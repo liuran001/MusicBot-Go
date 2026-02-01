@@ -15,9 +15,8 @@ type PluginConfig map[string]interface{}
 
 // Config wraps viper and provides typed accessors.
 type Config struct {
-	v        *viper.Viper
-	botAdmin []int
-	plugins  map[string]PluginConfig
+	v       *viper.Viper
+	plugins map[string]PluginConfig
 }
 
 // Load reads an INI config file and prepares defaults.
@@ -35,9 +34,8 @@ func Load(path string) (*Config, error) {
 		}
 
 		c := &Config{
-			v:        v,
-			botAdmin: parseIntList(v.GetString("BotAdmin")),
-			plugins:  make(map[string]PluginConfig),
+			v:       v,
+			plugins: make(map[string]PluginConfig),
 		}
 
 		loadPlugins(cfg, c)
@@ -50,9 +48,8 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &Config{
-		v:        v,
-		botAdmin: parseIntList(v.GetString("BotAdmin")),
-		plugins:  make(map[string]PluginConfig),
+		v:       v,
+		plugins: make(map[string]PluginConfig),
 	}, nil
 }
 
@@ -80,11 +77,8 @@ func (c *Config) GetBool(key string) bool {
 	return c.v.GetBool(key)
 }
 
-// GetIntSlice returns a slice of ints. BotAdmin is parsed from comma-separated values.
+// GetIntSlice returns a slice of ints.
 func (c *Config) GetIntSlice(key string) []int {
-	if key == "BotAdmin" {
-		return append([]int(nil), c.botAdmin...)
-	}
 	return c.v.GetIntSlice(key)
 }
 
@@ -157,28 +151,6 @@ func (c *Config) GetPluginBool(plugin, key string) bool {
 	default:
 		return false
 	}
-}
-
-func parseIntList(value string) []int {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-
-	parts := strings.Split(value, ",")
-	result := make([]int, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		num, err := strconv.Atoi(part)
-		if err != nil {
-			continue
-		}
-		result = append(result, num)
-	}
-	return result
 }
 
 func loadINI(v *viper.Viper, path string) (*ini.File, error) {

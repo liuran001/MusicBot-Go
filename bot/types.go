@@ -15,6 +15,7 @@ type SongInfo struct {
 	DeletedAt      *time.Time
 	Platform       string // Platform identifier (e.g., "netease", "spotify")
 	TrackID        string // Platform-specific track identifier
+	Quality        string // Quality level (e.g., "standard", "high", "lossless")
 	MusicID        int    // Deprecated: Legacy NetEase music ID (kept for backward compatibility)
 	SongName       string
 	SongArtists    string

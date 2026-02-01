@@ -45,6 +45,13 @@ func New(musicU string, logger bot.Logger) *Client {
 	data := utils.RequestData{}
 	if musicU != "" {
 		data.Cookies = []*http.Cookie{{Name: "MUSIC_U", Value: musicU}}
+		if logger != nil {
+			logger.Info("netease client initialized with MUSIC_U cookie", "cookie_length", len(musicU))
+		}
+	} else {
+		if logger != nil {
+			logger.Warn("netease client initialized WITHOUT MUSIC_U cookie - lossless download may fail")
+		}
 	}
 
 	return &Client{
@@ -60,13 +67,23 @@ func New(musicU string, logger bot.Logger) *Client {
 
 // GetSongDetail retrieves song detail data.
 func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*bot.SongDetail, error) {
+	if c.logger != nil {
+		c.logger.Info("fetching song detail", "music_id", musicID)
+	}
+
 	var result bot.SongDetail
 	err := c.execute(ctx, func() error {
 		data, err := api.GetSongDetail(c.data, []int{musicID})
 		if err != nil {
+			if c.logger != nil {
+				c.logger.Error("api.GetSongDetail failed", "music_id", musicID, "error", err)
+			}
 			return err
 		}
 		result = data
+		if c.logger != nil {
+			c.logger.Info("song detail fetched successfully", "music_id", musicID, "songs_count", len(result.Songs))
+		}
 		return nil
 	})
 	if err != nil {
@@ -147,9 +164,17 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := fn(); err == nil {
-			return nil
-		} else {
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- fn()
+		}()
+
+		select {
+		case err := <-errCh:
+			if err == nil {
+				return nil
+			}
 			lastErr = err
 			if attempt == c.maxRetries {
 				break
@@ -160,6 +185,8 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 				return ctx.Err()
 			case <-time.After(wait):
 			}
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 

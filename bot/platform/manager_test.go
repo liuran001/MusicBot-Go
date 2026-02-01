@@ -17,7 +17,8 @@ type mockPlatform struct {
 	supportsSearch      bool
 	supportsLyrics      bool
 	supportsRecognition bool
-	downloadFunc        func(ctx context.Context, trackID string, quality Quality) (io.ReadCloser, *TrackMetadata, error)
+	capabilities        Capabilities
+	downloadInfoFunc    func(ctx context.Context, trackID string, quality Quality) (*DownloadInfo, error)
 	searchFunc          func(ctx context.Context, query string, limit int) ([]Track, error)
 	getLyricsFunc       func(ctx context.Context, trackID string) (*Lyrics, error)
 	recognizeAudioFunc  func(ctx context.Context, audioData io.Reader) (*Track, error)
@@ -48,11 +49,15 @@ func (m *mockPlatform) SupportsRecognition() bool {
 	return m.supportsRecognition
 }
 
-func (m *mockPlatform) Download(ctx context.Context, trackID string, quality Quality) (io.ReadCloser, *TrackMetadata, error) {
-	if m.downloadFunc != nil {
-		return m.downloadFunc(ctx, trackID, quality)
+func (m *mockPlatform) Capabilities() Capabilities {
+	return m.capabilities
+}
+
+func (m *mockPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality Quality) (*DownloadInfo, error) {
+	if m.downloadInfoFunc != nil {
+		return m.downloadInfoFunc(ctx, trackID, quality)
 	}
-	return nil, nil, ErrUnsupported
+	return nil, ErrUnsupported
 }
 
 func (m *mockPlatform) Search(ctx context.Context, query string, limit int) ([]Track, error) {
@@ -376,11 +381,12 @@ func TestManager_MustGet(t *testing.T) {
 	manager.MustGet("non-existing")
 }
 
-func TestManager_Download(t *testing.T) {
+func TestManager_GetDownloadInfo(t *testing.T) {
 	reg := registry.New()
 	manager := NewManagerWithRegistry(reg)
 
-	expectedMetadata := &TrackMetadata{
+	expectedInfo := &DownloadInfo{
+		URL:     "https://example.com/audio.mp3",
 		Format:  "mp3",
 		Bitrate: 320,
 		Quality: QualityHigh,
@@ -388,11 +394,11 @@ func TestManager_Download(t *testing.T) {
 
 	mock := &mockPlatform{
 		name: "test-platform",
-		downloadFunc: func(ctx context.Context, trackID string, quality Quality) (io.ReadCloser, *TrackMetadata, error) {
+		downloadInfoFunc: func(ctx context.Context, trackID string, quality Quality) (*DownloadInfo, error) {
 			if trackID == "123" {
-				return nil, expectedMetadata, nil
+				return expectedInfo, nil
 			}
-			return nil, nil, ErrNotFound
+			return nil, ErrNotFound
 		},
 	}
 
@@ -431,7 +437,7 @@ func TestManager_Download(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			reader, metadata, err := manager.Download(ctx, tt.platform, tt.trackID, tt.quality)
+			info, err := manager.GetDownloadInfo(ctx, tt.platform, tt.trackID, tt.quality)
 
 			if tt.expectError {
 				if err == nil {
@@ -441,17 +447,12 @@ func TestManager_Download(t *testing.T) {
 				if err != nil {
 					t.Errorf("Expected no error, got %v", err)
 				}
-				if metadata == nil {
-					t.Error("Expected metadata, got nil")
+				if info == nil {
+					t.Error("Expected download info, got nil")
 				}
-				if metadata != nil && metadata.Bitrate != expectedMetadata.Bitrate {
-					t.Errorf("Expected bitrate %d, got %d", expectedMetadata.Bitrate, metadata.Bitrate)
+				if info != nil && info.Bitrate != expectedInfo.Bitrate {
+					t.Errorf("Expected bitrate %d, got %d", expectedInfo.Bitrate, info.Bitrate)
 				}
-			}
-
-			// Clean up reader if present
-			if reader != nil {
-				reader.Close()
 			}
 		})
 	}
@@ -739,8 +740,8 @@ func TestManager_ConvenienceMethods_Errors(t *testing.T) {
 	ctx := context.Background()
 
 	// Test all convenience methods with non-existing platform
-	t.Run("Download with non-existing platform", func(t *testing.T) {
-		_, _, err := manager.Download(ctx, "non-existing", "123", QualityHigh)
+	t.Run("GetDownloadInfo with non-existing platform", func(t *testing.T) {
+		_, err := manager.GetDownloadInfo(ctx, "non-existing", "123", QualityHigh)
 		if err == nil {
 			t.Error("Expected error for non-existing platform")
 		}
@@ -776,8 +777,8 @@ func TestManager_PlatformErrors(t *testing.T) {
 
 	mock := &mockPlatform{
 		name: "error-platform",
-		downloadFunc: func(ctx context.Context, trackID string, quality Quality) (io.ReadCloser, *TrackMetadata, error) {
-			return nil, nil, testErr
+		downloadInfoFunc: func(ctx context.Context, trackID string, quality Quality) (*DownloadInfo, error) {
+			return nil, testErr
 		},
 		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
 			return nil, testErr
@@ -794,8 +795,8 @@ func TestManager_PlatformErrors(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("Download error propagation", func(t *testing.T) {
-		_, _, err := manager.Download(ctx, "error-platform", "123", QualityHigh)
+	t.Run("GetDownloadInfo error propagation", func(t *testing.T) {
+		_, err := manager.GetDownloadInfo(ctx, "error-platform", "123", QualityHigh)
 		if !errors.Is(err, testErr) {
 			t.Errorf("Expected error to be %v, got %v", testErr, err)
 		}

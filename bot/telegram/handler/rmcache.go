@@ -41,7 +41,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *bot.Bot, update *models.
 		if h.PlatformManager != nil {
 			plat := h.PlatformManager.Get(platformName)
 			if plat != nil {
-				err := h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID)
+				err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID)
 				if err != nil {
 					_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 						ChatID:          message.Chat.ID,

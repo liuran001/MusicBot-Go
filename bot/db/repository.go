@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -24,6 +26,13 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 
 	if gormLogger == nil {
 		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	dbDir := filepath.Dir(dsn)
+	if dbDir != "" && dbDir != "." {
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
 	}
 
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
@@ -48,6 +57,10 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	}
 
 	if err := migrateToMultiPlatform(db); err != nil {
+		return nil, err
+	}
+
+	if err := migrateToQualityBasedCache(db); err != nil {
 		return nil, err
 	}
 
@@ -87,6 +100,31 @@ func migrateToMultiPlatform(db *gorm.DB) error {
 	return nil
 }
 
+func migrateToQualityBasedCache(db *gorm.DB) error {
+	var columnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('song_infos') WHERE name='quality'").Scan(&columnExists).Error; err != nil {
+		return fmt.Errorf("check quality column: %w", err)
+	}
+
+	if columnExists {
+		return nil
+	}
+
+	if err := db.Exec("ALTER TABLE song_infos ADD COLUMN quality TEXT NOT NULL DEFAULT 'high'").Error; err != nil {
+		return fmt.Errorf("add quality column: %w", err)
+	}
+
+	if err := db.Exec("DROP INDEX IF EXISTS idx_platform_track").Error; err != nil {
+		return fmt.Errorf("drop old index: %w", err)
+	}
+
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_track_quality ON song_infos(platform, track_id, quality)").Error; err != nil {
+		return fmt.Errorf("create new unique index: %w", err)
+	}
+
+	return nil
+}
+
 // FindByMusicID returns a cached song by MusicID (legacy NetEase support).
 func (r *Repository) FindByMusicID(ctx context.Context, musicID int) (*bot.SongInfo, error) {
 	var model SongInfoModel
@@ -97,10 +135,10 @@ func (r *Repository) FindByMusicID(ctx context.Context, musicID int) (*bot.SongI
 	return toInternal(model), nil
 }
 
-// FindByPlatformTrackID returns a cached song by platform and track ID.
-func (r *Repository) FindByPlatformTrackID(ctx context.Context, platform, trackID string) (*bot.SongInfo, error) {
+// FindByPlatformTrackID returns a cached song by platform, track ID and quality.
+func (r *Repository) FindByPlatformTrackID(ctx context.Context, platform, trackID, quality string) (*bot.SongInfo, error) {
 	var model SongInfoModel
-	err := r.db.WithContext(ctx).Where("platform = ? AND track_id = ?", platform, trackID).First(&model).Error
+	err := r.db.WithContext(ctx).Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, quality).First(&model).Error
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +184,14 @@ func (r *Repository) Delete(ctx context.Context, musicID int) error {
 	})
 }
 
-// DeleteByPlatformTrackID removes a song by platform and track ID.
-func (r *Repository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID string) error {
+// DeleteByPlatformTrackID removes a song by platform, track ID and quality.
+func (r *Repository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Delete(&SongInfoModel{}, "platform = ? AND track_id = ? AND quality = ?", platform, trackID, quality).Error
+	})
+}
+
+func (r *Repository) DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&SongInfoModel{}, "platform = ? AND track_id = ?", platform, trackID).Error
 	})

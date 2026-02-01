@@ -3,7 +3,6 @@ package platform
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform/registry"
 )
@@ -95,14 +94,14 @@ func (m *DefaultManager) MustGet(name string) Platform {
 	return p
 }
 
-// Download is a convenience method that retrieves a platform and downloads a track.
-// It combines Get and Platform.Download into a single call.
-func (m *DefaultManager) Download(ctx context.Context, platformName, trackID string, quality Quality) (io.ReadCloser, *TrackMetadata, error) {
+// GetDownloadInfo is a convenience method that retrieves a platform and resolves download info.
+// It combines Get and Platform.GetDownloadInfo into a single call.
+func (m *DefaultManager) GetDownloadInfo(ctx context.Context, platformName, trackID string, quality Quality) (*DownloadInfo, error) {
 	platform, err := m.GetPlatform(platformName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return platform.Download(ctx, trackID, quality)
+	return platform.GetDownloadInfo(ctx, trackID, quality)
 }
 
 // Search is a convenience method that retrieves a platform and performs a search.

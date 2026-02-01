@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/XiaoMengXinX/Music163Api-Go/api"
 	"github.com/XiaoMengXinX/Music163Api-Go/types"
 	"github.com/XiaoMengXinX/Music163Api-Go/utils"
+	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -337,4 +339,59 @@ func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, pla
 			songInfo.FromUserName = message.From.Username
 		}
 	}
+}
+
+type progressWriter struct {
+	ctx         context.Context
+	bot         *bot.Bot
+	msg         *models.Message
+	total       int64
+	written     int64
+	lastUpdate  time.Time
+	lastWritten int64
+	filename    string
+}
+
+func (pw *progressWriter) Write(p []byte) (n int, err error) {
+	n = len(p)
+	pw.written += int64(n)
+
+	now := time.Now()
+	if now.Sub(pw.lastUpdate) >= 2*time.Second && pw.msg != nil {
+		downloaded := float64(pw.written) / 1024 / 1024
+		total := float64(pw.total) / 1024 / 1024
+		progress := float64(pw.written) * 100 / float64(pw.total)
+
+		bytesInPeriod := pw.written - pw.lastWritten
+		duration := now.Sub(pw.lastUpdate).Seconds()
+		speed := float64(bytesInPeriod) / duration / 1024 / 1024
+
+		text := fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)\n速度：%.2f MB/s",
+			pw.filename, progress, downloaded, total, speed)
+
+		_, _ = pw.bot.EditMessageText(pw.ctx, &bot.EditMessageTextParams{
+			ChatID:    pw.msg.Chat.ID,
+			MessageID: pw.msg.ID,
+			Text:      text,
+		})
+
+		pw.lastUpdate = now
+		pw.lastWritten = pw.written
+	}
+
+	return n, nil
+}
+
+func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, totalSize int64, b *bot.Bot, msg *models.Message, filename string) (int64, error) {
+	pw := &progressWriter{
+		ctx:        ctx,
+		bot:        b,
+		msg:        msg,
+		total:      totalSize,
+		lastUpdate: time.Now(),
+		filename:   filename,
+	}
+
+	writer := io.MultiWriter(dst, pw)
+	return io.Copy(writer, src)
 }

@@ -4,36 +4,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	marker "github.com/XiaoMengXinX/163KeyMarker"
-	"github.com/XiaoMengXinX/Music163Api-Go/types"
-	downloader "github.com/XiaoMengXinX/SimpleDownloader"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/download"
+	"github.com/liuran001/MusicBot-Go/bot/id3"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
 // MusicHandler handles /music and related commands.
 type MusicHandler struct {
 	Repo            botpkg.SongRepository
-	Netease         botpkg.NeteaseClient // DEPRECATED: Keep for backward compatibility
-	PlatformManager platform.Manager       // NEW: Platform-agnostic music platform manager
+	PlatformManager platform.Manager // NEW: Platform-agnostic music platform manager
+	DownloadService *download.DownloadService
+	ID3Service      *id3.ID3Service
+	TagProviders    map[string]id3.ID3TagProvider
 	Pool            botpkg.WorkerPool
 	Logger          botpkg.Logger
 	CacheDir        string
 	BotName         string
-	CheckMD5        bool
-	DownloadTimeout time.Duration
-	ReverseProxy    string
 	Limiter         chan struct{}
 }
 
@@ -53,6 +48,9 @@ func (h *MusicHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Up
 }
 
 func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *models.Message, platformName, trackID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	if h.CacheDir == "" {
 		h.CacheDir = "./cache"
 	}
@@ -101,26 +99,12 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		}
 	}
 
-	// Try cache
+	qualityStr := quality.String()
+
 	if h.Repo != nil {
-		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID)
+		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 		if err == nil && cached != nil {
 			songInfo = *cached
-			if songInfo.SongArtistsIDs == "" || songInfo.AlbumID == 0 {
-				if h.Netease != nil && platformName == "netease" {
-					if musicID, err := strconv.Atoi(trackID); err == nil {
-						if detail, err := h.Netease.GetSongDetail(ctx, musicID); err == nil && len(detail.Songs) > 0 {
-							var artistIDs []string
-							for _, ar := range detail.Songs[0].Ar {
-								artistIDs = append(artistIDs, fmt.Sprintf("%d", ar.Id))
-							}
-							songInfo.SongArtistsIDs = strings.Join(artistIDs, ",")
-							songInfo.AlbumID = detail.Songs[0].Al.Id
-							_ = h.Repo.Update(ctx, &songInfo)
-						}
-					}
-				}
-			}
 
 			msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 
@@ -141,7 +125,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	defer func() { <-h.Limiter }()
 
 	if h.Repo != nil {
-		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID)
+		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 		if err == nil && cached != nil {
 			songInfo = *cached
 			if msgResult != nil {
@@ -176,6 +160,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
+		if h.Logger != nil {
+			h.Logger.Error("platform not found", "platform", platformName)
+		}
 		if msgResult != nil {
 			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 				ChatID:    msgResult.Chat.ID,
@@ -188,6 +175,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 
 	track, err := plat.GetTrack(ctx, trackID)
 	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
+		}
 		if msgResult != nil {
 			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 				ChatID:    msgResult.Chat.ID,
@@ -199,6 +189,60 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	fillSongInfoFromTrack(&songInfo, track, platformName, trackID, message)
+	info, err := plat.GetDownloadInfo(ctx, trackID, quality)
+	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
+		}
+		if msgResult != nil {
+			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+				ChatID:    msgResult.Chat.ID,
+				MessageID: msgResult.ID,
+				Text:      fetchInfoFailed,
+			})
+		}
+		return err
+	}
+	if info == nil || info.URL == "" {
+		if msgResult != nil {
+			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+				ChatID:    msgResult.Chat.ID,
+				MessageID: msgResult.ID,
+				Text:      fetchInfoFailed,
+			})
+		}
+		return errors.New("download info unavailable")
+	}
+	if info.Format == "" {
+		info.Format = "mp3"
+	}
+
+	actualQuality := info.Quality.String()
+	if actualQuality == "unknown" || actualQuality == "" {
+		actualQuality = qualityStr
+	}
+	if songInfo.Quality == "" {
+		songInfo.Quality = actualQuality
+	}
+	songInfo.FileExt = info.Format
+	songInfo.MusicSize = int(info.Size)
+	songInfo.BitRate = info.Bitrate * 1000
+
+	if h.Repo != nil && actualQuality != qualityStr {
+		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, actualQuality)
+		if err == nil && cached != nil {
+			songInfo = *cached
+			msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+			if _, err = h.sendMusic(ctx, b, message, &songInfo, "", ""); err != nil {
+				sendFailed(err)
+				return err
+			}
+			if msgResult != nil {
+				_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID})
+			}
+			return nil
+		}
+	}
 
 	if msgResult != nil {
 		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
@@ -208,8 +252,11 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		})
 	}
 
-	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, quality, msgResult, b, message, &songInfo)
+	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo)
 	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Error("failed to download and prepare", "platform", platformName, "trackID", trackID, "error", err)
+		}
 		cleanupFiles(append(cleanupList, musicPath, picPath)...)
 		sendFailed(err)
 		return err
@@ -238,7 +285,11 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	if h.Repo != nil {
-		_ = h.Repo.Create(ctx, &songInfo)
+		if err := h.Repo.Create(ctx, &songInfo); err != nil {
+			if h.Logger != nil {
+				h.Logger.Error("failed to save song info", "platform", platformName, "trackID", trackID, "error", err)
+			}
+		}
 	}
 
 	if msgResult != nil {
@@ -248,222 +299,90 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	return nil
 }
 
-func (h *MusicHandler) downloadAndPrepare(ctx context.Context, detail types.SongDetailData, urlData types.SongURLData, msg *models.Message, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo) (string, string, []string, error) {
+func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, info *platform.DownloadInfo, msg *models.Message, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo) (string, string, []string, error) {
 	cleanupList := make([]string, 0, 4)
-	url := urlData.Url
-	baseURL := url
-	if idx := strings.Index(url, "?"); idx != -1 {
-		baseURL = url[:idx]
+	if h.DownloadService == nil {
+		return "", "", cleanupList, errors.New("download service not configured")
 	}
-	switch path.Ext(path.Base(baseURL)) {
-	case ".mp3":
-		songInfo.FileExt = "mp3"
-	case ".flac":
-		songInfo.FileExt = "flac"
-	default:
-		songInfo.FileExt = "mp3"
+	if info == nil || info.URL == "" {
+		return "", "", cleanupList, errors.New("download info unavailable")
 	}
 
-	if h.DownloadTimeout > 0 {
-		// SimpleDownloader uses seconds
+	if info.Format == "" {
+		info.Format = "mp3"
 	}
 
-	client := downloader.NewDownloader().SetSavePath(h.CacheDir).SetBreakPoint(true)
-	if h.DownloadTimeout > 0 {
-		client.SetTimeOut(h.DownloadTimeout)
-	} else {
-		client.SetTimeOut(60 * time.Second)
-	}
-
-	if detail.Al.PicUrl != "" {
-		if picRes, err := http.Head(detail.Al.PicUrl); err == nil {
-			songInfo.PicSize = int(picRes.ContentLength)
-		}
+	songInfo.FileExt = info.Format
+	songInfo.MusicSize = int(info.Size)
+	songInfo.BitRate = info.Bitrate * 1000
+	if songInfo.Quality == "" {
+		songInfo.Quality = info.Quality.String()
 	}
 
 	stamp := time.Now().UnixMicro()
-	musicFileName := fmt.Sprintf("%d-%s", stamp, path.Base(url))
-
-	task, _ := client.NewDownloadTask(url)
-	hostReplacer := strings.NewReplacer("m8.", "m7.", "m801.", "m701.", "m804.", "m701.", "m704.", "m701.")
-	host := task.GetHostName()
-	task.ReplaceHostName(hostReplacer.Replace(host)).ForceHttps().ForceMultiThread()
-	errCh := task.SetFileName(musicFileName).DownloadWithChannel()
-
-	updateStatus := func(task *downloader.DownloadTask, ch chan error, statusText string) error {
-		var lastUpdateTime int64
-		for {
-			select {
-			case err := <-ch:
-				return err
-			default:
-				writtenBytes := task.GetWrittenBytes()
-				if task.GetFileSize() == 0 || writtenBytes == 0 || time.Now().Unix()-lastUpdateTime < 5 {
-					continue
-				}
-				if msg != nil {
-					_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-						ChatID:    msg.Chat.ID,
-						MessageID: msg.ID,
-						Text:      fmt.Sprintf(musicInfoMsg+statusText+downloadStatus, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, task.CalculateSpeed(time.Millisecond*500), float64(writtenBytes)/1024/1024, float64(task.GetFileSize())/1024/1024, (writtenBytes*100)/task.GetFileSize()),
-					})
-				}
-				lastUpdateTime = time.Now().Unix()
-			}
-		}
-	}
-
-	if err := updateStatus(task, errCh, downloading); err != nil {
-		if h.ReverseProxy != "" {
-			retryCh := task.WithResolvedIpOnHost(h.ReverseProxy).DownloadWithChannel()
-			if err := updateStatus(task, retryCh, redownloading); err != nil {
-				task.CleanTempFiles()
-				return "", "", cleanupList, err
-			}
-		} else {
-			task.CleanTempFiles()
-			return "", "", cleanupList, err
-		}
-	}
-
+	musicFileName := fmt.Sprintf("%d-%s.%s", stamp, sanitizeFileName(track.Title), info.Format)
 	filePath := filepath.Join(h.CacheDir, musicFileName)
-	if h.CheckMD5 && urlData.Md5 != "" {
-		if ok, _ := verifyMD5(filePath, urlData.Md5); !ok {
-			_ = os.Remove(filePath)
-			return "", "", cleanupList, fmt.Errorf("%s\n%s", md5VerFailed, retryLater)
+
+	progress := func(written, total int64) {
+		if msg == nil {
+			return
 		}
+		totalMB := float64(total) / 1024 / 1024
+		writtenMB := float64(written) / 1024 / 1024
+		progressPct := 0.0
+		if total > 0 {
+			progressPct = float64(written) * 100 / float64(total)
+		}
+		text := fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			ChatID:    msg.Chat.ID,
+			MessageID: msg.ID,
+			Text:      text,
+		})
+	}
+
+	if _, err := h.DownloadService.Download(ctx, info, filePath, progress); err != nil {
+		_ = os.Remove(filePath)
+		return "", "", cleanupList, err
 	}
 
 	picPath, resizePicPath := "", ""
-	if detail.Al.PicUrl != "" {
-		p, _ := client.NewDownloadTask(detail.Al.PicUrl)
-		_ = p.SetFileName(fmt.Sprintf("%d-%s", stamp, path.Base(detail.Al.PicUrl))).Download()
-		picPath = filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(detail.Al.PicUrl)))
-		cleanupList = append(cleanupList, picPath)
-		if resized, err := resizeImg(picPath); err == nil {
-			resizePicPath = resized
-			cleanupList = append(cleanupList, resizePicPath)
+	coverURL := ""
+	if track.CoverURL != "" {
+		coverURL = track.CoverURL
+	} else if track.Album != nil && track.Album.CoverURL != "" {
+		coverURL = track.Album.CoverURL
+	}
+	if coverURL != "" {
+		picPath = filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(coverURL)))
+		if _, err := h.DownloadService.Download(ctx, &platform.DownloadInfo{URL: coverURL}, picPath, nil); err == nil {
+			if stat, statErr := os.Stat(picPath); statErr == nil {
+				songInfo.PicSize = int(stat.Size())
+				cleanupList = append(cleanupList, picPath)
+				if resized, err := resizeImg(picPath); err == nil {
+					resizePicPath = resized
+					cleanupList = append(cleanupList, resizePicPath)
+				}
+			}
+		} else {
+			picPath = ""
 		}
 	}
 
+	embedPicPath := picPath
+	thumbPicPath := picPath
 	if picPath != "" {
 		if stat, err := os.Stat(picPath); err == nil {
-			if stat.Size() > 2*1024*1024 {
-				picPath = resizePicPath
+			if stat.Size() > 2*1024*1024 && resizePicPath != "" {
+				embedPicPath = resizePicPath
 				if embStat, err := os.Stat(resizePicPath); err == nil {
 					songInfo.EmbPicSize = int(embStat.Size())
 				}
 			} else {
-				songInfo.EmbPicSize = songInfo.PicSize
+				songInfo.EmbPicSize = int(stat.Size())
 			}
-		}
-	}
-
-	// Move file to final path
-	finalDir := filepath.Join(h.CacheDir, fmt.Sprintf("%d", stamp))
-	_ = os.Mkdir(finalDir, os.ModePerm)
-	fileName := sanitizeFileName(fmt.Sprintf("%v - %v.%v", strings.ReplaceAll(songInfo.SongArtists, "/", ","), songInfo.SongName, songInfo.FileExt))
-	finalPath := filepath.Join(finalDir, fileName)
-	if err := os.Rename(filePath, finalPath); err == nil {
-		filePath = finalPath
-	}
-	cleanupList = append(cleanupList, filePath, finalDir)
-
-	// Add ID3
-	mark := marker.CreateMarker(detail, urlData)
-	file, _ := os.Open(filePath)
-	defer file.Close()
-
-	var pic *os.File
-	if picPath != "" {
-		pic, _ = os.Open(picPath)
-		defer pic.Close()
-	}
-
-	if err := marker.AddMusicID3V2(file, pic, mark); err != nil {
-		file, _ = os.Open(filePath)
-		defer file.Close()
-		if err := marker.AddMusicID3V2(file, nil, mark); err != nil {
-			return "", "", cleanupList, err
-		}
-	}
-
-	return filePath, picPath, cleanupList, nil
-}
-
-func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, quality platform.Quality, msg *models.Message, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo) (string, string, []string, error) {
-	cleanupList := make([]string, 0, 4)
-
-	reader, metadata, err := plat.Download(ctx, trackID, quality)
-	if err != nil {
-		return "", "", cleanupList, fmt.Errorf("download track: %w", err)
-	}
-	defer reader.Close()
-
-	songInfo.FileExt = metadata.Format
-	songInfo.MusicSize = int(metadata.Size)
-	songInfo.BitRate = metadata.Bitrate * 1000
-
-	stamp := time.Now().UnixMicro()
-	musicFileName := fmt.Sprintf("%d-%s.%s", stamp, sanitizeFileName(track.Title), metadata.Format)
-	filePath := filepath.Join(h.CacheDir, musicFileName)
-
-	outFile, err := os.Create(filePath)
-	if err != nil {
-		return "", "", cleanupList, fmt.Errorf("create file: %w", err)
-	}
-
-	written, err := io.Copy(outFile, reader)
-	outFile.Close()
-	if err != nil {
-		_ = os.Remove(filePath)
-		return "", "", cleanupList, fmt.Errorf("write file: %w", err)
-	}
-
-	if written != metadata.Size {
-		_ = os.Remove(filePath)
-		return "", "", cleanupList, fmt.Errorf("incomplete download: got %d bytes, expected %d", written, metadata.Size)
-	}
-
-	if h.CheckMD5 && metadata.MD5 != "" {
-		if ok, _ := verifyMD5(filePath, metadata.MD5); !ok {
-			_ = os.Remove(filePath)
-			return "", "", cleanupList, fmt.Errorf("%s\n%s", md5VerFailed, retryLater)
-		}
-	}
-
-	picPath, resizePicPath := "", ""
-	if track.Album != nil && track.Album.CoverURL != "" {
-		if picRes, err := http.Head(track.Album.CoverURL); err == nil {
-			songInfo.PicSize = int(picRes.ContentLength)
-		}
-
-		client := downloader.NewDownloader().SetSavePath(h.CacheDir).SetBreakPoint(true)
-		if h.DownloadTimeout > 0 {
-			client.SetTimeOut(h.DownloadTimeout)
-		} else {
-			client.SetTimeOut(60 * time.Second)
-		}
-
-		p, _ := client.NewDownloadTask(track.Album.CoverURL)
-		_ = p.SetFileName(fmt.Sprintf("%d-%s", stamp, path.Base(track.Album.CoverURL))).Download()
-		picPath = filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(track.Album.CoverURL)))
-		cleanupList = append(cleanupList, picPath)
-		if resized, err := resizeImg(picPath); err == nil {
-			resizePicPath = resized
-			cleanupList = append(cleanupList, resizePicPath)
-		}
-	}
-
-	if picPath != "" {
-		if stat, err := os.Stat(picPath); err == nil {
-			if stat.Size() > 2*1024*1024 {
-				picPath = resizePicPath
-				if embStat, err := os.Stat(resizePicPath); err == nil {
-					songInfo.EmbPicSize = int(embStat.Size())
-				}
-			} else {
-				songInfo.EmbPicSize = songInfo.PicSize
+			if stat.Size() > 200*1024 && resizePicPath != "" {
+				thumbPicPath = resizePicPath
 			}
 		}
 	}
@@ -477,33 +396,24 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	}
 	cleanupList = append(cleanupList, filePath, finalDir)
 
-	if plat.Name() == "netease" && songInfo.MusicID != 0 {
-		musicID := songInfo.MusicID
-		neteaseClient := h.Netease
-		if neteaseClient != nil {
-			songDetail, detailErr := neteaseClient.GetSongDetail(ctx, musicID)
-			songURL, urlErr := neteaseClient.GetSongURL(ctx, musicID, "")
-			if detailErr == nil && urlErr == nil && len(songDetail.Songs) > 0 && len(songURL.Data) > 0 {
-				mark := marker.CreateMarker(songDetail.Songs[0], songURL.Data[0])
-				file, _ := os.Open(filePath)
-				defer file.Close()
-
-				var pic *os.File
-				if picPath != "" {
-					pic, _ = os.Open(picPath)
-					defer pic.Close()
+	if h.ID3Service != nil && h.TagProviders != nil {
+		if provider, ok := h.TagProviders[plat.Name()]; ok && provider != nil {
+			tagData, tagErr := provider.GetTagData(ctx, track, info)
+			if tagErr != nil {
+				if h.Logger != nil {
+					h.Logger.Error("failed to get tag data", "platform", plat.Name(), "trackID", trackID, "error", tagErr)
 				}
-
-				if err := marker.AddMusicID3V2(file, pic, mark); err != nil {
-					file, _ = os.Open(filePath)
-					defer file.Close()
-					_ = marker.AddMusicID3V2(file, nil, mark)
+			} else {
+				if err := h.ID3Service.EmbedTags(filePath, tagData, embedPicPath); err != nil {
+					if h.Logger != nil {
+						h.Logger.Error("failed to embed tags", "platform", plat.Name(), "trackID", trackID, "error", err)
+					}
 				}
 			}
 		}
 	}
 
-	return filePath, picPath, cleanupList, nil
+	return filePath, thumbPicPath, cleanupList, nil
 }
 
 func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo, musicPath, picPath string) (*models.Message, error) {
@@ -543,12 +453,13 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, message *model
 
 	if songInfo.ThumbFileID != "" {
 		params.Thumbnail = &models.InputFileString{Data: songInfo.ThumbFileID}
-	}
-	if picPath != "" {
-		pic, err := os.Open(picPath)
-		if err == nil {
-			defer pic.Close()
-			params.Thumbnail = &models.InputFileUpload{Filename: filepath.Base(picPath), Data: pic}
+	} else if picPath != "" {
+		if _, err := os.Stat(picPath); err == nil {
+			pic, err := os.Open(picPath)
+			if err == nil {
+				defer pic.Close()
+				params.Thumbnail = &models.InputFileUpload{Filename: filepath.Base(picPath), Data: pic}
+			}
 		}
 	}
 
@@ -583,37 +494,4 @@ func sendStatusMessage(ctx context.Context, b *bot.Bot, chatID int64, threadID i
 		msg, err = b.SendMessage(ctx, params)
 	}
 	return msg, err
-}
-
-func fillSongInfo(songInfo *botpkg.SongInfo, detail *botpkg.SongDetail, url *botpkg.SongURL, message *models.Message) {
-	songInfo.Platform = "netease"
-	songInfo.TrackID = fmt.Sprintf("%d", detail.Songs[0].Id)
-	songInfo.MusicID = detail.Songs[0].Id
-	songInfo.Duration = detail.Songs[0].Dt / 1000
-	songInfo.SongName = detail.Songs[0].Name
-	songInfo.SongArtists = parseArtist(detail.Songs[0])
-
-	var artistIDs []string
-	for _, ar := range detail.Songs[0].Ar {
-		artistIDs = append(artistIDs, fmt.Sprintf("%d", ar.Id))
-	}
-	songInfo.SongArtistsIDs = strings.Join(artistIDs, ",")
-
-	songInfo.SongAlbum = detail.Songs[0].Al.Name
-	songInfo.AlbumID = detail.Songs[0].Al.Id
-	songInfo.MusicSize = url.Data[0].Size
-	songInfo.BitRate = 8 * url.Data[0].Size / (detail.Songs[0].Dt / 1000)
-
-	if message != nil {
-		songInfo.FromChatID = message.Chat.ID
-		if message.Chat.Type == "private" {
-			songInfo.FromChatName = message.Chat.Username
-		} else {
-			songInfo.FromChatName = message.Chat.Title
-		}
-		if message.From != nil {
-			songInfo.FromUserID = message.From.ID
-			songInfo.FromUserName = message.From.Username
-		}
-	}
 }

@@ -33,8 +33,6 @@
 # Telegram Bot Token (必填)
 BOT_TOKEN = YOUR_BOT_TOKEN
 
-# Bot 管理员 ID (可选)
-BotAdmin = 123456,789012
 ```
 
 ### 平台配置

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -52,12 +51,21 @@ func (n *NeteasePlatform) SupportsRecognition() bool {
 	return true // NetEase has 听歌识曲 feature
 }
 
-// Download retrieves the audio file for the given track ID at the specified quality.
-func (n *NeteasePlatform) Download(ctx context.Context, trackID string, quality platform.Quality) (io.ReadCloser, *platform.TrackMetadata, error) {
+func (n *NeteasePlatform) Capabilities() platform.Capabilities {
+	return platform.Capabilities{
+		Download:    true,
+		Search:      true,
+		Lyrics:      true,
+		Recognition: true,
+		HiRes:       true,
+	}
+}
+
+func (n *NeteasePlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	// Convert trackID string to int
 	musicID, err := strconv.Atoi(trackID)
 	if err != nil {
-		return nil, nil, platform.NewNotFoundError("netease", "track", trackID)
+		return nil, platform.NewNotFoundError("netease", "track", trackID)
 	}
 
 	// Map quality to NetEase quality level
@@ -66,47 +74,32 @@ func (n *NeteasePlatform) Download(ctx context.Context, trackID string, quality 
 	// Get song URL
 	songURL, err := n.client.GetSongURL(ctx, musicID, qualityLevel)
 	if err != nil {
-		return nil, nil, fmt.Errorf("netease: failed to get song URL: %w", err)
+		return nil, fmt.Errorf("netease: failed to get song URL: %w", err)
 	}
 
 	if len(songURL.Data) == 0 || songURL.Data[0].Url == "" {
-		return nil, nil, platform.NewUnavailableError("netease", "track", trackID)
+		return nil, platform.NewUnavailableError("netease", "track", trackID)
 	}
 
 	urlData := songURL.Data[0]
 
-	// Download the audio file
-	req, err := http.NewRequestWithContext(ctx, "GET", urlData.Url, nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("netease: failed to create request: %w", err)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, nil, fmt.Errorf("netease: failed to download audio: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, nil, fmt.Errorf("netease: download failed with status %d", resp.StatusCode)
-	}
-
-	// Determine format from type or URL
 	format := "mp3"
 	if urlData.Type != "" {
 		format = urlData.Type
 	}
 
-	// Create metadata
-	metadata := &platform.TrackMetadata{
-		Format:  format,
-		Bitrate: urlData.Br / 1000, // Convert to kbps
-		Size:    int64(urlData.Size),
-		MD5:     urlData.Md5,
-		Quality: n.bitrateToQuality(urlData.Br),
+	expiresAt := time.Now().Add(time.Duration(urlData.Expi) * time.Second)
+	info := &platform.DownloadInfo{
+		URL:       urlData.Url,
+		Size:      int64(urlData.Size),
+		Format:    format,
+		Bitrate:   urlData.Br / 1000,
+		MD5:       urlData.Md5,
+		Quality:   n.bitrateToQuality(urlData.Br),
+		ExpiresAt: &expiresAt,
 	}
 
-	return resp.Body, metadata, nil
+	return info, nil
 }
 
 // Search searches for tracks matching the given query string.
@@ -213,7 +206,9 @@ func (n *NeteasePlatform) bitrateToQuality(bitrate int) platform.Quality {
 	// Bitrate is in bps, convert to kbps for comparison
 	kbps := bitrate / 1000
 
-	if kbps >= 1000 {
+	if kbps >= 1500 {
+		return platform.QualityHiRes
+	} else if kbps >= 1000 {
 		return platform.QualityLossless
 	} else if kbps >= 320 {
 		return platform.QualityHigh

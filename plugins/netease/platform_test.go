@@ -74,7 +74,7 @@ func TestBitrateToQuality(t *testing.T) {
 		{320000, platform.QualityHigh},
 		{999000, platform.QualityHigh},
 		{1411000, platform.QualityLossless},
-		{2000000, platform.QualityLossless},
+		{2000000, platform.QualityHiRes},
 	}
 
 	for _, tt := range tests {

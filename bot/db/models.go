@@ -10,8 +10,9 @@ import (
 // SongInfoModel mirrors the song_infos schema with multi-platform support.
 type SongInfoModel struct {
 	gorm.Model
-	Platform       string `gorm:"not null;default:'netease';index:idx_platform_track,unique"`
-	TrackID        string `gorm:"not null;default:'';index:idx_platform_track,unique"`
+	Platform       string `gorm:"not null;default:'netease';index:idx_platform_track_quality,unique"`
+	TrackID        string `gorm:"not null;default:'';index:idx_platform_track_quality,unique"`
+	Quality        string `gorm:"not null;default:'high';index:idx_platform_track_quality,unique"`
 	MusicID        int    // Deprecated: Legacy NetEase music ID (kept for backward compatibility)
 	SongName       string
 	SongArtists    string
@@ -44,6 +45,7 @@ func toInternal(model SongInfoModel) *bot.SongInfo {
 		DeletedAt:      deletedAtPtr(model.DeletedAt),
 		Platform:       model.Platform,
 		TrackID:        model.TrackID,
+		Quality:        model.Quality,
 		MusicID:        model.MusicID,
 		SongName:       model.SongName,
 		SongArtists:    model.SongArtists,
@@ -73,6 +75,7 @@ func toModel(info *bot.SongInfo) *SongInfoModel {
 	model := &SongInfoModel{
 		Platform:       info.Platform,
 		TrackID:        info.TrackID,
+		Quality:        info.Quality,
 		MusicID:        info.MusicID,
 		SongName:       info.SongName,
 		SongArtists:    info.SongArtists,

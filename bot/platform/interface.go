@@ -29,17 +29,9 @@ type Platform interface {
 	// This feature allows identifying a track from an audio sample.
 	SupportsRecognition() bool
 
-	// Download retrieves the audio file for the given track ID at the specified quality.
-	// It returns an io.ReadCloser for the audio data (caller must close), metadata about
-	// the downloaded file, and any error encountered.
-	//
-	// If the requested quality is not available, implementations should return the best
-	// available quality and reflect the actual quality in the returned metadata.
-	//
-	// Returns ErrNotFound if the track doesn't exist, ErrUnavailable if the track exists
-	// but cannot be downloaded (e.g., region restrictions), or ErrUnsupported if downloads
-	// are not supported by this platform.
-	Download(ctx context.Context, trackID string, quality Quality) (io.ReadCloser, *TrackMetadata, error)
+	Capabilities() Capabilities
+
+	GetDownloadInfo(ctx context.Context, trackID string, quality Quality) (*DownloadInfo, error)
 
 	// Search searches for tracks matching the given query string.
 	// The limit parameter controls the maximum number of results to return.

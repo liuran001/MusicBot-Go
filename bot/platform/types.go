@@ -152,3 +152,22 @@ type TrackMetadata struct {
 	// Quality is the quality level of this track.
 	Quality Quality `json:"quality"`
 }
+
+type DownloadInfo struct {
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Size      int64             `json:"size"`
+	Format    string            `json:"format"`
+	Bitrate   int               `json:"bitrate"`
+	MD5       string            `json:"md5,omitempty"`
+	Quality   Quality           `json:"quality"`
+	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+}
+
+type Capabilities struct {
+	Download    bool `json:"download"`
+	Search      bool `json:"search"`
+	Lyrics      bool `json:"lyrics"`
+	Recognition bool `json:"recognition"`
+	HiRes       bool `json:"hi_res"`
+}

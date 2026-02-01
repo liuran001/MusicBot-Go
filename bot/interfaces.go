@@ -22,12 +22,13 @@ type Config interface {
 // SongRepository defines storage operations for cached songs.
 type SongRepository interface {
 	FindByMusicID(ctx context.Context, musicID int) (*SongInfo, error)
-	FindByPlatformTrackID(ctx context.Context, platform, trackID string) (*SongInfo, error)
+	FindByPlatformTrackID(ctx context.Context, platform, trackID, quality string) (*SongInfo, error)
 	FindByFileID(ctx context.Context, fileID string) (*SongInfo, error)
 	Create(ctx context.Context, song *SongInfo) error
 	Update(ctx context.Context, song *SongInfo) error
 	Delete(ctx context.Context, musicID int) error
-	DeleteByPlatformTrackID(ctx context.Context, platform, trackID string) error
+	DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error
+	DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error
 	Count(ctx context.Context) (int64, error)
 	CountByUserID(ctx context.Context, userID int64) (int64, error)
 	CountByChatID(ctx context.Context, chatID int64) (int64, error)

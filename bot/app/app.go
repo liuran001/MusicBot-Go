@@ -10,6 +10,8 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/db"
+	"github.com/liuran001/MusicBot-Go/bot/download"
+	"github.com/liuran001/MusicBot-Go/bot/id3"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
@@ -65,9 +67,13 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 	}
 
 	pool := worker.New(4)
-	neteaseClient := netease.New(conf.GetString("MUSIC_U"), log)
 
-	// Initialize platform manager and register NetEase platform
+	musicU := conf.GetPluginString("netease", "music_u")
+	if musicU == "" {
+		musicU = conf.GetString("MUSIC_U")
+	}
+	neteaseClient := netease.New(musicU, log)
+
 	platformManager := platform.NewManager()
 	neteasePlatformInstance := neteasePlatform.NewPlatform(neteaseClient)
 	platformManager.Register(neteasePlatformInstance)
@@ -100,16 +106,28 @@ func (a *App) Start(ctx context.Context) error {
 		botName = me.Username
 	}
 
+	downloadService := download.NewDownloadService(download.DownloadServiceOptions{
+		Timeout:      time.Duration(a.Config.GetInt("DownloadTimeout")) * time.Second,
+		ReverseProxy: a.Config.GetString("ReverseProxy"),
+		CheckMD5:     a.Config.GetBool("CheckMD5"),
+	})
+	id3Service := id3.NewID3Service(a.Logger)
+
+	tagProviders := map[string]id3.ID3TagProvider{}
+	if a.Netease != nil {
+		tagProviders["netease"] = netease.NewID3Provider(a.Netease)
+	}
+
 	musicHandler := &handler.MusicHandler{
 		Repo:            a.DB,
-		Netease:         a.Netease,
 		Pool:            a.Pool,
 		Logger:          a.Logger,
 		CacheDir:        "./cache",
 		BotName:         botName,
-		CheckMD5:        a.Config.GetBool("CheckMD5"),
-		DownloadTimeout: time.Duration(a.Config.GetInt("DownloadTimeout")) * time.Second,
-		ReverseProxy:    a.Config.GetString("ReverseProxy"),
+		PlatformManager: a.PlatformManager,
+		DownloadService: downloadService,
+		ID3Service:      id3Service,
+		TagProviders:    tagProviders,
 	}
 
 	settingsHandler := &handler.SettingsHandler{

@@ -17,9 +17,8 @@ func TestLoadINI(t *testing.T) {
 		t.Fatalf("expected BOT_TOKEN to be present")
 	}
 
-	admins := conf.GetIntSlice("BotAdmin")
-	if len(admins) == 0 {
-		t.Fatalf("expected BotAdmin to be parsed")
+	if conf.GetString("BotAPI") == "" {
+		t.Fatalf("expected BotAPI to be present")
 	}
 }
 
@@ -32,17 +31,16 @@ func TestPluginSections(t *testing.T) {
 
 	configContent := `BOT_TOKEN = test_token
 MUSIC_U = test_music_u
-BotAdmin = 123,456
 
 [plugins.netease]
 api_url = https://netease.api
-timeout = 30
-enabled = true
+retry = 3
+feature_enabled = true
 
 [plugins.spotify]
 client_id = spotify_client
 client_secret = spotify_secret
-enabled = false
+feature_enabled = false
 `
 
 	if _, err := tmpFile.WriteString(configContent); err != nil {
@@ -72,16 +70,16 @@ enabled = false
 		t.Errorf("GetPluginString failed")
 	}
 
-	if conf.GetPluginInt("netease", "timeout") != 30 {
-		t.Errorf("GetPluginInt failed, got %d", conf.GetPluginInt("netease", "timeout"))
+	if conf.GetPluginInt("netease", "retry") != 3 {
+		t.Errorf("GetPluginInt failed, got %d", conf.GetPluginInt("netease", "retry"))
 	}
 
-	if !conf.GetPluginBool("netease", "enabled") {
-		t.Errorf("GetPluginBool failed for netease.enabled")
+	if !conf.GetPluginBool("netease", "feature_enabled") {
+		t.Errorf("GetPluginBool failed for netease.feature_enabled")
 	}
 
-	if conf.GetPluginBool("spotify", "enabled") {
-		t.Errorf("GetPluginBool should return false for spotify.enabled")
+	if conf.GetPluginBool("spotify", "feature_enabled") {
+		t.Errorf("GetPluginBool should return false for spotify.feature_enabled")
 	}
 
 	if conf.GetPluginString("spotify", "client_id") != "spotify_client" {
@@ -135,7 +133,6 @@ func TestBackwardCompatibility(t *testing.T) {
 
 	configContent := `BOT_TOKEN = legacy_token
 MUSIC_U = legacy_music_u
-BotAdmin = 111,222,333
 BotAPI = https://api.telegram.org
 BotDebug = true
 Database = test.db
@@ -163,11 +160,6 @@ CheckMD5 = false
 		t.Errorf("backward compatibility broken for MUSIC_U")
 	}
 
-	admins := conf.GetIntSlice("BotAdmin")
-	if len(admins) != 3 || admins[0] != 111 || admins[1] != 222 || admins[2] != 333 {
-		t.Errorf("backward compatibility broken for BotAdmin: got %v", admins)
-	}
-
 	if conf.GetBool("BotDebug") != true {
 		t.Errorf("backward compatibility broken for BotDebug")
 	}
@@ -190,7 +182,6 @@ func TestMixedFormat(t *testing.T) {
 
 	configContent := `BOT_TOKEN = mixed_token
 MUSIC_U = mixed_music_u
-BotAdmin = 999
 
 [plugins.custom]
 feature_x = enabled

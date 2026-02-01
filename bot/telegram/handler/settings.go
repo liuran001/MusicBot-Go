@@ -41,7 +41,6 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      message.Chat.ID,
 		Text:        text,
-		ParseMode:   models.ParseModeMarkdown,
 		ReplyMarkup: keyboard,
 	})
 }
@@ -49,17 +48,17 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 func (h *SettingsHandler) buildSettingsText(settings *botpkg.UserSettings, platforms []string) string {
 	var sb strings.Builder
 
-	sb.WriteString("⚙️ *设置中心*\n\n")
+	sb.WriteString("⚙️ 设置中心\n\n")
 
 	platformName := settings.DefaultPlatform
 	platformEmoji := h.getPlatformEmoji(platformName)
-	sb.WriteString(fmt.Sprintf("🎵 *默认平台*: %s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
+	sb.WriteString(fmt.Sprintf("🎵 默认平台: %s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
 
 	qualityEmoji := h.getQualityEmoji(settings.DefaultQuality)
-	sb.WriteString(fmt.Sprintf("🎧 *默认音质*: %s %s\n\n", qualityEmoji, h.getQualityDisplayName(settings.DefaultQuality)))
+	sb.WriteString(fmt.Sprintf("🎧 默认音质: %s %s\n\n", qualityEmoji, h.getQualityDisplayName(settings.DefaultQuality)))
 
 	if len(platforms) > 1 {
-		sb.WriteString("💡 *可用平台*: ")
+		sb.WriteString("💡 可用平台: ")
 		var platformNames []string
 		for _, p := range platforms {
 			platformNames = append(platformNames, h.getPlatformDisplayName(p))
@@ -68,7 +67,7 @@ func (h *SettingsHandler) buildSettingsText(settings *botpkg.UserSettings, platf
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n_点击下方按钮修改设置_")
+	sb.WriteString("\n点击下方按钮修改设置")
 
 	return sb.String()
 }
@@ -289,7 +288,6 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update
 				ChatID:      msg.Chat.ID,
 				MessageID:   msg.ID,
 				Text:        text,
-				ParseMode:   models.ParseModeMarkdown,
 				ReplyMarkup: keyboard,
 			})
 		}
