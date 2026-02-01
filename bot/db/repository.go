@@ -1,0 +1,263 @@
+package db
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/glebarez/sqlite"
+	"github.com/liuran001/MusicBot-Go/bot"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+// Repository provides access to the song cache database.
+type Repository struct {
+	db *gorm.DB
+}
+
+// NewSQLiteRepository creates a repository backed by SQLite.
+func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, error) {
+	if dsn == "" {
+		return nil, fmt.Errorf("dsn required")
+	}
+
+	if gormLogger == nil {
+		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		PrepareStmt:            true,
+		SkipDefaultTransaction: true,
+		Logger:                 gormLogger,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := applySQLitePragmas(db); err != nil {
+		return nil, err
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	if err := db.AutoMigrate(&SongInfoModel{}, &UserSettingsModel{}); err != nil {
+		return nil, err
+	}
+
+	if err := migrateToMultiPlatform(db); err != nil {
+		return nil, err
+	}
+
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	return &Repository{db: db}, nil
+}
+
+func migrateToMultiPlatform(db *gorm.DB) error {
+	var columnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('song_infos') WHERE name='platform'").Scan(&columnExists).Error; err != nil {
+		return fmt.Errorf("check platform column: %w", err)
+	}
+
+	if columnExists {
+		return nil
+	}
+
+	if err := db.Exec("ALTER TABLE song_infos ADD COLUMN platform TEXT NOT NULL DEFAULT 'netease'").Error; err != nil {
+		return fmt.Errorf("add platform column: %w", err)
+	}
+
+	if err := db.Exec("ALTER TABLE song_infos ADD COLUMN track_id TEXT NOT NULL DEFAULT ''").Error; err != nil {
+		return fmt.Errorf("add track_id column: %w", err)
+	}
+
+	if err := db.Exec("UPDATE song_infos SET track_id = CAST(music_id AS TEXT) WHERE track_id = ''").Error; err != nil {
+		return fmt.Errorf("populate track_id from music_id: %w", err)
+	}
+
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_track ON song_infos(platform, track_id)").Error; err != nil {
+		return fmt.Errorf("create unique index: %w", err)
+	}
+
+	return nil
+}
+
+// FindByMusicID returns a cached song by MusicID (legacy NetEase support).
+func (r *Repository) FindByMusicID(ctx context.Context, musicID int) (*bot.SongInfo, error) {
+	var model SongInfoModel
+	err := r.db.WithContext(ctx).Where("platform = ? AND music_id = ?", "netease", musicID).First(&model).Error
+	if err != nil {
+		return nil, err
+	}
+	return toInternal(model), nil
+}
+
+// FindByPlatformTrackID returns a cached song by platform and track ID.
+func (r *Repository) FindByPlatformTrackID(ctx context.Context, platform, trackID string) (*bot.SongInfo, error) {
+	var model SongInfoModel
+	err := r.db.WithContext(ctx).Where("platform = ? AND track_id = ?", platform, trackID).First(&model).Error
+	if err != nil {
+		return nil, err
+	}
+	return toInternal(model), nil
+}
+
+// FindByFileID returns a cached song by FileID.
+func (r *Repository) FindByFileID(ctx context.Context, fileID string) (*bot.SongInfo, error) {
+	var model SongInfoModel
+	err := r.db.WithContext(ctx).Where("file_id = ?", fileID).First(&model).Error
+	if err != nil {
+		return nil, err
+	}
+	return toInternal(model), nil
+}
+
+// Create inserts a new song record.
+func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		model := toModel(song)
+		if err := tx.Create(model).Error; err != nil {
+			return err
+		}
+		song.ID = model.ID
+		song.CreatedAt = model.CreatedAt
+		song.UpdatedAt = model.UpdatedAt
+		return nil
+	})
+}
+
+// Update updates an existing song record.
+func (r *Repository) Update(ctx context.Context, song *bot.SongInfo) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		model := toModel(song)
+		return tx.Save(model).Error
+	})
+}
+
+// Delete removes a song by MusicID (legacy NetEase support).
+func (r *Repository) Delete(ctx context.Context, musicID int) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Delete(&SongInfoModel{}, "platform = ? AND music_id = ?", "netease", musicID).Error
+	})
+}
+
+// DeleteByPlatformTrackID removes a song by platform and track ID.
+func (r *Repository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Delete(&SongInfoModel{}, "platform = ? AND track_id = ?", platform, trackID).Error
+	})
+}
+
+// Count returns total cached songs.
+func (r *Repository) Count(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Count(&count).Error
+	return count, err
+}
+
+// CountByUserID returns cached count by user ID.
+func (r *Repository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Where("from_user_id = ?", userID).Count(&count).Error
+	return count, err
+}
+
+// CountByChatID returns cached count by chat ID.
+func (r *Repository) CountByChatID(ctx context.Context, chatID int64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Where("from_chat_id = ?", chatID).Count(&count).Error
+	return count, err
+}
+
+// Last returns the last cached record.
+func (r *Repository) Last(ctx context.Context) (*bot.SongInfo, error) {
+	var model SongInfoModel
+	if err := r.db.WithContext(ctx).Last(&model).Error; err != nil {
+		return nil, err
+	}
+	return toInternal(model), nil
+}
+
+func applySQLitePragmas(db *gorm.DB) error {
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL;",
+		"PRAGMA busy_timeout=5000;",
+		"PRAGMA synchronous=NORMAL;",
+		"PRAGMA cache_size=-64000;",
+		"PRAGMA foreign_keys=ON;",
+	}
+	for _, stmt := range pragmas {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetUserSettings retrieves settings for a user, creating default if not exists.
+func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.UserSettings, error) {
+	var settings UserSettingsModel
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
+	if err == gorm.ErrRecordNotFound {
+		settings = UserSettingsModel{
+			UserID:          userID,
+			DefaultPlatform: "netease",
+			DefaultQuality:  "high",
+		}
+		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
+			return nil, createErr
+		}
+		var deletedAt *time.Time
+		if settings.DeletedAt.Valid {
+			deletedAt = &settings.DeletedAt.Time
+		}
+		return &bot.UserSettings{
+			ID:              settings.ID,
+			CreatedAt:       settings.CreatedAt,
+			UpdatedAt:       settings.UpdatedAt,
+			DeletedAt:       deletedAt,
+			UserID:          settings.UserID,
+			DefaultPlatform: settings.DefaultPlatform,
+			DefaultQuality:  settings.DefaultQuality,
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var deletedAt *time.Time
+	if settings.DeletedAt.Valid {
+		deletedAt = &settings.DeletedAt.Time
+	}
+	return &bot.UserSettings{
+		ID:              settings.ID,
+		CreatedAt:       settings.CreatedAt,
+		UpdatedAt:       settings.UpdatedAt,
+		DeletedAt:       deletedAt,
+		UserID:          settings.UserID,
+		DefaultPlatform: settings.DefaultPlatform,
+		DefaultQuality:  settings.DefaultQuality,
+	}, nil
+}
+
+// UpdateUserSettings updates user settings.
+func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserSettings) error {
+	model := UserSettingsModel{
+		Model: gorm.Model{
+			ID:        settings.ID,
+			CreatedAt: settings.CreatedAt,
+			UpdatedAt: settings.UpdatedAt,
+		},
+		UserID:          settings.UserID,
+		DefaultPlatform: settings.DefaultPlatform,
+		DefaultQuality:  settings.DefaultQuality,
+	}
+	if settings.DeletedAt != nil {
+		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
+	}
+	return r.db.WithContext(ctx).Save(&model).Error
+}

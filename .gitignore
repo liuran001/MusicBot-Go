@@ -1,0 +1,47 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+MusicBot-Go
+Music163bot-Go
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Config files (sensitive)
+config.ini
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+log/
+*.log
+
+# Cache
+cache/
+tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# sisyphus sessions
+.sisyphus/
