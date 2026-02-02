@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +103,14 @@ func parseRetryAfter(err error) (int, bool) {
 	return retryAfter, retryAfter > 0
 }
 
+func isMessageNotModified(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "message is not modified")
+}
+
 func WithRetry(ctx context.Context, rl *RateLimiter, chatID int64, fn func() error) error {
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -185,7 +194,7 @@ func EditMessageTextWithRetry(ctx context.Context, rl *RateLimiter, b *bot.Bot, 
 	})
 
 	if err != nil {
-		if rl != nil {
+		if rl != nil && !isMessageNotModified(lastErr) {
 			rl.logError("EditMessageText failed", "chat_id", chatID, "message_id", params.MessageID, "error", lastErr)
 		}
 		return result, lastErr
