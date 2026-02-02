@@ -65,6 +65,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("DBMaxIdleConns", 1)
 	v.SetDefault("DBConnMaxLifetimeSec", 3600)
 	v.SetDefault("LogLevel", "info")
+	v.SetDefault("DefaultPlatform", "netease")
 	v.SetDefault("DefaultQuality", "hires")
 	v.SetDefault("EnableMultipartDownload", true)
 	v.SetDefault("MultipartConcurrency", 4)
