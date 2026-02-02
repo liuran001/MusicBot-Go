@@ -75,14 +75,14 @@ func (r *Router) Register(b *bot.Bot, botName string) {
 		}
 		// Use PlatformManager for dynamic URL matching if available
 		if r.PlatformManager != nil {
-			_, _, matched := r.PlatformManager.MatchURL(update.Message.Text)
-			if matched {
+			if _, _, matched := r.PlatformManager.MatchText(update.Message.Text); matched {
+				return true
+			}
+			if _, _, matched := r.PlatformManager.MatchURL(update.Message.Text); matched {
 				return true
 			}
 		}
-		// Fallback to hardcoded patterns for backward compatibility (163cn.tv/link shorteners)
-		text := update.Message.Text
-		return strings.Contains(text, "163cn.tv") || strings.Contains(text, "163cn.link")
+		return false
 	}, r.wrapMessage(r.Music))
 
 	b.RegisterHandlerMatchFunc(func(update *models.Update) bool {
@@ -95,13 +95,12 @@ func (r *Router) Register(b *bot.Bot, botName string) {
 		text := update.Message.Text
 		// Use PlatformManager to exclude platform URLs if available
 		if r.PlatformManager != nil {
+			if _, _, matched := r.PlatformManager.MatchText(text); matched {
+				return false
+			}
 			if _, _, matched := r.PlatformManager.MatchURL(text); matched {
 				return false
 			}
-		}
-		// Fallback: exclude hardcoded NetEase shortener domains
-		if strings.Contains(text, "163cn.tv") || strings.Contains(text, "163cn.link") {
-			return false
 		}
 		return true
 	}, r.wrapMessage(r.Search))

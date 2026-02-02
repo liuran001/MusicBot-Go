@@ -3,58 +3,16 @@ package handler
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/XiaoMengXinX/Music163Api-Go/api"
-	"github.com/XiaoMengXinX/Music163Api-Go/types"
-	"github.com/XiaoMengXinX/Music163Api-Go/utils"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
-
-var (
-	reg1   = regexp.MustCompile(`(.*)song\?id=`)
-	reg2   = regexp.MustCompile("(.*)song/")
-	regP1  = regexp.MustCompile(`(.*)program\?id=`)
-	regP2  = regexp.MustCompile("(.*)program/")
-	regP3  = regexp.MustCompile(`(.*)dj\?id=`)
-	regP4  = regexp.MustCompile("(.*)dj/")
-	reg5   = regexp.MustCompile("/(.*)")
-	reg4   = regexp.MustCompile("&(.*)")
-	reg3   = regexp.MustCompile(`\?(.*)`)
-	regInt = regexp.MustCompile(`\d+`)
-	regUrl = regexp.MustCompile("(http|https)://[\\w\\-_]+(\\.[\\w\\-_]+)+([\\w\\-.,@?^=%&:/~+#]*[\\w\\-@?^=%&/~+#])?")
-)
-
-func extractMusicID(message *models.Message) int {
-	if message == nil {
-		return 0
-	}
-
-	text := message.Text
-	args := commandArguments(message.Text)
-	if args != "" {
-		text = args
-	}
-
-	text = getRedirectUrl(text)
-
-	if id := parseMusicID(text); id != 0 {
-		return id
-	}
-	if id := parseProgramID(text); id != 0 {
-		return getProgramRealID(id)
-	}
-	return 0
-}
 
 func extractPlatformTrack(message *models.Message, manager platform.Manager) (platformName, trackID string, found bool) {
 	if message == nil || message.Text == "" {
@@ -73,119 +31,16 @@ func extractPlatformTrack(message *models.Message, manager platform.Manager) (pl
 		}
 	}
 
-	text = getRedirectUrl(text)
-
 	if manager != nil {
-		plat, id, matched := manager.MatchURL(text)
-		if matched {
+		if plat, id, matched := manager.MatchText(text); matched {
+			return plat, id, true
+		}
+		if plat, id, matched := manager.MatchURL(text); matched {
 			return plat, id, true
 		}
 	}
 
-	musicID := parseMusicID(text)
-	if musicID == 0 {
-		musicID = parseProgramID(text)
-		if musicID != 0 {
-			musicID = getProgramRealID(musicID)
-		}
-	}
-
-	if musicID != 0 {
-		return "netease", fmt.Sprintf("%d", musicID), true
-	}
-
 	return "", "", false
-}
-
-func parseArtist(songDetail types.SongDetailData) string {
-	var artists string
-	for i, ar := range songDetail.Ar {
-		if i == 0 {
-			artists = ar.Name
-		} else {
-			artists = fmt.Sprintf("%s/%s", artists, ar.Name)
-		}
-	}
-	return artists
-}
-
-func parseMusicID(text string) int {
-	var replacer = strings.NewReplacer("\n", "", " ", "")
-	messageText := replacer.Replace(getRedirectUrl(text))
-	musicUrl := regUrl.FindStringSubmatch(messageText)
-	if len(musicUrl) != 0 {
-		if strings.Contains(musicUrl[0], "song") {
-			ur, _ := url.Parse(musicUrl[0])
-			id := ur.Query().Get("id")
-			if musicid, _ := strconv.Atoi(id); musicid != 0 {
-				return musicid
-			}
-		}
-	}
-	musicid, _ := strconv.Atoi(linkTestMusic(messageText))
-	return musicid
-}
-
-func parseProgramID(text string) int {
-	var replacer = strings.NewReplacer("\n", "", " ", "")
-	messageText := replacer.Replace(text)
-	programid, _ := strconv.Atoi(linkTestProgram(messageText))
-	return programid
-}
-
-func extractInt(text string) string {
-	matchArr := regInt.FindStringSubmatch(text)
-	if len(matchArr) == 0 {
-		return ""
-	}
-	return matchArr[0]
-}
-
-func linkTestMusic(text string) string {
-	return extractInt(reg5.ReplaceAllString(reg4.ReplaceAllString(reg3.ReplaceAllString(reg2.ReplaceAllString(reg1.ReplaceAllString(text, ""), ""), ""), ""), ""))
-}
-
-func linkTestProgram(text string) string {
-	return extractInt(reg5.ReplaceAllString(reg4.ReplaceAllString(reg3.ReplaceAllString(regP4.ReplaceAllString(regP3.ReplaceAllString(regP2.ReplaceAllString(regP1.ReplaceAllString(text, ""), ""), ""), ""), ""), ""), ""))
-}
-
-func getProgramRealID(programID int) int {
-	programDetail, err := api.GetProgramDetail(utils.RequestData{}, programID)
-	if err != nil {
-		return 0
-	}
-	if programDetail.Program.MainSong.ID != 0 {
-		return programDetail.Program.MainSong.ID
-	}
-	return 0
-}
-
-func getRedirectUrl(text string) string {
-	var replacer = strings.NewReplacer("\n", "", " ", "")
-	messageText := replacer.Replace(text)
-	musicUrl := regUrl.FindStringSubmatch(messageText)
-	if len(musicUrl) != 0 {
-		if strings.Contains(musicUrl[0], "163cn.tv") {
-			urlStr := musicUrl[0]
-			req, err := http.NewRequest("GET", urlStr, nil)
-			if err != nil {
-				return text
-			}
-			client := &http.Client{
-				Timeout: 10 * time.Second,
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					return http.ErrUseLastResponse
-				},
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				return text
-			}
-			defer resp.Body.Close()
-			return resp.Header.Get("location")
-		}
-	}
-	return text
 }
 
 func extractQualityOverride(message *models.Message) string {

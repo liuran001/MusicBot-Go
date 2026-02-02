@@ -117,35 +117,15 @@ func extractPlatformTrackFromMessage(messageText string, mgr platform.Manager) (
 	if messageText == "" {
 		return "", "", false
 	}
-
-	platformName, trackID, matched := mgr.MatchURL(messageText)
-	if matched {
-		return platformName, trackID, true
-	}
-
-	parts := strings.Fields(strings.TrimSpace(messageText))
-	if len(parts) > 0 {
-		if _, err := parseStringToInt(parts[0]); err == nil {
-			return "netease", parts[0], true
+	if mgr != nil {
+		if platformName, trackID, matched := mgr.MatchText(messageText); matched {
+			return platformName, trackID, true
 		}
-		return "netease", messageText, true
+		if platformName, trackID, matched := mgr.MatchURL(messageText); matched {
+			return platformName, trackID, true
+		}
 	}
-
 	return "", "", false
-}
-
-func parseStringToInt(s string) (int, error) {
-	var result int
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, fmt.Errorf("not a number")
-		}
-		result = result*10 + int(c-'0')
-	}
-	if s == "" {
-		return 0, fmt.Errorf("empty string")
-	}
-	return result, nil
 }
 
 func (h *LyricHandler) formatLyricsError(err error) string {

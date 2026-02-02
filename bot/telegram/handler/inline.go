@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,18 +36,24 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *bot.Bot, update *mo
 		h.inlineSearch(ctx, b, query)
 	default:
 		if h.PlatformManager != nil {
-			platformName, trackID, matched := h.PlatformManager.MatchURL(query.Query)
+			platformName, trackID, matched := h.PlatformManager.MatchText(query.Query)
+			if matched {
+				if platformName == "netease" {
+					if musicID, err := strconv.Atoi(trackID); err == nil {
+						h.inlineMusic(ctx, b, query, musicID)
+						return
+					}
+				}
+				h.inlineCommand(ctx, b, query, platformName, trackID)
+				return
+			}
+			platformName, trackID, matched = h.PlatformManager.MatchURL(query.Query)
 			if matched {
 				h.inlineCommand(ctx, b, query, platformName, trackID)
 				return
 			}
 		}
-		musicID := parseMusicID(query.Query)
-		if musicID != 0 {
-			h.inlineMusic(ctx, b, query, musicID)
-		} else {
-			h.inlineEmpty(ctx, b, query)
-		}
+		h.inlineEmpty(ctx, b, query)
 	}
 }
 

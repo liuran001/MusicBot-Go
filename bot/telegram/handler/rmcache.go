@@ -76,46 +76,63 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *bot.Bot, update *models.
 			}
 		}
 	}
-
-	musicID := parseMusicID(args)
-	if musicID == 0 {
-		musicID = parseProgramID(args)
-		if musicID != 0 {
-			musicID = getProgramRealID(musicID)
+	if h.PlatformManager != nil {
+		if platformName, trackID, matched := h.PlatformManager.MatchText(args); matched {
+			if err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID); err == nil {
+				params := &bot.SendMessageParams{
+					ChatID:          message.Chat.ID,
+					Text:            fmt.Sprintf("已清除平台 %s 歌曲 %s 的缓存", platformName, trackID),
+					ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+				}
+				if h.RateLimiter != nil {
+					_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+				} else {
+					_, _ = b.SendMessage(ctx, params)
+				}
+				return
+			}
+			params := &bot.SendMessageParams{
+				ChatID:          message.Chat.ID,
+				Text:            "清除缓存失败",
+				ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.SendMessage(ctx, params)
+			}
+			return
 		}
-	}
-	if musicID == 0 {
-		params := &bot.SendMessageParams{
-			ChatID:          message.Chat.ID,
-			Text:            "请输入有效的歌曲ID或URL，或使用格式: /rmcache <platform> <trackID>",
-			ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+		if platformName, trackID, matched := h.PlatformManager.MatchURL(args); matched {
+			if err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID); err == nil {
+				params := &bot.SendMessageParams{
+					ChatID:          message.Chat.ID,
+					Text:            fmt.Sprintf("已清除平台 %s 歌曲 %s 的缓存", platformName, trackID),
+					ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+				}
+				if h.RateLimiter != nil {
+					_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+				} else {
+					_, _ = b.SendMessage(ctx, params)
+				}
+				return
+			}
+			params := &bot.SendMessageParams{
+				ChatID:          message.Chat.ID,
+				Text:            "清除缓存失败",
+				ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.SendMessage(ctx, params)
+			}
+			return
 		}
-		if h.RateLimiter != nil {
-			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
-		} else {
-			_, _ = b.SendMessage(ctx, params)
-		}
-		return
-	}
-
-	songInfo, err := h.Repo.FindByMusicID(ctx, musicID)
-	if err == nil && songInfo != nil {
-		_ = h.Repo.Delete(ctx, musicID)
-		params := &bot.SendMessageParams{
-			ChatID:          message.Chat.ID,
-			Text:            fmt.Sprintf(rmcacheReport, songInfo.SongName),
-			ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
-		}
-		if h.RateLimiter != nil {
-			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
-		} else {
-			_, _ = b.SendMessage(ctx, params)
-		}
-		return
 	}
 	params := &bot.SendMessageParams{
 		ChatID:          message.Chat.ID,
-		Text:            noCache,
+		Text:            "请输入有效的歌曲ID或URL，或使用格式: /rmcache <platform> <trackID>",
 		ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
 	}
 	if h.RateLimiter != nil {
@@ -123,4 +140,5 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *bot.Bot, update *models.
 	} else {
 		_, _ = b.SendMessage(ctx, params)
 	}
+	return
 }
