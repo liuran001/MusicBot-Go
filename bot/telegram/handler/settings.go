@@ -205,29 +205,11 @@ func (h *SettingsHandler) formatQualityButton(quality string, isSelected bool) s
 }
 
 func (h *SettingsHandler) getPlatformEmoji(platform string) string {
-	switch platform {
-	case "netease":
-		return "🎵"
-	case "spotify":
-		return "🎧"
-	case "qqmusic":
-		return "🎶"
-	default:
-		return "🎵"
-	}
+	return platformEmoji(platform)
 }
 
 func (h *SettingsHandler) getPlatformDisplayName(platform string) string {
-	switch platform {
-	case "netease":
-		return "网易云音乐"
-	case "spotify":
-		return "Spotify"
-	case "qqmusic":
-		return "QQ音乐"
-	default:
-		return platform
-	}
+	return platformDisplayName(platform)
 }
 
 func (h *SettingsHandler) getQualityEmoji(quality string) string {

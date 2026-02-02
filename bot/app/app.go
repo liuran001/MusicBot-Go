@@ -252,10 +252,14 @@ func (a *App) Start(ctx context.Context) error {
 		DefaultPlatform: defaultPlatform,
 		DefaultQuality:  defaultQuality,
 	}
+	searchFallback := strings.TrimSpace(a.Config.GetString("SearchFallbackPlatform"))
+	if searchFallback == "" {
+		searchFallback = "netease"
+	}
 
 	router := &handler.Router{
 		Music:            musicHandler,
-		Search:           &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform},
+		Search:           &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback},
 		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Recognize:        &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger},
 		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, RateLimiter: rateLimiter},
