@@ -18,19 +18,27 @@ type Logger struct {
 	logFile *os.File // Keep reference to close on shutdown
 }
 
-// New creates a new Logger with text output to stdout and a daily log file.
-func New(level string) (*Logger, error) {
+// New creates a new Logger with configurable output format.
+func New(level, format string, addSource bool) (*Logger, error) {
 	logFile, output, err := logOutput()
 	if err != nil {
 		return nil, err
 	}
 
-	h := slog.NewTextHandler(output, &slog.HandlerOptions{
+	options := &slog.HandlerOptions{
 		Level:     parseLevel(level),
-		AddSource: true,
-	})
+		AddSource: addSource,
+	}
 
-	return &Logger{logger: slog.New(h), logFile: logFile}, nil
+	format = strings.ToLower(strings.TrimSpace(format))
+	var handler slog.Handler
+	if format == "json" {
+		handler = slog.NewJSONHandler(output, options)
+	} else {
+		handler = slog.NewTextHandler(output, options)
+	}
+
+	return &Logger{logger: slog.New(handler), logFile: logFile}, nil
 }
 
 // With returns a child logger with additional fields.

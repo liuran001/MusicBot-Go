@@ -51,12 +51,12 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 		return nil, err
 	}
 
-	log, err := logpkg.New(conf.GetString("LogLevel"))
+	log, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), conf.GetBool("LogSource"))
 	if err != nil {
 		return nil, err
 	}
 
-	gormLogger := logpkg.NewGormLogger(log.Slog(), mapLogLevel(conf.GetString("LogLevel")))
+	gormLogger := logpkg.NewGormLogger(log.Slog(), mapGormLogLevel(conf.GetString("GormLogLevel"), conf.GetString("LogLevel")))
 	databasePath := conf.GetString("Database")
 	if strings.TrimSpace(databasePath) == "" {
 		databasePath = "cache.db"
@@ -361,5 +361,24 @@ func mapLogLevel(level string) gormlogger.LogLevel {
 		fallthrough
 	default:
 		return gormlogger.Info
+	}
+}
+
+func mapGormLogLevel(level, fallback string) gormlogger.LogLevel {
+	level = strings.ToLower(strings.TrimSpace(level))
+	if level == "" {
+		return mapLogLevel(fallback)
+	}
+	switch level {
+	case "silent", "off":
+		return gormlogger.Silent
+	case "error":
+		return gormlogger.Error
+	case "warn", "warning":
+		return gormlogger.Warn
+	case "info", "debug", "trace":
+		return gormlogger.Info
+	default:
+		return mapLogLevel(fallback)
 	}
 }
