@@ -2,21 +2,29 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"sync"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform/registry"
 )
 
 // DefaultManager implements the Manager interface by wrapping the registry.
 // It provides a high-level API for managing and interacting with multiple music platforms.
+// It now supports multiple providers per platform name with automatic fallback.
 type DefaultManager struct {
 	registry *registry.Registry
+	mu       sync.RWMutex
+	// providers maps platform name to a list of providers in registration order
+	providers map[string][]Platform
 }
 
 // NewManager creates a new manager instance with the default global registry.
 func NewManager() *DefaultManager {
 	return &DefaultManager{
-		registry: registry.Default,
+		registry:  registry.Default,
+		providers: make(map[string][]Platform),
 	}
 }
 
@@ -24,33 +32,283 @@ func NewManager() *DefaultManager {
 // This is useful for testing or isolated instances.
 func NewManagerWithRegistry(reg *registry.Registry) *DefaultManager {
 	return &DefaultManager{
-		registry: reg,
+		registry:  reg,
+		providers: make(map[string][]Platform),
 	}
 }
 
 // Register adds a platform implementation to the manager.
-// If a platform with the same name already exists, it will be replaced.
-// The platform must implement both the Platform interface and the URLMatcher interface
-// (from registry package) to be properly registered.
+// Multiple providers can be registered for the same platform name.
+// Providers are tried in registration order when Get returns a composite platform.
 func (m *DefaultManager) Register(platform Platform) {
-	// Wrap the platform to implement registry.Platform interface
-	wrapper := &platformWrapper{platform: platform}
-	// Note: Registry.Register returns an error, but Manager.Register doesn't
-	// We'll ignore the error here to match the Manager interface signature
-	_ = m.registry.Register(wrapper)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	name := platform.Name()
+	m.providers[name] = append(m.providers[name], platform)
+
+	// For URL matching, register only the first provider for each platform name
+	// to preserve URL matching behavior (first registered provider handles MatchURL)
+	if len(m.providers[name]) == 1 {
+		wrapper := &platformWrapper{platform: platform}
+		_ = m.registry.Register(wrapper)
+	}
 }
 
 // Get retrieves a platform by name.
+// If multiple providers are registered for the same name, returns a composite
+// platform that tries providers in registration order with automatic fallback.
 // Returns nil if no platform with that name is registered.
 func (m *DefaultManager) Get(name string) Platform {
-	p, ok := m.registry.Get(name)
-	if !ok {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	providers, ok := m.providers[name]
+	if !ok || len(providers) == 0 {
 		return nil
 	}
-	if wrapper, ok := p.(*platformWrapper); ok {
-		return wrapper.platform
+
+	// Single provider: return directly
+	if len(providers) == 1 {
+		return providers[0]
 	}
-	return nil
+
+	// Multiple providers: return composite with fallback
+	return &compositePlatform{
+		name:      name,
+		providers: providers,
+	}
+}
+
+// compositePlatform implements Platform by trying multiple providers in order with fallback.
+type compositePlatform struct {
+	name      string
+	providers []Platform
+}
+
+func (c *compositePlatform) Name() string {
+	return c.name
+}
+
+func (c *compositePlatform) SupportsDownload() bool {
+	for _, p := range c.providers {
+		if p.SupportsDownload() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *compositePlatform) SupportsSearch() bool {
+	for _, p := range c.providers {
+		if p.SupportsSearch() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *compositePlatform) SupportsLyrics() bool {
+	for _, p := range c.providers {
+		if p.SupportsLyrics() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *compositePlatform) SupportsRecognition() bool {
+	for _, p := range c.providers {
+		if p.SupportsRecognition() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *compositePlatform) Capabilities() Capabilities {
+	var combined Capabilities
+	for _, p := range c.providers {
+		caps := p.Capabilities()
+		combined.Download = combined.Download || caps.Download
+		combined.Search = combined.Search || caps.Search
+		combined.Lyrics = combined.Lyrics || caps.Lyrics
+		combined.Recognition = combined.Recognition || caps.Recognition
+		combined.HiRes = combined.HiRes || caps.HiRes
+	}
+	return combined
+}
+
+func (c *compositePlatform) GetDownloadInfo(ctx context.Context, trackID string, quality Quality) (*DownloadInfo, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		if !p.SupportsDownload() {
+			continue
+		}
+		info, err := p.GetDownloadInfo(ctx, trackID, quality)
+		if err == nil {
+			return info, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func (c *compositePlatform) Search(ctx context.Context, query string, limit int) ([]Track, error) {
+	var lastErr error
+	anyProviderAttempted := false
+	for _, p := range c.providers {
+		if !p.SupportsSearch() {
+			continue
+		}
+		anyProviderAttempted = true
+		tracks, err := p.Search(ctx, query, limit)
+		if err == nil && len(tracks) > 0 {
+			return tracks, nil
+		}
+		// Continue to next provider if error occurs or empty results
+		lastErr = err
+		if err != nil && !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	// Only return ErrUnsupported if no provider supports search
+	if !anyProviderAttempted {
+		return nil, ErrUnsupported
+	}
+	// If at least one provider attempted but all returned empty or errors, return last error or empty
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return []Track{}, nil
+}
+
+func (c *compositePlatform) GetLyrics(ctx context.Context, trackID string) (*Lyrics, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		if !p.SupportsLyrics() {
+			continue
+		}
+		lyrics, err := p.GetLyrics(ctx, trackID)
+		if err == nil {
+			return lyrics, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func (c *compositePlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*Track, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		if !p.SupportsRecognition() {
+			continue
+		}
+		track, err := p.RecognizeAudio(ctx, audioData)
+		if err == nil {
+			return track, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func (c *compositePlatform) GetTrack(ctx context.Context, trackID string) (*Track, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		track, err := p.GetTrack(ctx, trackID)
+		if err == nil {
+			return track, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func (c *compositePlatform) GetArtist(ctx context.Context, artistID string) (*Artist, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		artist, err := p.GetArtist(ctx, artistID)
+		if err == nil {
+			return artist, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func (c *compositePlatform) GetAlbum(ctx context.Context, albumID string) (*Album, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		album, err := p.GetAlbum(ctx, albumID)
+		if err == nil {
+			return album, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func (c *compositePlatform) GetPlaylist(ctx context.Context, playlistID string) (*Playlist, error) {
+	var lastErr error
+	for _, p := range c.providers {
+		playlist, err := p.GetPlaylist(ctx, playlistID)
+		if err == nil {
+			return playlist, nil
+		}
+		lastErr = err
+		if !shouldRetry(err) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, ErrUnsupported
+}
+
+func shouldRetry(err error) bool {
+	return errors.Is(err, ErrNotFound) ||
+		errors.Is(err, ErrUnavailable) ||
+		errors.Is(err, ErrUnsupported) ||
+		errors.Is(err, ErrRateLimited) ||
+		errors.Is(err, ErrAuthRequired)
 }
 
 // List returns all registered platform names.

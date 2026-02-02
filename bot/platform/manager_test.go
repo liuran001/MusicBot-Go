@@ -823,3 +823,358 @@ func TestManager_PlatformErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestManager_MultiProviderFallback(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name: "test-platform",
+		getTrackFunc: func(ctx context.Context, trackID string) (*Track, error) {
+			return nil, ErrNotFound
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name: "test-platform",
+		getTrackFunc: func(ctx context.Context, trackID string) (*Track, error) {
+			return &Track{ID: "123", Platform: "test-platform", Title: "Test Track"}, nil
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	track, err := manager.GetTrack(ctx, "test-platform", "123")
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if track == nil {
+		t.Fatal("Expected track, got nil")
+	}
+	if track.Title != "Test Track" {
+		t.Errorf("Expected title 'Test Track', got '%s'", track.Title)
+	}
+}
+
+func TestManager_MultiProviderAllFail(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name: "test-platform",
+		getTrackFunc: func(ctx context.Context, trackID string) (*Track, error) {
+			return nil, ErrNotFound
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name: "test-platform",
+		getTrackFunc: func(ctx context.Context, trackID string) (*Track, error) {
+			return nil, ErrUnavailable
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	_, err := manager.GetTrack(ctx, "test-platform", "123")
+	if err == nil {
+		t.Error("Expected error, got nil")
+	}
+	if !errors.Is(err, ErrUnavailable) {
+		t.Errorf("Expected last error ErrUnavailable, got %v", err)
+	}
+}
+
+func TestManager_MultiProviderNoRetryOnFatalError(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	fatalErr := errors.New("fatal error")
+
+	mock1 := &mockPlatform{
+		name: "test-platform",
+		getTrackFunc: func(ctx context.Context, trackID string) (*Track, error) {
+			return nil, fatalErr
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name: "test-platform",
+		getTrackFunc: func(ctx context.Context, trackID string) (*Track, error) {
+			return &Track{ID: "123", Platform: "test-platform", Title: "Test Track"}, nil
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	_, err := manager.GetTrack(ctx, "test-platform", "123")
+	if err == nil {
+		t.Error("Expected error, got nil")
+	}
+	if !errors.Is(err, fatalErr) {
+		t.Errorf("Expected fatal error, got %v", err)
+	}
+}
+
+func TestManager_MultiProviderSkipUnsupported(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: false,
+	}
+
+	mock2 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return []Track{{ID: "1", Title: "Track 1"}}, nil
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	tracks, err := manager.Search(ctx, "test-platform", "test", 10)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Errorf("Expected 1 track, got %d", len(tracks))
+	}
+}
+
+func TestCompositePlatform_Capabilities(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		capabilities: Capabilities{
+			Search: true,
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name:             "test-platform",
+		supportsDownload: true,
+		capabilities: Capabilities{
+			Download: true,
+			HiRes:    true,
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	platform := manager.Get("test-platform")
+	if platform == nil {
+		t.Fatal("Expected platform, got nil")
+	}
+
+	if !platform.SupportsSearch() {
+		t.Error("Expected SupportsSearch to be true")
+	}
+	if !platform.SupportsDownload() {
+		t.Error("Expected SupportsDownload to be true")
+	}
+
+	caps := platform.Capabilities()
+	if !caps.Search {
+		t.Error("Expected Search capability")
+	}
+	if !caps.Download {
+		t.Error("Expected Download capability")
+	}
+	if !caps.HiRes {
+		t.Error("Expected HiRes capability")
+	}
+}
+
+func TestCompositePlatform_AllUnsupported(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: false,
+	}
+
+	mock2 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: false,
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	_, err := manager.Search(ctx, "test-platform", "test", 10)
+	if err == nil {
+		t.Error("Expected error, got nil")
+	}
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("Expected ErrUnsupported, got %v", err)
+	}
+}
+
+func TestManager_URLMatchingFirstProviderOnly(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name: "test-platform",
+		matchURLFunc: func(url string) (string, bool) {
+			if url == "https://example.com/track/123" {
+				return "123", true
+			}
+			return "", false
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name: "test-platform",
+		matchURLFunc: func(url string) (string, bool) {
+			if url == "https://example.com/track/456" {
+				return "456", true
+			}
+			return "", false
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	platformName, trackID, matched := manager.MatchURL("https://example.com/track/123")
+	if !matched {
+		t.Error("Expected match")
+	}
+	if platformName != "test-platform" {
+		t.Errorf("Expected platform 'test-platform', got '%s'", platformName)
+	}
+	if trackID != "123" {
+		t.Errorf("Expected track ID '123', got '%s'", trackID)
+	}
+
+	platformName, trackID, matched = manager.MatchURL("https://example.com/track/456")
+	if matched {
+		t.Error("Expected no match for second provider's URL")
+	}
+}
+
+func TestCompositePlatform_SearchEmptyResultsFallback(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return []Track{}, nil
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return []Track{
+				{ID: "1", Platform: "test-platform", Title: "Track 1"},
+				{ID: "2", Platform: "test-platform", Title: "Track 2"},
+			}, nil
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	tracks, err := manager.Search(ctx, "test-platform", "test", 10)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Errorf("Expected 2 tracks from fallback provider, got %d", len(tracks))
+	}
+	if len(tracks) > 0 && tracks[0].Title != "Track 1" {
+		t.Errorf("Expected first track title 'Track 1', got '%s'", tracks[0].Title)
+	}
+}
+
+func TestCompositePlatform_SearchAllProvidersEmptyResults(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return []Track{}, nil
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return []Track{}, nil
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	tracks, err := manager.Search(ctx, "test-platform", "test", 10)
+	if err != nil {
+		t.Errorf("Expected no error when all providers return empty results, got %v", err)
+	}
+	if len(tracks) != 0 {
+		t.Errorf("Expected empty result slice, got %d tracks", len(tracks))
+	}
+}
+
+func TestCompositePlatform_SearchEmptyResultsThenError(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return []Track{}, nil
+		},
+	}
+
+	mock2 := &mockPlatform{
+		name:           "test-platform",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]Track, error) {
+			return nil, ErrNotFound
+		},
+	}
+
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	ctx := context.Background()
+	tracks, err := manager.Search(ctx, "test-platform", "test", 10)
+	if err == nil {
+		t.Error("Expected error from second provider, got nil")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
+	}
+	if len(tracks) != 0 {
+		t.Errorf("Expected no tracks on error, got %d", len(tracks))
+	}
+}

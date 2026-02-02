@@ -15,6 +15,7 @@ import (
 // Contribution describes the components a plugin can provide.
 type Contribution struct {
 	Platform   platform.Platform
+	Platforms  []platform.Platform
 	ID3        id3.ID3TagProvider
 	Recognizer recognize.Service
 }

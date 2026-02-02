@@ -120,12 +120,21 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 		if contrib == nil {
 			continue
 		}
-		if contrib.Platform != nil {
-			platformManager.Register(contrib.Platform)
-			if contrib.ID3 != nil {
-				pluginTagProviders[contrib.Platform.Name()] = contrib.ID3
+
+		platformsToRegister := contrib.Platforms
+		if len(platformsToRegister) == 0 && contrib.Platform != nil {
+			platformsToRegister = []platform.Platform{contrib.Platform}
+		}
+
+		for _, plat := range platformsToRegister {
+			if plat != nil {
+				platformManager.Register(plat)
+				if contrib.ID3 != nil {
+					pluginTagProviders[plat.Name()] = contrib.ID3
+				}
 			}
 		}
+
 		if contrib.Recognizer != nil {
 			if recognizeService == nil {
 				recognizeService = contrib.Recognizer
