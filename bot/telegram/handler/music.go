@@ -35,6 +35,7 @@ type MusicHandler struct {
 	UploadQueue     chan uploadTask
 	UploadQueueSize int
 	UploadBot       *bot.Bot
+	initOnce        sync.Once
 	queueMu         sync.Mutex
 	queuedStatus    []queuedStatus
 }
@@ -110,30 +111,30 @@ func (h *MusicHandler) dispatch(ctx context.Context, b *bot.Bot, message *models
 func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *models.Message, platformName, trackID string, qualityOverride string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-
-	if h.CacheDir == "" {
-		h.CacheDir = "./cache"
-	}
-	ensureDir(h.CacheDir)
+	h.initOnce.Do(func() {
+		if h.CacheDir == "" {
+			h.CacheDir = "./cache"
+		}
+		ensureDir(h.CacheDir)
+		if h.Limiter == nil {
+			h.Limiter = make(chan struct{}, 4)
+		}
+		if h.UploadLimiter == nil {
+			h.UploadLimiter = make(chan struct{}, 1)
+		}
+		if h.UploadQueueSize <= 0 {
+			h.UploadQueueSize = 20
+		}
+		if h.UploadQueue == nil {
+			h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
+			go h.runUploadWorker()
+		}
+	})
 	threadID := 0
 	if message != nil {
 		threadID = message.MessageThreadID
 	}
 	replyParams := buildReplyParams(message)
-
-	if h.Limiter == nil {
-		h.Limiter = make(chan struct{}, 4)
-	}
-	if h.UploadLimiter == nil {
-		h.UploadLimiter = make(chan struct{}, 1)
-	}
-	if h.UploadQueueSize <= 0 {
-		h.UploadQueueSize = 20
-	}
-	if h.UploadQueue == nil {
-		h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
-		go h.runUploadWorker()
-	}
 
 	var songInfo botpkg.SongInfo
 	var msgResult *models.Message
@@ -386,7 +387,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	}
 	if coverURL != "" {
 		picPath = filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(coverURL)))
-		if _, err := h.DownloadService.Download(ctx, &platform.DownloadInfo{URL: coverURL}, picPath, nil); err == nil {
+		if _, err := h.DownloadService.Download(ctx, &platform.DownloadInfo{URL: coverURL, Size: 2 * 1024 * 1024}, picPath, nil); err == nil {
 			if stat, statErr := os.Stat(picPath); statErr == nil && stat.Size() > 0 {
 				songInfo.PicSize = int(stat.Size())
 				cleanupList = append(cleanupList, picPath)
@@ -536,8 +537,14 @@ func (h *MusicHandler) runUploadWorker() {
 		if task.ctx != nil {
 			select {
 			case <-task.ctx.Done():
+				result := uploadResult{err: task.ctx.Err()}
+				if task.onDone != nil {
+					task.onDone(result)
+				}
+				h.removeQueuedStatus(task.statusMsg)
+				h.refreshQueuedStatuses()
 				if task.resultCh != nil {
-					task.resultCh <- uploadResult{err: task.ctx.Err()}
+					task.resultCh <- result
 				}
 				continue
 			case h.UploadLimiter <- struct{}{}:

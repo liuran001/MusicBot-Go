@@ -44,7 +44,7 @@ func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   minDuration(opts.Timeout, 10*time.Second),
-		ResponseHeaderTimeout: opts.Timeout,
+		ResponseHeaderTimeout: minDuration(opts.Timeout, 10*time.Second),
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 

@@ -87,7 +87,9 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *bot.Bot, update *model
 		sendText(ctx, b, chatID, replyID, "服务器未安装 ffmpeg，无法识别")
 		return
 	}
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", oggPath, oggPath+".mp3")
+	ffmpegCtx, ffmpegCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer ffmpegCancel()
+	cmd := exec.CommandContext(ffmpegCtx, "ffmpeg", "-i", oggPath, oggPath+".mp3")
 	if err := cmd.Run(); err != nil {
 		sendText(ctx, b, chatID, replyID, "音频转换失败，请稍后重试")
 		return
@@ -103,14 +105,9 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *bot.Bot, update *model
 		sendText(ctx, b, chatID, replyID, "读取音频失败，请稍后重试")
 		return
 	}
-	newBuf, err := io.ReadAll(newFile)
-	_ = newFile.Close()
-	if err != nil {
-		sendText(ctx, b, chatID, replyID, "读取音频失败，请稍后重试")
-		return
-	}
+	defer newFile.Close()
 
-	respBody, err := uploadFile(ctx, client, recognizeAPI, newBuf)
+	respBody, err := uploadFile(ctx, client, recognizeAPI, newFile)
 	if err != nil {
 		sendText(ctx, b, chatID, replyID, "识别服务暂不可用，请稍后重试")
 		return
@@ -139,14 +136,14 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *bot.Bot, update *model
 	}
 }
 
-func uploadFile(ctx context.Context, client *http.Client, url string, file []byte) ([]byte, error) {
+func uploadFile(ctx context.Context, client *http.Client, url string, file io.Reader) ([]byte, error) {
 	bodyBuf := &bytes.Buffer{}
 	writer := multipart.NewWriter(bodyBuf)
 	fileWriter, err := writer.CreateFormFile("file", "")
 	if err != nil {
 		return nil, err
 	}
-	_, err = fileWriter.Write(file)
+	_, err = io.Copy(fileWriter, file)
 	if err != nil {
 		return nil, err
 	}
