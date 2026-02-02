@@ -18,6 +18,7 @@ type SearchHandler struct {
 	PlatformManager platform.Manager
 	Repo            botpkg.SongRepository
 	RateLimiter     *telegram.RateLimiter
+	DefaultPlatform string
 }
 
 func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -72,7 +73,10 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 	}
 
 	// Get user's default platform from settings
-	platformName := "netease" // fallback default
+	platformName := h.DefaultPlatform
+	if platformName == "" {
+		platformName = "netease"
+	}
 	if h.Repo != nil {
 		if message.Chat.Type != "private" {
 			if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {

@@ -72,7 +72,11 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 	if err := repo.ConfigurePool(poolMaxOpen, poolMaxIdle, time.Duration(poolMaxLifetimeSec)*time.Second); err != nil {
 		return nil, fmt.Errorf("configure db pool: %w", err)
 	}
-	repo.SetDefaults("netease", conf.GetString("DefaultQuality"))
+	defaultPlatform := strings.TrimSpace(conf.GetString("DefaultPlatform"))
+	if defaultPlatform == "" {
+		defaultPlatform = "netease"
+	}
+	repo.SetDefaults(defaultPlatform, conf.GetString("DefaultQuality"))
 
 	poolSize := conf.GetInt("WorkerPoolSize")
 	pool := worker.New(poolSize)
@@ -236,15 +240,22 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	musicHandler.StartWorker(ctx)
 
+	defaultPlatform := strings.TrimSpace(a.Config.GetString("DefaultPlatform"))
+	if defaultPlatform == "" {
+		defaultPlatform = "netease"
+	}
+	defaultQuality := a.Config.GetString("DefaultQuality")
 	settingsHandler := &handler.SettingsHandler{
 		Repo:            a.DB,
 		PlatformManager: a.PlatformManager,
 		RateLimiter:     rateLimiter,
+		DefaultPlatform: defaultPlatform,
+		DefaultQuality:  defaultQuality,
 	}
 
 	router := &handler.Router{
 		Music:            musicHandler,
-		Search:           &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter},
+		Search:           &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform},
 		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Recognize:        &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger},
 		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, RateLimiter: rateLimiter},

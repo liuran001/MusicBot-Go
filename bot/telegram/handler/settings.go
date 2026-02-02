@@ -16,6 +16,8 @@ type SettingsHandler struct {
 	Repo            botpkg.SongRepository
 	PlatformManager platform.Manager
 	RateLimiter     *telegram.RateLimiter
+	DefaultPlatform string
+	DefaultQuality  string
 }
 
 func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -81,8 +83,14 @@ func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.Us
 
 	sb.WriteString("⚙️ 设置中心\n\n")
 
-	platformName := "netease"
-	qualityValue := "hires"
+	platformName := h.DefaultPlatform
+	qualityValue := h.DefaultQuality
+	if platformName == "" {
+		platformName = "netease"
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
 	if chatType != "private" {
 		if groupSettings != nil {
 			platformName = groupSettings.DefaultPlatform
@@ -115,8 +123,14 @@ func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.Us
 
 func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) *models.InlineKeyboardMarkup {
 	var rows [][]models.InlineKeyboardButton
-	platformValue := "netease"
-	qualityValue := "hires"
+	platformValue := h.DefaultPlatform
+	qualityValue := h.DefaultQuality
+	if platformValue == "" {
+		platformValue = "netease"
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
 	if chatType != "private" {
 		if groupSettings != nil {
 			platformValue = groupSettings.DefaultPlatform
