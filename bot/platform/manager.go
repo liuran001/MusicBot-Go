@@ -74,6 +74,27 @@ func (m *DefaultManager) MatchURL(url string) (platformName, trackID string, mat
 	return p.Name(), id, true
 }
 
+// MatchText attempts to match text against all registered platforms that support text matching.
+// Returns the platform name, track ID, and true if a match is found.
+// Returns empty strings and false if no platform matches the text.
+func (m *DefaultManager) MatchText(text string) (platformName, trackID string, matched bool) {
+	if m == nil {
+		return "", "", false
+	}
+	for _, name := range m.List() {
+		platform := m.Get(name)
+		if platform == nil {
+			continue
+		}
+		if matcher, ok := platform.(TextMatcher); ok {
+			if id, ok := matcher.MatchText(text); ok {
+				return name, id, true
+			}
+		}
+	}
+	return "", "", false
+}
+
 // GetPlatform retrieves a platform by name and returns an error if not found.
 // This is a convenience method that provides better error handling than Get.
 func (m *DefaultManager) GetPlatform(name string) (Platform, error) {
