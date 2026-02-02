@@ -10,11 +10,13 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 // LyricHandler handles /lyric command.
 type LyricHandler struct {
 	PlatformManager platform.Manager
+	RateLimiter     *telegram.RateLimiter
 }
 
 func (h *LyricHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -25,11 +27,16 @@ func (h *LyricHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Up
 
 	args := commandArguments(message.Text)
 	if args == "" && message.ReplyToMessage == nil {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		params := &bot.SendMessageParams{
 			ChatID:          message.Chat.ID,
 			Text:            inputContent,
 			ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.SendMessage(ctx, params)
+		}
 		return
 	}
 
@@ -50,31 +57,56 @@ func (h *LyricHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Up
 	}
 
 	if h.PlatformManager == nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: getLrcFailed})
+		params := &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: getLrcFailed}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
 	platformName, trackID, found := extractPlatformTrackFromMessage(args, h.PlatformManager)
 	if !found {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: noResults})
+		params := &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: noResults}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: getLrcFailed})
+		params := &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: getLrcFailed}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
 	if !plat.SupportsLyrics() {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: "此平台不支持获取歌词"})
+		params := &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: "此平台不支持获取歌词"}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
 	lyrics, err := plat.GetLyrics(ctx, trackID)
 	if err != nil {
 		errText := h.formatLyricsError(err)
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: errText})
+		params := &bot.EditMessageTextParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID, Text: errText}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
@@ -154,12 +186,23 @@ func (h *LyricHandler) sendLyrics(ctx context.Context, b *bot.Bot, msgResult *mo
 		text = text[:4000] + "\n\n... (已截断)"
 	}
 
-	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID})
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	deleteParams := &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID}
+	if h.RateLimiter != nil {
+		_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+	} else {
+		_, _ = b.DeleteMessage(ctx, deleteParams)
+	}
+
+	sendParams := &bot.SendMessageParams{
 		ChatID:          originalMsg.Chat.ID,
 		Text:            text,
 		ReplyParameters: &models.ReplyParameters{MessageID: originalMsg.ID},
-	})
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendParams)
+	} else {
+		_, _ = b.SendMessage(ctx, sendParams)
+	}
 }
 
 func formatDuration(d time.Duration) string {

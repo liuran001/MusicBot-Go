@@ -39,9 +39,23 @@ func New(size int) *Pool {
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
-			for task := range p.tasks {
-				if task != nil {
-					task()
+			for {
+				select {
+				case <-p.shutdown:
+					return
+				case task, ok := <-p.tasks:
+					if !ok {
+						return
+					}
+					if task != nil {
+						func() {
+							defer func() {
+								if r := recover(); r != nil {
+								}
+							}()
+							task()
+						}()
+					}
 				}
 			}
 		}()
@@ -52,12 +66,11 @@ func New(size int) *Pool {
 
 // Submit enqueues a task for execution.
 func (p *Pool) Submit(task func()) error {
-	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
+	select {
+	case <-p.shutdown:
 		return ErrPoolClosed
+	default:
 	}
-	p.mu.Unlock()
 
 	select {
 	case <-p.shutdown:
@@ -90,7 +103,6 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 	if !p.closed {
 		p.closed = true
 		close(p.shutdown)
-		close(p.tasks)
 	}
 	p.mu.Unlock()
 
@@ -114,7 +126,6 @@ func (p *Pool) StopNow() {
 	if !p.closed {
 		p.closed = true
 		close(p.shutdown)
-		close(p.tasks)
 	}
 	p.mu.Unlock()
 }

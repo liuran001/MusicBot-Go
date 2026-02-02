@@ -8,12 +8,14 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 // CallbackMusicHandler handles callback queries for music buttons.
 type CallbackMusicHandler struct {
-	Music   *MusicHandler
-	BotName string
+	Music       *MusicHandler
+	BotName     string
+	RateLimiter *telegram.RateLimiter
 }
 
 func (h *CallbackMusicHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -101,7 +103,12 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *bot.Bot, update *m
 	if h.Music != nil {
 		h.Music.dispatch(ctx, b, msgToUse, platformName, trackID, qualityOverride)
 	}
-	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msg.Chat.ID, MessageID: msg.ID})
+	deleteParams := &bot.DeleteMessageParams{ChatID: msg.Chat.ID, MessageID: msg.ID}
+	if h.RateLimiter != nil {
+		_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+	} else {
+		_, _ = b.DeleteMessage(ctx, deleteParams)
+	}
 }
 
 func isRequesterOrAdmin(ctx context.Context, b *bot.Bot, chatID int64, userID int64, requesterID int64) bool {

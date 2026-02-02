@@ -130,7 +130,7 @@ func (s *ID3Service) embedMp3Tags(audioPath string, tagData *TagData, coverPath 
 	}
 
 	if coverPath != "" {
-		artwork, err := os.ReadFile(coverPath)
+		artwork, err := readCoverWithLimit(coverPath, 512*1024)
 		if err == nil && len(artwork) > 0 {
 			mime := http.DetectContentType(artwork[:minInt(len(artwork), 32)])
 			pic := id3v2.PictureFrame{
@@ -160,7 +160,7 @@ func (s *ID3Service) embedFlacTags(audioPath string, tagData *TagData, coverPath
 	}
 
 	if coverPath != "" {
-		artwork, err := os.ReadFile(coverPath)
+		artwork, err := readCoverWithLimit(coverPath, 512*1024)
 		if err == nil && len(artwork) > 0 {
 			mime := http.DetectContentType(artwork[:minInt(len(artwork), 32)])
 			picture, err := flacpicture.NewFromImageData(flacpicture.PictureTypeFrontCover, "Front cover", artwork, mime)
@@ -295,4 +295,15 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func readCoverWithLimit(path string, maxSize int64) ([]byte, error) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if stat.Size() > maxSize {
+		return nil, fmt.Errorf("cover image too large: %d bytes (max %d)", stat.Size(), maxSize)
+	}
+	return os.ReadFile(path)
 }

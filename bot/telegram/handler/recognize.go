@@ -15,12 +15,14 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 // RecognizeHandler handles voice recognition.
 type RecognizeHandler struct {
-	CacheDir string
-	Music    *MusicHandler
+	CacheDir    string
+	Music       *MusicHandler
+	RateLimiter *telegram.RateLimiter
 }
 
 var recognizeAPI = "https://music-recognize.vercel.app/api/recognize"
@@ -62,11 +64,15 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *bot.Bot, update *model
 		return
 	}
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if err != nil {
 		sendText(ctx, b, chatID, replyID, "下载语音失败，请稍后重试")
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		sendText(ctx, b, chatID, replyID, "下载语音失败，请稍后重试")
+		return
+	}
 
 	fileName := fmt.Sprintf("%d-%d-%d.ogg", message.ReplyToMessage.Chat.ID, message.ReplyToMessage.ID, time.Now().Unix())
 	oggPath := fmt.Sprintf("%s/%s", h.CacheDir, fileName)
@@ -124,11 +130,16 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *bot.Bot, update *model
 	}
 
 	musicID := result.Data.Result[0].Song.Id
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	params := &bot.SendMessageParams{
 		ChatID:          chatID,
 		Text:            fmt.Sprintf("https://music.163.com/song/%d", musicID),
 		ReplyParameters: &models.ReplyParameters{MessageID: replyID},
-	})
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.SendMessage(ctx, params)
+	}
 
 	if h.Music != nil {
 		// Recognition currently returns NetEase musicID
@@ -186,9 +197,10 @@ func sendText(ctx context.Context, b *bot.Bot, chatID int64, replyID int, text s
 	if b == nil {
 		return
 	}
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	params := &bot.SendMessageParams{
 		ChatID:          chatID,
 		Text:            text,
 		ReplyParameters: &models.ReplyParameters{MessageID: replyID},
-	})
+	}
+	_, _ = b.SendMessage(ctx, params)
 }

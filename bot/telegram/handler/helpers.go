@@ -2,10 +2,7 @@ package handler
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -226,23 +223,6 @@ func isNumeric(s string) bool {
 	return err == nil
 }
 
-func verifyMD5(filePath string, md5str string) (bool, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	md5hash := md5.New()
-	if _, err := io.Copy(md5hash, f); err != nil {
-		return false, err
-	}
-	if hex.EncodeToString(md5hash.Sum(nil)) != md5str {
-		return false, fmt.Errorf(md5VerFailed)
-	}
-	return true, nil
-}
-
 func ensureDir(path string) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -404,18 +384,4 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 	}
 
 	return n, nil
-}
-
-func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, totalSize int64, b *bot.Bot, msg *models.Message, filename string) (int64, error) {
-	pw := &progressWriter{
-		ctx:        ctx,
-		bot:        b,
-		msg:        msg,
-		total:      totalSize,
-		lastUpdate: time.Now(),
-		filename:   filename,
-	}
-
-	writer := io.MultiWriter(dst, pw)
-	return io.Copy(writer, src)
 }

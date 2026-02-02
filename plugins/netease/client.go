@@ -165,28 +165,21 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 			return err
 		}
 
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- fn()
-		}()
-
-		select {
-		case err := <-errCh:
-			if err == nil {
-				return nil
-			}
+		if err := fn(); err == nil {
+			return nil
+		} else {
 			lastErr = err
-			if attempt == c.maxRetries {
-				break
-			}
-			wait := c.retry.Backoff(c.minBackoff, c.maxBackoff, attempt, nil)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(wait):
-			}
+		}
+
+		if attempt == c.maxRetries {
+			break
+		}
+
+		wait := c.retry.Backoff(c.minBackoff, c.maxBackoff, attempt, nil)
+		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-time.After(wait):
 		}
 	}
 

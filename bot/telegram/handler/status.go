@@ -10,12 +10,14 @@ import (
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 // StatusHandler handles /status command.
 type StatusHandler struct {
 	Repo            botpkg.SongRepository
 	PlatformManager platform.Manager
+	RateLimiter     *telegram.RateLimiter
 }
 
 var statLimiter = make(chan struct{}, 1)
@@ -60,10 +62,15 @@ func (h *StatusHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 		}
 	}
 
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	params := &bot.SendMessageParams{
 		ChatID:          message.Chat.ID,
 		Text:            msgText,
 		ParseMode:       models.ParseModeMarkdown,
 		ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
-	})
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.SendMessage(ctx, params)
+	}
 }

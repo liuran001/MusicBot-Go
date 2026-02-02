@@ -2,12 +2,9 @@ package download
 
 import (
 	"context"
-	"crypto/md5"
 	"crypto/tls"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,9 +14,10 @@ import (
 	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/util"
 )
 
-type ProgressFunc func(written, total int64)
+type ProgressFunc = util.ProgressFunc
 
 type DownloadService struct {
 	client       *http.Client
@@ -83,7 +81,7 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 				return 0, fmt.Errorf("incomplete download: got %d bytes, expected %d", written, info.Size)
 			}
 			if s.checkMD5 && info.MD5 != "" {
-				if ok, err := verifyMD5(destPath, info.MD5); err != nil || !ok {
+				if ok, err := util.VerifyMD5(destPath, info.MD5); err != nil || !ok {
 					_ = os.Remove(destPath)
 					if err != nil {
 						return 0, err
@@ -144,7 +142,7 @@ func (s *DownloadService) downloadOnce(ctx context.Context, rawURL, originalHost
 	}
 	defer file.Close()
 
-	return copyWithProgress(file, resp.Body, info.Size, progress)
+	return util.CopyWithProgress(file, resp.Body, info.Size, progress)
 }
 
 func (s *DownloadService) newClientForOverride(serverName, overrideAddr, rawURL string) *http.Client {
@@ -212,47 +210,6 @@ func replaceHost(rawURL, newHost string) (string, error) {
 	}
 	parsed.Host = newHost
 	return parsed.String(), nil
-}
-
-func copyWithProgress(dst io.Writer, src io.Reader, total int64, progress ProgressFunc) (int64, error) {
-	buf := make([]byte, 128*1024)
-	var written int64
-	lastUpdate := time.Now()
-
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
-				return written, werr
-			}
-			written += int64(n)
-			if progress != nil && time.Since(lastUpdate) >= 2*time.Second {
-				progress(written, total)
-				lastUpdate = time.Now()
-			}
-		}
-		if err != nil {
-			if err == io.EOF {
-				return written, nil
-			}
-			return written, err
-		}
-	}
-}
-
-func verifyMD5(filePath, expected string) (bool, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-
-	h := md5.New()
-	if _, err := io.Copy(h, file); err != nil {
-		return false, err
-	}
-	actual := hex.EncodeToString(h.Sum(nil))
-	return strings.EqualFold(actual, expected), nil
 }
 
 func minDuration(a, b time.Duration) time.Duration {

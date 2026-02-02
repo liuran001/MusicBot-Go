@@ -14,12 +14,13 @@ import (
 
 // Logger wraps slog.Logger to satisfy bot.Logger.
 type Logger struct {
-	logger *slog.Logger
+	logger  *slog.Logger
+	logFile *os.File // Keep reference to close on shutdown
 }
 
 // New creates a new Logger with text output to stdout and a daily log file.
 func New(level string) (*Logger, error) {
-	output, err := logOutput()
+	logFile, output, err := logOutput()
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +30,7 @@ func New(level string) (*Logger, error) {
 		AddSource: true,
 	})
 
-	return &Logger{logger: slog.New(h)}, nil
+	return &Logger{logger: slog.New(h), logFile: logFile}, nil
 }
 
 // With returns a child logger with additional fields.
@@ -62,9 +63,9 @@ func parseLevel(level string) slog.Level {
 	}
 }
 
-func logOutput() (io.Writer, error) {
+func logOutput() (*os.File, io.Writer, error) {
 	if err := os.MkdirAll("./log", 0755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	fileName := time.Now().Local().Format("2006-01-02") + ".log"
@@ -72,12 +73,20 @@ func logOutput() (io.Writer, error) {
 
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if file == nil {
-		return nil, errors.New("log file handle is nil")
+		return nil, nil, errors.New("log file handle is nil")
 	}
 
-	return io.MultiWriter(os.Stdout, file), nil
+	return file, io.MultiWriter(os.Stdout, file), nil
+}
+
+// Close closes the log file handle.
+func (l *Logger) Close() error {
+	if l == nil || l.logFile == nil {
+		return nil
+	}
+	return l.logFile.Close()
 }

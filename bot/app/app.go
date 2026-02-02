@@ -123,6 +123,10 @@ func (a *App) Start(ctx context.Context) error {
 		tagProviders["netease"] = netease.NewID3Provider(a.Netease)
 	}
 
+	// Initialize rate limiter: 1 msg/sec with burst of 3
+	rateLimiter := telegram.NewRateLimiter(1.0, 3)
+	rateLimiter.SetLogger(a.Logger)
+
 	musicHandler := &handler.MusicHandler{
 		Repo:            a.DB,
 		Pool:            a.Pool,
@@ -135,24 +139,27 @@ func (a *App) Start(ctx context.Context) error {
 		TagProviders:    tagProviders,
 		UploadQueueSize: 20,
 		UploadBot:       a.Telegram.UploadClient(),
+		RateLimiter:     rateLimiter,
 	}
+	musicHandler.StartWorker(ctx)
 
 	settingsHandler := &handler.SettingsHandler{
 		Repo:            a.DB,
 		PlatformManager: a.PlatformManager,
+		RateLimiter:     rateLimiter,
 	}
 
 	router := &handler.Router{
 		Music:            musicHandler,
-		Search:           &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB},
-		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager},
-		Recognize:        &handler.RecognizeHandler{CacheDir: "./cache", Music: musicHandler},
-		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch},
-		Status:           &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager},
+		Search:           &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter},
+		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		Recognize:        &handler.RecognizeHandler{CacheDir: "./cache", Music: musicHandler, RateLimiter: rateLimiter},
+		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, RateLimiter: rateLimiter},
+		Status:           &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Settings:         settingsHandler,
-		RmCache:          &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager},
-		Callback:         &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName},
-		SettingsCallback: &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler},
+		RmCache:          &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		Callback:         &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},
+		SettingsCallback: &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler, RateLimiter: rateLimiter},
 		Inline:           &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, BotName: botName},
 		PlatformManager:  a.PlatformManager,
 	}
@@ -177,14 +184,37 @@ func (a *App) Start(ctx context.Context) error {
 
 // Shutdown releases resources.
 func (a *App) Shutdown(ctx context.Context) error {
+	var firstErr error
+
 	if a.Pool != nil {
 		if err := a.Pool.Shutdown(ctx); err != nil {
 			a.Pool.StopNow()
-			return err
+			if firstErr == nil {
+				firstErr = fmt.Errorf("shutdown worker pool: %w", err)
+			}
 		}
-		return nil
 	}
-	return nil
+
+	if a.DB != nil {
+		if err := a.DB.Close(); err != nil {
+			if a.Logger != nil {
+				a.Logger.Error("failed to close database", "error", err)
+			}
+			if firstErr == nil {
+				firstErr = fmt.Errorf("close database: %w", err)
+			}
+		}
+	}
+
+	if a.Logger != nil {
+		if err := a.Logger.Close(); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("close logger: %w", err)
+			}
+		}
+	}
+
+	return firstErr
 }
 
 func mapLogLevel(level string) gormlogger.LogLevel {

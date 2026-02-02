@@ -406,3 +406,15 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 	}
 	return r.db.WithContext(ctx).Save(&model).Error
 }
+
+// Close closes the database connection.
+func (r *Repository) Close() error {
+	if r == nil || r.db == nil {
+		return nil
+	}
+	sqlDB, err := r.db.DB()
+	if err != nil {
+		return fmt.Errorf("get sql.DB: %w", err)
+	}
+	return sqlDB.Close()
+}

@@ -10,12 +10,14 @@ import (
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 // SearchHandler handles /search and private message search.
 type SearchHandler struct {
 	PlatformManager platform.Manager
 	Repo            botpkg.SongRepository
+	RateLimiter     *telegram.RateLimiter
 }
 
 func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -33,11 +35,16 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 		}
 	}
 	if strings.TrimSpace(keyword) == "" {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		params := &bot.SendMessageParams{
 			ChatID:          message.Chat.ID,
 			Text:            inputKeyword,
 			ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.SendMessage(ctx, params)
+		}
 		return
 	}
 
@@ -51,11 +58,16 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 		return
 	}
 	if h.PlatformManager == nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		params := &bot.EditMessageTextParams{
 			ChatID:    msgResult.Chat.ID,
 			MessageID: msgResult.ID,
 			Text:      noResults,
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
@@ -84,20 +96,30 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		params := &bot.EditMessageTextParams{
 			ChatID:    msgResult.Chat.ID,
 			MessageID: msgResult.ID,
 			Text:      noResults,
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
 	if !plat.SupportsSearch() {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		params := &bot.EditMessageTextParams{
 			ChatID:    msgResult.Chat.ID,
 			MessageID: msgResult.ID,
 			Text:      "此平台不支持搜索功能",
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
@@ -125,21 +147,31 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 			} else if errors.Is(err, platform.ErrUnavailable) {
 				errorText = "搜索服务暂时不可用"
 			}
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			params := &bot.EditMessageTextParams{
 				ChatID:    msgResult.Chat.ID,
 				MessageID: msgResult.ID,
 				Text:      errorText,
-			})
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.EditMessageText(ctx, params)
+			}
 			return
 		}
 	}
 
 	if len(tracks) == 0 {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		params := &bot.EditMessageTextParams{
 			ChatID:    msgResult.Chat.ID,
 			MessageID: msgResult.ID,
 			Text:      noResults,
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 		return
 	}
 
@@ -215,12 +247,17 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 
 	keyboard := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{buttons}}
 	disablePreview := true
-	_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+	params := &bot.EditMessageTextParams{
 		ChatID:             msgResult.Chat.ID,
 		MessageID:          msgResult.ID,
 		Text:               textMessage.String(),
 		ParseMode:          models.ParseModeMarkdown,
 		ReplyMarkup:        keyboard,
 		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: &disablePreview},
-	})
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageText(ctx, params)
+	}
 }

@@ -26,15 +26,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		os.Exit(0)
-	}()
-
 	buildInfo := app.BuildInfo{
-		RuntimeVer: fmt.Sprintf(runtime.Version()),
+		RuntimeVer: runtime.Version(),
 		BinVersion: versionName,
 		CommitSHA:  commitSHA,
 		BuildTime:  buildTime,
@@ -43,16 +36,22 @@ func main() {
 
 	application, err := app.New(ctx, *configPath, buildInfo)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Failed to create application: %v\n", err)
+		os.Exit(1)
 	}
 
 	if err := application.Start(ctx); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Failed to start application: %v\n", err)
+		os.Exit(1)
 	}
 
 	<-ctx.Done()
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
-	_ = application.Shutdown(shutdownCtx)
-	os.Exit(0)
+
+	if err := application.Shutdown(shutdownCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "Shutdown error: %v\n", err)
+		os.Exit(1)
+	}
 }

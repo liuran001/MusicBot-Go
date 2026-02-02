@@ -17,6 +17,7 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/download"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 // MusicHandler handles /music and related commands.
@@ -35,9 +36,11 @@ type MusicHandler struct {
 	UploadQueue     chan uploadTask
 	UploadQueueSize int
 	UploadBot       *bot.Bot
+	RateLimiter     *telegram.RateLimiter
 	initOnce        sync.Once
 	queueMu         sync.Mutex
 	queuedStatus    []queuedStatus
+	statusDirty     bool
 }
 
 type uploadTask struct {
@@ -64,6 +67,29 @@ type queuedStatus struct {
 type uploadResult struct {
 	message *models.Message
 	err     error
+}
+
+// StartWorker initializes and starts the upload worker.
+// Must be called once during app startup with a long-lived context.
+func (h *MusicHandler) StartWorker(ctx context.Context) {
+	if h.CacheDir == "" {
+		h.CacheDir = "./cache"
+	}
+	ensureDir(h.CacheDir)
+	if h.Limiter == nil {
+		h.Limiter = make(chan struct{}, 4)
+	}
+	if h.UploadLimiter == nil {
+		h.UploadLimiter = make(chan struct{}, 1)
+	}
+	if h.UploadQueueSize <= 0 {
+		h.UploadQueueSize = 20
+	}
+	if h.UploadQueue == nil {
+		h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
+		go h.runUploadWorker(ctx)
+	}
+	go h.runStatusRefresher(ctx)
 }
 
 // Handle processes music download and send flow.
@@ -109,27 +135,6 @@ func (h *MusicHandler) dispatch(ctx context.Context, b *bot.Bot, message *models
 }
 
 func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *models.Message, platformName, trackID string, qualityOverride string) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-	h.initOnce.Do(func() {
-		if h.CacheDir == "" {
-			h.CacheDir = "./cache"
-		}
-		ensureDir(h.CacheDir)
-		if h.Limiter == nil {
-			h.Limiter = make(chan struct{}, 4)
-		}
-		if h.UploadLimiter == nil {
-			h.UploadLimiter = make(chan struct{}, 1)
-		}
-		if h.UploadQueueSize <= 0 {
-			h.UploadQueueSize = 20
-		}
-		if h.UploadQueue == nil {
-			h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
-			go h.runUploadWorker()
-		}
-	})
 	threadID := 0
 	if message != nil {
 		threadID = message.MessageThreadID
@@ -138,6 +143,23 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 
 	var songInfo botpkg.SongInfo
 	var msgResult *models.Message
+
+	// Request-level cache to avoid duplicate DB queries
+	cacheMap := make(map[string]*botpkg.SongInfo)
+	getCached := func(platform, trackID, quality string) (*botpkg.SongInfo, error) {
+		key := platform + ":" + trackID + ":" + quality
+		if cached, ok := cacheMap[key]; ok {
+			return cached, nil
+		}
+		if h.Repo == nil {
+			return nil, errors.New("repo not configured")
+		}
+		cached, err := h.Repo.FindByPlatformTrackID(ctx, platform, trackID, quality)
+		if err == nil && cached != nil {
+			cacheMap[key] = cached
+		}
+		return cached, err
+	}
 
 	sendFailed := func(err error) {
 		var errText string
@@ -148,7 +170,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		}
 		text := fmt.Sprintf(musicInfoMsg+errText, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
 		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, text)
+			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
 		}
 	}
 
@@ -182,14 +204,14 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	qualityStr := quality.String()
 
 	if h.Repo != nil {
-		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityStr)
+		cached, err := getCached(platformName, trackID, qualityStr)
 		if err == nil && cached != nil {
 			if cached.FileID == "" {
 				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 			} else {
 				songInfo = *cached
 
-				msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -200,20 +222,20 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		}
 	}
 
-	msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, waitForDown)
+	msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, waitForDown)
 
 	h.Limiter <- struct{}{}
 	defer func() { <-h.Limiter }()
 
 	if h.Repo != nil {
-		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityStr)
+		cached, err := getCached(platformName, trackID, qualityStr)
 		if err == nil && cached != nil {
 			if cached.FileID == "" {
 				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 			} else {
 				songInfo = *cached
 				if msgResult != nil {
-					msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -225,7 +247,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfo)
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfo)
 	}
 
 	if h.PlatformManager == nil {
@@ -238,7 +260,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			h.Logger.Error("platform not found", "platform", platformName)
 		}
 		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
+			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return fmt.Errorf("platform not found: %s", platformName)
 	}
@@ -249,7 +271,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
 		}
 		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
+			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return err
 	}
@@ -261,13 +283,13 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
 		}
 		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
+			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return err
 	}
 	if info == nil || info.URL == "" {
 		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
+			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return errors.New("download info unavailable")
 	}
@@ -287,13 +309,13 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	songInfo.BitRate = info.Bitrate * 1000
 
 	if h.Repo != nil && actualQuality != qualityStr {
-		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, actualQuality)
+		cached, err := getCached(platformName, trackID, actualQuality)
 		if err == nil && cached != nil {
 			if cached.FileID == "" {
 				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, actualQuality)
 			} else {
 				songInfo = *cached
-				msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
 					return err
@@ -304,7 +326,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 	}
 
 	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo)
@@ -319,7 +341,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	cleanupList = append(cleanupList, musicPath, picPath)
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 	}
 
 	if err := h.sendMusic(ctx, b, msgResult, message, &songInfo, musicPath, picPath, cleanupList, platformName, trackID); err != nil {
@@ -366,11 +388,16 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 			progressPct = float64(written) * 100 / float64(total)
 		}
 		text := fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		editParams := &bot.EditMessageTextParams{
 			ChatID:    msg.Chat.ID,
 			MessageID: msg.ID,
 			Text:      text,
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, editParams)
+		} else {
+			_, _ = b.EditMessageText(ctx, editParams)
+		}
 	}
 
 	if _, err := h.DownloadService.Download(ctx, info, filePath, progress); err != nil {
@@ -455,16 +482,6 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, statusMsg *mod
 	if h == nil {
 		return errors.New("music handler not configured")
 	}
-	if h.UploadLimiter == nil {
-		h.UploadLimiter = make(chan struct{}, 1)
-	}
-	if h.UploadQueueSize <= 0 {
-		h.UploadQueueSize = 20
-	}
-	if h.UploadQueue == nil {
-		h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
-		go h.runUploadWorker()
-	}
 
 	h.registerQueuedStatus(b, statusMsg, songInfo)
 
@@ -515,7 +532,7 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, statusMsg *mod
 					if result.err != nil {
 						errText = result.err.Error()
 					}
-					statusMessage = editMessageTextOrSend(context.Background(), statusBot, statusMessage, taskMessage.Chat.ID, fmt.Sprintf(musicInfoMsg+uploadFailed, songCopy.SongName, songCopy.SongAlbum, songCopy.FileExt, float64(songCopy.MusicSize)/1024/1024, errText))
+					statusMessage = editMessageTextOrSend(context.Background(), statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, fmt.Sprintf(musicInfoMsg+uploadFailed, songCopy.SongName, songCopy.SongAlbum, songCopy.FileExt, float64(songCopy.MusicSize)/1024/1024, errText))
 				}
 			}
 			cleanupFiles(cleanupCopy...)
@@ -530,46 +547,74 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, statusMsg *mod
 	}
 }
 
-func (h *MusicHandler) runUploadWorker() {
-	for task := range h.UploadQueue {
-		h.dequeueQueuedStatus(task.statusMsg)
-		h.refreshQueuedStatuses()
-		if task.ctx != nil {
-			select {
-			case <-task.ctx.Done():
-				result := uploadResult{err: task.ctx.Err()}
-				if task.onDone != nil {
-					task.onDone(result)
-				}
-				h.removeQueuedStatus(task.statusMsg)
-				h.refreshQueuedStatuses()
-				if task.resultCh != nil {
-					task.resultCh <- result
-				}
-				continue
-			case h.UploadLimiter <- struct{}{}:
+func (h *MusicHandler) runUploadWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task, ok := <-h.UploadQueue:
+			if !ok {
+				return
 			}
-		} else {
-			h.UploadLimiter <- struct{}{}
+			h.processUploadTask(task)
 		}
-		if task.statusMsg != nil && task.statusBot != nil {
-			text := fmt.Sprintf(musicInfoMsg+uploading, task.songInfo.SongName, task.songInfo.SongAlbum, task.songInfo.FileExt, float64(task.songInfo.MusicSize)/1024/1024)
-			updated := editMessageTextOrSend(context.Background(), task.statusBot, task.statusMsg, task.statusMsg.Chat.ID, text)
-			if updated != nil {
-				task.statusMsg = updated
+	}
+}
+
+func (h *MusicHandler) runStatusRefresher(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.queueMu.Lock()
+			if h.statusDirty {
+				h.statusDirty = false
+				h.refreshQueuedStatusesLocked()
 			}
+			h.queueMu.Unlock()
 		}
-		result := uploadResult{}
-		result.message, result.err = h.sendMusicDirect(task.ctx, task.b, task.message, &task.songInfo, task.musicPath, task.picPath)
-		<-h.UploadLimiter
-		if task.onDone != nil {
-			task.onDone(result)
+	}
+}
+
+func (h *MusicHandler) processUploadTask(task uploadTask) {
+	h.dequeueQueuedStatus(task.statusMsg)
+	if task.ctx != nil {
+		select {
+		case <-task.ctx.Done():
+			result := uploadResult{err: task.ctx.Err()}
+			if task.onDone != nil {
+				task.onDone(result)
+			}
+			h.removeQueuedStatus(task.statusMsg)
+			if task.resultCh != nil {
+				task.resultCh <- result
+			}
+			return
+		case h.UploadLimiter <- struct{}{}:
 		}
-		h.removeQueuedStatus(task.statusMsg)
-		h.refreshQueuedStatuses()
-		if task.resultCh != nil {
-			task.resultCh <- result
+	} else {
+		h.UploadLimiter <- struct{}{}
+	}
+	if task.statusMsg != nil && task.statusBot != nil {
+		text := fmt.Sprintf(musicInfoMsg+uploading, task.songInfo.SongName, task.songInfo.SongAlbum, task.songInfo.FileExt, float64(task.songInfo.MusicSize)/1024/1024)
+		updated := editMessageTextOrSend(context.Background(), task.statusBot, h.RateLimiter, task.statusMsg, task.statusMsg.Chat.ID, text)
+		if updated != nil {
+			task.statusMsg = updated
 		}
+	}
+	result := uploadResult{}
+	result.message, result.err = h.sendMusicDirect(task.ctx, task.b, task.message, &task.songInfo, task.musicPath, task.picPath)
+	<-h.UploadLimiter
+	if task.onDone != nil {
+		task.onDone(result)
+	}
+	h.removeQueuedStatus(task.statusMsg)
+	if task.resultCh != nil {
+		task.resultCh <- result
 	}
 }
 
@@ -581,7 +626,7 @@ func (h *MusicHandler) registerQueuedStatus(b *bot.Bot, statusMsg *models.Messag
 	defer h.queueMu.Unlock()
 	entry := queuedStatus{bot: b, message: statusMsg, songInfo: *songInfo}
 	h.queuedStatus = append(h.queuedStatus, entry)
-	h.refreshQueuedStatusesLocked()
+	h.statusDirty = true
 }
 
 func (h *MusicHandler) removeQueuedStatus(statusMsg *models.Message) {
@@ -598,6 +643,7 @@ func (h *MusicHandler) removeQueuedStatus(statusMsg *models.Message) {
 		filtered = append(filtered, entry)
 	}
 	h.queuedStatus = filtered
+	h.statusDirty = true
 }
 
 func (h *MusicHandler) dequeueQueuedStatus(statusMsg *models.Message) {
@@ -616,6 +662,7 @@ func (h *MusicHandler) dequeueQueuedStatus(statusMsg *models.Message) {
 		filtered = append(filtered, entry)
 	}
 	h.queuedStatus = filtered
+	h.statusDirty = true
 }
 
 func (h *MusicHandler) refreshQueuedStatuses() {
@@ -734,7 +781,13 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *bot.Bot, message 
 		}
 	}
 
-	audio, err := b.SendAudio(uploadCtx, params)
+	var audio *models.Message
+	var err error
+	if h.RateLimiter != nil {
+		audio, err = telegram.SendAudioWithRetry(uploadCtx, h.RateLimiter, b, params)
+	} else {
+		audio, err = b.SendAudio(uploadCtx, params)
+	}
 	if err != nil && (strings.Contains(fmt.Sprintf("%v", err), "replied message not found") || strings.Contains(fmt.Sprintf("%v", err), "message to be replied not found")) {
 		params.ReplyParameters = nil
 		if songInfo.FileID == "" {
@@ -748,7 +801,11 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *bot.Bot, message 
 				params.Thumbnail = thumbUpload
 			}
 		}
-		audio, err = b.SendAudio(uploadCtx, params)
+		if h.RateLimiter != nil {
+			audio, err = telegram.SendAudioWithRetry(uploadCtx, h.RateLimiter, b, params)
+		} else {
+			audio, err = b.SendAudio(uploadCtx, params)
+		}
 	}
 	if err != nil && strings.Contains(fmt.Sprintf("%v", err), "file must be non-empty") && songInfo.FileID == "" {
 		params.Thumbnail = nil
@@ -761,7 +818,11 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *bot.Bot, message 
 		}
 		defer file.Close()
 		params.Audio = &models.InputFileUpload{Filename: filepath.Base(musicPath), Data: file}
-		audio, err = b.SendAudio(uploadCtx, params)
+		if h.RateLimiter != nil {
+			audio, err = telegram.SendAudioWithRetry(uploadCtx, h.RateLimiter, b, params)
+		} else {
+			audio, err = b.SendAudio(uploadCtx, params)
+		}
 	}
 	return audio, err
 }
@@ -773,22 +834,32 @@ func buildReplyParams(message *models.Message) *models.ReplyParameters {
 	return &models.ReplyParameters{MessageID: message.ID}
 }
 
-func sendStatusMessage(ctx context.Context, b *bot.Bot, chatID int64, threadID int, replyParams *models.ReplyParameters, text string) (*models.Message, error) {
+func sendStatusMessage(ctx context.Context, b *bot.Bot, rateLimiter *telegram.RateLimiter, chatID int64, threadID int, replyParams *models.ReplyParameters, text string) (*models.Message, error) {
 	params := &bot.SendMessageParams{
 		ChatID:          chatID,
 		MessageThreadID: threadID,
 		Text:            text,
 		ReplyParameters: replyParams,
 	}
-	msg, err := b.SendMessage(ctx, params)
+	var msg *models.Message
+	var err error
+	if rateLimiter != nil {
+		msg, err = telegram.SendMessageWithRetry(ctx, rateLimiter, b, params)
+	} else {
+		msg, err = b.SendMessage(ctx, params)
+	}
 	if err != nil && replyParams != nil && (strings.Contains(fmt.Sprintf("%v", err), "replied message not found") || strings.Contains(fmt.Sprintf("%v", err), "message to be replied not found")) {
 		params.ReplyParameters = nil
-		msg, err = b.SendMessage(ctx, params)
+		if rateLimiter != nil {
+			msg, err = telegram.SendMessageWithRetry(ctx, rateLimiter, b, params)
+		} else {
+			msg, err = b.SendMessage(ctx, params)
+		}
 	}
 	return msg, err
 }
 
-func editMessageTextOrSend(ctx context.Context, b *bot.Bot, msg *models.Message, chatID int64, text string) *models.Message {
+func editMessageTextOrSend(ctx context.Context, b *bot.Bot, rateLimiter *telegram.RateLimiter, msg *models.Message, chatID int64, text string) *models.Message {
 	if msg == nil {
 		return nil
 	}
@@ -797,7 +868,13 @@ func editMessageTextOrSend(ctx context.Context, b *bot.Bot, msg *models.Message,
 		MessageID: msg.ID,
 		Text:      text,
 	}
-	editedMsg, err := b.EditMessageText(ctx, editParams)
+	var editedMsg *models.Message
+	var err error
+	if rateLimiter != nil {
+		editedMsg, err = telegram.EditMessageTextWithRetry(ctx, rateLimiter, b, editParams)
+	} else {
+		editedMsg, err = b.EditMessageText(ctx, editParams)
+	}
 	if err == nil {
 		return editedMsg
 	}
@@ -808,7 +885,12 @@ func editMessageTextOrSend(ctx context.Context, b *bot.Bot, msg *models.Message,
 		ChatID: chatID,
 		Text:   text,
 	}
-	newMsg, err := b.SendMessage(ctx, sendParams)
+	var newMsg *models.Message
+	if rateLimiter != nil {
+		newMsg, err = telegram.SendMessageWithRetry(ctx, rateLimiter, b, sendParams)
+	} else {
+		newMsg, err = b.SendMessage(ctx, sendParams)
+	}
 	if err != nil {
 		return msg
 	}

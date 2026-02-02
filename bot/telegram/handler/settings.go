@@ -9,11 +9,13 @@ import (
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/bot/telegram"
 )
 
 type SettingsHandler struct {
 	Repo            botpkg.SongRepository
 	PlatformManager platform.Manager
+	RateLimiter     *telegram.RateLimiter
 }
 
 func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -28,10 +30,15 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 	var err error
 	if message.Chat.Type != "private" {
 		if !isRequesterOrAdmin(ctx, b, message.Chat.ID, message.From.ID, 0) {
-			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+			params := &bot.SendMessageParams{
 				ChatID: message.Chat.ID,
 				Text:   "❌ 仅管理员可修改群组设置",
-			})
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.SendMessage(ctx, params)
+			}
 			return
 		}
 		groupSettings, err = h.Repo.GetGroupSettings(ctx, message.Chat.ID)
@@ -39,10 +46,15 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 		settings, err = h.Repo.GetUserSettings(ctx, userID)
 	}
 	if err != nil {
-		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+		params := &bot.SendMessageParams{
 			ChatID: message.Chat.ID,
 			Text:   "❌ 获取设置失败，请稍后重试",
-		})
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.SendMessage(ctx, params)
+		}
 		return
 	}
 
@@ -52,11 +64,16 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 	text := h.buildSettingsText(chatType, settings, groupSettings, platforms)
 	keyboard := h.buildSettingsKeyboard(chatType, settings, groupSettings, platforms)
 
-	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+	params := &bot.SendMessageParams{
 		ChatID:      message.Chat.ID,
 		Text:        text,
 		ReplyMarkup: keyboard,
-	})
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.SendMessage(ctx, params)
+	}
 }
 
 func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) string {
@@ -233,6 +250,7 @@ type SettingsCallbackHandler struct {
 	Repo            botpkg.SongRepository
 	PlatformManager platform.Manager
 	SettingsHandler *SettingsHandler
+	RateLimiter     *telegram.RateLimiter
 }
 
 func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -360,12 +378,17 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update
 			text := h.SettingsHandler.buildSettingsText(chatType, settings, groupSettings, platforms)
 			keyboard := h.SettingsHandler.buildSettingsKeyboard(chatType, settings, groupSettings, platforms)
 
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+			params := &bot.EditMessageTextParams{
 				ChatID:      msg.Chat.ID,
 				MessageID:   msg.ID,
 				Text:        text,
 				ReplyMarkup: keyboard,
-			})
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.EditMessageText(ctx, params)
+			}
 		}
 	} else {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
