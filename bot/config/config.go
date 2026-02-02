@@ -56,6 +56,7 @@ func Load(path string) (*Config, error) {
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("BotAPI", "https://api.telegram.org")
 	v.SetDefault("BotDebug", false)
+	v.SetDefault("CacheDir", "./cache")
 	v.SetDefault("DownloadTimeout", 60)
 	v.SetDefault("CheckMD5", true)
 	v.SetDefault("Database", "cache.db")
@@ -64,6 +65,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("EnableMultipartDownload", true)
 	v.SetDefault("MultipartConcurrency", 4)
 	v.SetDefault("MultipartMinSizeMB", 5)
+	v.SetDefault("WorkerPoolSize", 4)
+	v.SetDefault("RecognizePort", 3737)
+	v.SetDefault("RateLimitPerSecond", 1.0)
+	v.SetDefault("RateLimitBurst", 3)
+	v.SetDefault("DownloadConcurrency", 4)
+	v.SetDefault("UploadConcurrency", 1)
+	v.SetDefault("UploadQueueSize", 20)
 }
 
 // GetString returns a string value.
@@ -74,6 +82,11 @@ func (c *Config) GetString(key string) string {
 // GetInt returns an int value.
 func (c *Config) GetInt(key string) int {
 	return c.v.GetInt(key)
+}
+
+// GetFloat64 returns a float64 value.
+func (c *Config) GetFloat64(key string) float64 {
+	return c.v.GetFloat64(key)
 }
 
 // GetBool returns a bool value.
