@@ -23,8 +23,21 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 
 	message := update.Message
 	userID := message.From.ID
-
-	settings, err := h.Repo.GetUserSettings(ctx, userID)
+	var settings *botpkg.UserSettings
+	var groupSettings *botpkg.GroupSettings
+	var err error
+	if message.Chat.Type != "private" {
+		if !isRequesterOrAdmin(ctx, b, message.Chat.ID, message.From.ID, 0) {
+			_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: message.Chat.ID,
+				Text:   "❌ 仅管理员可修改群组设置",
+			})
+			return
+		}
+		groupSettings, err = h.Repo.GetGroupSettings(ctx, message.Chat.ID)
+	} else {
+		settings, err = h.Repo.GetUserSettings(ctx, userID)
+	}
 	if err != nil {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID: message.Chat.ID,
@@ -35,8 +48,9 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 
 	platforms := h.PlatformManager.List()
 
-	text := h.buildSettingsText(settings, platforms)
-	keyboard := h.buildSettingsKeyboard(settings, platforms)
+	chatType := string(message.Chat.Type)
+	text := h.buildSettingsText(chatType, settings, groupSettings, platforms)
+	keyboard := h.buildSettingsKeyboard(chatType, settings, groupSettings, platforms)
 
 	_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      message.Chat.ID,
@@ -45,17 +59,27 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *bot.Bot, update *models
 	})
 }
 
-func (h *SettingsHandler) buildSettingsText(settings *botpkg.UserSettings, platforms []string) string {
+func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("⚙️ 设置中心\n\n")
 
-	platformName := settings.DefaultPlatform
+	platformName := "netease"
+	qualityValue := "hires"
+	if chatType != "private" {
+		if groupSettings != nil {
+			platformName = groupSettings.DefaultPlatform
+			qualityValue = groupSettings.DefaultQuality
+		}
+	} else if settings != nil {
+		platformName = settings.DefaultPlatform
+		qualityValue = settings.DefaultQuality
+	}
 	platformEmoji := h.getPlatformEmoji(platformName)
 	sb.WriteString(fmt.Sprintf("🎵 默认平台: %s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
 
-	qualityEmoji := h.getQualityEmoji(settings.DefaultQuality)
-	sb.WriteString(fmt.Sprintf("🎧 默认音质: %s %s\n\n", qualityEmoji, h.getQualityDisplayName(settings.DefaultQuality)))
+	qualityEmoji := h.getQualityEmoji(qualityValue)
+	sb.WriteString(fmt.Sprintf("🎧 默认音质: %s %s\n\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
 
 	if len(platforms) > 1 {
 		sb.WriteString("💡 可用平台: ")
@@ -72,8 +96,19 @@ func (h *SettingsHandler) buildSettingsText(settings *botpkg.UserSettings, platf
 	return sb.String()
 }
 
-func (h *SettingsHandler) buildSettingsKeyboard(settings *botpkg.UserSettings, platforms []string) *models.InlineKeyboardMarkup {
+func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) *models.InlineKeyboardMarkup {
 	var rows [][]models.InlineKeyboardButton
+	platformValue := "netease"
+	qualityValue := "hires"
+	if chatType != "private" {
+		if groupSettings != nil {
+			platformValue = groupSettings.DefaultPlatform
+			qualityValue = groupSettings.DefaultQuality
+		}
+	} else if settings != nil {
+		platformValue = settings.DefaultPlatform
+		qualityValue = settings.DefaultQuality
+	}
 
 	if len(platforms) > 1 {
 		var platformButtons []models.InlineKeyboardButton
@@ -83,7 +118,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(settings *botpkg.UserSettings, p
 			callbackData := fmt.Sprintf("settings platform %s", p)
 
 			text := fmt.Sprintf("%s %s", emoji, displayName)
-			if p == settings.DefaultPlatform {
+			if p == platformValue {
 				text = "✓ " + text
 			}
 
@@ -104,11 +139,11 @@ func (h *SettingsHandler) buildSettingsKeyboard(settings *botpkg.UserSettings, p
 
 	qualityButtons := []models.InlineKeyboardButton{
 		{
-			Text:         h.formatQualityButton("standard", settings.DefaultQuality == "standard"),
+			Text:         h.formatQualityButton("standard", qualityValue == "standard"),
 			CallbackData: "settings quality standard",
 		},
 		{
-			Text:         h.formatQualityButton("high", settings.DefaultQuality == "high"),
+			Text:         h.formatQualityButton("high", qualityValue == "high"),
 			CallbackData: "settings quality high",
 		},
 	}
@@ -116,11 +151,11 @@ func (h *SettingsHandler) buildSettingsKeyboard(settings *botpkg.UserSettings, p
 
 	qualityButtons2 := []models.InlineKeyboardButton{
 		{
-			Text:         h.formatQualityButton("lossless", settings.DefaultQuality == "lossless"),
+			Text:         h.formatQualityButton("lossless", qualityValue == "lossless"),
 			CallbackData: "settings quality lossless",
 		},
 		{
-			Text:         h.formatQualityButton("hires", settings.DefaultQuality == "hires"),
+			Text:         h.formatQualityButton("hires", qualityValue == "hires"),
 			CallbackData: "settings quality hires",
 		},
 	}
@@ -211,12 +246,28 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update
 	if len(args) < 3 {
 		return
 	}
+	msg := query.Message.Message
 
 	userID := query.From.ID
 	settingType := args[1]
 	settingValue := args[2]
 
-	settings, err := h.Repo.GetUserSettings(ctx, userID)
+	var settings *botpkg.UserSettings
+	var groupSettings *botpkg.GroupSettings
+	var err error
+	if msg != nil && msg.Chat.Type != "private" {
+		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, 0) {
+			_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+				CallbackQueryID: query.ID,
+				Text:            "❌ 仅管理员可修改群组设置",
+				ShowAlert:       true,
+			})
+			return
+		}
+		groupSettings, err = h.Repo.GetGroupSettings(ctx, msg.Chat.ID)
+	} else {
+		settings, err = h.Repo.GetUserSettings(ctx, userID)
+	}
 	if err != nil {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 			CallbackQueryID: query.ID,
@@ -240,10 +291,18 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update
 			}
 		}
 
-		if validPlatform && settings.DefaultPlatform != settingValue {
-			settings.DefaultPlatform = settingValue
-			changed = true
-			responseText = fmt.Sprintf("✅ 已切换到 %s", h.SettingsHandler.getPlatformDisplayName(settingValue))
+		if validPlatform {
+			if msg != nil && msg.Chat.Type != "private" {
+				if groupSettings != nil && groupSettings.DefaultPlatform != settingValue {
+					groupSettings.DefaultPlatform = settingValue
+					changed = true
+					responseText = fmt.Sprintf("✅ 已切换到 %s", h.SettingsHandler.getPlatformDisplayName(settingValue))
+				}
+			} else if settings != nil && settings.DefaultPlatform != settingValue {
+				settings.DefaultPlatform = settingValue
+				changed = true
+				responseText = fmt.Sprintf("✅ 已切换到 %s", h.SettingsHandler.getPlatformDisplayName(settingValue))
+			}
 		}
 
 	case "quality":
@@ -256,15 +315,32 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update
 			}
 		}
 
-		if validQuality && settings.DefaultQuality != settingValue {
-			settings.DefaultQuality = settingValue
-			changed = true
-			responseText = fmt.Sprintf("✅ 音质已设置为 %s", h.SettingsHandler.getQualityDisplayName(settingValue))
+		if validQuality {
+			if msg != nil && msg.Chat.Type != "private" {
+				if groupSettings != nil && groupSettings.DefaultQuality != settingValue {
+					groupSettings.DefaultQuality = settingValue
+					changed = true
+					responseText = fmt.Sprintf("✅ 音质已设置为 %s", h.SettingsHandler.getQualityDisplayName(settingValue))
+				}
+			} else if settings != nil && settings.DefaultQuality != settingValue {
+				settings.DefaultQuality = settingValue
+				changed = true
+				responseText = fmt.Sprintf("✅ 音质已设置为 %s", h.SettingsHandler.getQualityDisplayName(settingValue))
+			}
 		}
 	}
 
 	if changed {
-		if err := h.Repo.UpdateUserSettings(ctx, settings); err != nil {
+		if msg != nil && msg.Chat.Type != "private" {
+			if err := h.Repo.UpdateGroupSettings(ctx, groupSettings); err != nil {
+				_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+					CallbackQueryID: query.ID,
+					Text:            "❌ 保存设置失败",
+					ShowAlert:       true,
+				})
+				return
+			}
+		} else if err := h.Repo.UpdateUserSettings(ctx, settings); err != nil {
 			_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
 				Text:            "❌ 保存设置失败",
@@ -278,11 +354,11 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update
 			Text:            responseText,
 		})
 
-		msg := query.Message.Message
 		if msg != nil {
 			platforms := h.PlatformManager.List()
-			text := h.SettingsHandler.buildSettingsText(settings, platforms)
-			keyboard := h.SettingsHandler.buildSettingsKeyboard(settings, platforms)
+			chatType := string(msg.Chat.Type)
+			text := h.SettingsHandler.buildSettingsText(chatType, settings, groupSettings, platforms)
+			keyboard := h.SettingsHandler.buildSettingsKeyboard(chatType, settings, groupSettings, platforms)
 
 			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 				ChatID:      msg.Chat.ID,

@@ -68,6 +68,12 @@ func extractPlatformTrack(message *models.Message, manager platform.Manager) (pl
 	args := commandArguments(message.Text)
 	if args != "" {
 		text = args
+		fields := strings.Fields(args)
+		if len(fields) >= 3 {
+			if _, err := platform.ParseQuality(fields[2]); err == nil {
+				return fields[0], fields[1], true
+			}
+		}
 	}
 
 	text = getRedirectUrl(text)
@@ -183,6 +189,24 @@ func getRedirectUrl(text string) string {
 		}
 	}
 	return text
+}
+
+func extractQualityOverride(message *models.Message) string {
+	if message == nil || message.Text == "" {
+		return ""
+	}
+	args := commandArguments(message.Text)
+	if args == "" {
+		return ""
+	}
+	fields := strings.Fields(args)
+	if len(fields) < 3 {
+		return ""
+	}
+	if _, err := platform.ParseQuality(fields[2]); err == nil {
+		return fields[2]
+	}
+	return ""
 }
 
 func commandArguments(text string) string {

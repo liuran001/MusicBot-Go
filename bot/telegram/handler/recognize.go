@@ -135,7 +135,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *bot.Bot, update *model
 
 	if h.Music != nil {
 		// Recognition currently returns NetEase musicID
-		_ = h.Music.processMusic(ctx, b, message.ReplyToMessage, "netease", fmt.Sprintf("%d", musicID))
+		h.Music.dispatch(ctx, b, message.ReplyToMessage, "netease", fmt.Sprintf("%d", musicID), "")
 	}
 }
 

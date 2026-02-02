@@ -27,17 +27,17 @@ type Router struct {
 
 // Register registers all handlers to the bot.
 func (r *Router) Register(b *bot.Bot, botName string) {
-	b.RegisterHandler(bot.HandlerTypeMessageText, "start", bot.MatchTypeCommand, r.wrapMessage(r.Music))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "music", bot.MatchTypeCommand, r.wrapMessage(r.Music))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "netease", bot.MatchTypeCommand, r.wrapMessage(r.Music))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "program", bot.MatchTypeCommand, r.wrapMessage(r.Music))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "search", bot.MatchTypeCommand, r.wrapMessage(r.Search))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "lyric", bot.MatchTypeCommand, r.wrapMessage(r.Lyric))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "recognize", bot.MatchTypeCommand, r.wrapMessage(r.Recognize))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "about", bot.MatchTypeCommand, r.wrapMessage(r.About))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "status", bot.MatchTypeCommand, r.wrapMessage(r.Status))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "settings", bot.MatchTypeCommand, r.wrapMessage(r.Settings))
-	b.RegisterHandler(bot.HandlerTypeMessageText, "rmcache", bot.MatchTypeCommand, r.wrapMessage(r.RmCache))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "start"), r.wrapMessage(r.Music))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "music"), r.wrapMessage(r.Music))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "netease"), r.wrapMessage(r.Music))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "program"), r.wrapMessage(r.Music))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "search"), r.wrapMessage(r.Search))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "lyric"), r.wrapMessage(r.Lyric))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "recognize"), r.wrapMessage(r.Recognize))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "about"), r.wrapMessage(r.About))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "status"), r.wrapMessage(r.Status))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "settings"), r.wrapMessage(r.Settings))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "rmcache"), r.wrapMessage(r.RmCache))
 
 	b.RegisterHandlerMatchFunc(func(update *models.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {
@@ -125,4 +125,25 @@ func isCommandMessage(message *models.Message) bool {
 		}
 	}
 	return false
+}
+
+func matchCommandFunc(botName, cmd string) func(update *models.Update) bool {
+	return func(update *models.Update) bool {
+		if update.Message == nil || update.Message.Text == "" {
+			return false
+		}
+		text := strings.TrimSpace(update.Message.Text)
+		if !strings.HasPrefix(text, "/") {
+			return false
+		}
+		parts := strings.SplitN(text, " ", 2)
+		command := strings.TrimPrefix(parts[0], "/")
+		if command == cmd {
+			return true
+		}
+		if botName != "" && command == cmd+"@"+botName {
+			return true
+		}
+		return false
+	}
 }

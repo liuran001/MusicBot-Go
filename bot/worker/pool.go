@@ -24,8 +24,13 @@ func New(size int) *Pool {
 		size = 1
 	}
 
+	queueSize := size * 8
+	if queueSize < 8 {
+		queueSize = 8
+	}
+
 	p := &Pool{
-		tasks:    make(chan func()),
+		tasks:    make(chan func(), queueSize),
 		shutdown: make(chan struct{}),
 		size:     size,
 	}
@@ -101,6 +106,17 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 	case <-done:
 		return nil
 	}
+}
+
+// StopNow closes the pool without waiting for tasks to finish.
+func (p *Pool) StopNow() {
+	p.mu.Lock()
+	if !p.closed {
+		p.closed = true
+		close(p.shutdown)
+		close(p.tasks)
+	}
+	p.mu.Unlock()
 }
 
 // Size returns the worker count.

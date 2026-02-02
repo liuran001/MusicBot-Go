@@ -28,7 +28,9 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 	replyParams := buildReplyParams(message)
 	keyword := commandArguments(message.Text)
 	if keyword == "" && message.Chat.Type == "private" {
-		keyword = message.Text
+		if !strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
+			keyword = message.Text
+		}
 	}
 	if strings.TrimSpace(keyword) == "" {
 		_, _ = b.SendMessage(ctx, &bot.SendMessageParams{
@@ -59,11 +61,22 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 
 	// Get user's default platform from settings
 	platformName := "netease" // fallback default
+	if h.Repo != nil {
+		if message.Chat.Type != "private" {
+			if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+				platformName = settings.DefaultPlatform
+			}
+		}
+	}
 	var userID int64
 	if message.From != nil {
 		userID = message.From.ID
 		if h.Repo != nil {
-			if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
+			if message.Chat.Type == "private" {
+				if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
+					platformName = settings.DefaultPlatform
+				}
+			} else if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
 				platformName = settings.DefaultPlatform
 			}
 		}
@@ -181,7 +194,19 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 
 		textMessage.WriteString(fmt.Sprintf("%d\\. 「%s」 \\- %s\n", i+1, trackLink, songArtists))
 
-		callbackData := fmt.Sprintf("music %s %s %d", platformName, track.ID, requesterID)
+		qualityValue := "hires"
+		if h.Repo != nil {
+			if message.Chat.Type != "private" {
+				if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+					qualityValue = settings.DefaultQuality
+				}
+			} else if userID != 0 {
+				if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
+					qualityValue = settings.DefaultQuality
+				}
+			}
+		}
+		callbackData := fmt.Sprintf("music %s %s %s %d", platformName, track.ID, qualityValue, requesterID)
 		buttons = append(buttons, models.InlineKeyboardButton{
 			Text:         fmt.Sprintf("%d", i+1),
 			CallbackData: callbackData,

@@ -35,6 +35,8 @@ type SongRepository interface {
 	Last(ctx context.Context) (*SongInfo, error)
 	GetUserSettings(ctx context.Context, userID int64) (*UserSettings, error)
 	UpdateUserSettings(ctx context.Context, settings *UserSettings) error
+	GetGroupSettings(ctx context.Context, chatID int64) (*GroupSettings, error)
+	UpdateGroupSettings(ctx context.Context, settings *GroupSettings) error
 }
 
 // NeteaseClient defines the NetEase API operations used by the bot.

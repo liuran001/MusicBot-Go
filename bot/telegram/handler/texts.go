@@ -42,7 +42,7 @@ via @%s`
 	getUrlFailed     = "获取歌曲下载链接失败"
 	downloading      = "下载中..."
 	redownloading    = "下载失败，尝试重新下载中..."
-	uploading        = "下载完成, 发送中..."
+	uploading        = "下载完成, 发送中...（若文件较大可能需要更久）"
 	downloadStatus   = " %s\n%.2fMB/%.2fMB %d%%"
 	md5VerFailed     = "MD5校验失败"
 	retryLater       = "请稍后重试"

@@ -326,6 +326,7 @@ func (n *NeteasePlatform) convertSearchSongToTrack(song struct {
 			ID:       strconv.Itoa(song.Album.Id),
 			Platform: "netease",
 			Title:    song.Album.Name,
+			CoverURL: fmt.Sprintf("https://p4.music.126.net/%d/%d.jpg", song.Album.PicId, song.Album.PicId),
 			Artists:  artists,
 		}
 

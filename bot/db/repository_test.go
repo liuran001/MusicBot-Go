@@ -28,6 +28,7 @@ func TestRepositoryCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
+	repo.SetDefaults("netease", "hires")
 
 	ctx := context.Background()
 	count, err := repo.Count(ctx)
@@ -82,6 +83,22 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 	if loaded.SongName != "Song Updated" {
 		t.Fatalf("update not persisted")
+	}
+
+	userSettings, err := repo.GetUserSettings(ctx, 123)
+	if err != nil {
+		t.Fatalf("get user settings: %v", err)
+	}
+	if userSettings.DefaultQuality != "hires" {
+		t.Fatalf("unexpected default user quality: %s", userSettings.DefaultQuality)
+	}
+
+	groupSettings, err := repo.GetGroupSettings(ctx, -1001)
+	if err != nil {
+		t.Fatalf("get group settings: %v", err)
+	}
+	if groupSettings.DefaultQuality != "hires" {
+		t.Fatalf("unexpected default group quality: %s", groupSettings.DefaultQuality)
 	}
 
 	if err := repo.Delete(ctx, 1); err != nil {

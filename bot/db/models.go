@@ -124,9 +124,21 @@ type UserSettingsModel struct {
 	gorm.Model
 	UserID          int64  `gorm:"uniqueIndex;not null"`
 	DefaultPlatform string `gorm:"not null;default:'netease'"`
-	DefaultQuality  string `gorm:"not null;default:'high'"`
+	DefaultQuality  string `gorm:"not null;default:'hires'"`
 }
 
 func (UserSettingsModel) TableName() string {
 	return "user_settings"
+}
+
+// GroupSettingsModel stores group preferences for the bot.
+type GroupSettingsModel struct {
+	gorm.Model
+	ChatID          int64  `gorm:"uniqueIndex;not null"`
+	DefaultPlatform string `gorm:"not null;default:'netease'"`
+	DefaultQuality  string `gorm:"not null;default:'hires'"`
+}
+
+func (GroupSettingsModel) TableName() string {
+	return "group_settings"
 }

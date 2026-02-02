@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -14,6 +15,7 @@ import (
 // Bot wraps go-telegram/bot with application configuration.
 type Bot struct {
 	client *bot.Bot
+	upload *bot.Bot
 	config *config.Config
 	logger botpkg.Logger
 }
@@ -27,8 +29,35 @@ func New(cfg *config.Config, logger botpkg.Logger) (*Bot, error) {
 		return nil, fmt.Errorf("logger required")
 	}
 
+	pollTransport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       50,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	uploadTransport := &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       50,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	pollClient := &http.Client{
+		Timeout:   2 * time.Minute,
+		Transport: pollTransport,
+	}
+	uploadClient := &http.Client{
+		Timeout:   15 * time.Minute,
+		Transport: uploadTransport,
+	}
+
 	options := []bot.Option{
 		bot.WithWorkers(4),
+		bot.WithHTTPClient(time.Minute, pollClient),
+		bot.WithSkipGetMe(),
 		bot.WithErrorsHandler(func(err error) {
 			logger.Error("telegram error", "error", err)
 		}),
@@ -50,8 +79,27 @@ func New(cfg *config.Config, logger botpkg.Logger) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
+	uploadOptions := []bot.Option{
+		bot.WithHTTPClient(time.Minute, uploadClient),
+		bot.WithSkipGetMe(),
+		bot.WithErrorsHandler(func(err error) {
+			logger.Error("telegram upload error", "error", err)
+		}),
+		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
+			_ = ctx
+			_ = b
+			_ = update
+		}),
+	}
+	if cfg.GetString("BotAPI") != "" {
+		uploadOptions = append(uploadOptions, bot.WithServerURL(cfg.GetString("BotAPI")))
+	}
+	upload, err := bot.New(cfg.GetString("BOT_TOKEN"), uploadOptions...)
+	if err != nil {
+		return nil, err
+	}
 
-	return &Bot{client: client, config: cfg, logger: logger}, nil
+	return &Bot{client: client, upload: upload, config: cfg, logger: logger}, nil
 }
 
 // Start begins polling updates and blocks until context is canceled.
@@ -61,6 +109,14 @@ func (b *Bot) Start(ctx context.Context) {
 
 // Client exposes the underlying bot client.
 func (b *Bot) Client() *bot.Bot {
+	return b.client
+}
+
+// UploadClient exposes a dedicated client for uploads.
+func (b *Bot) UploadClient() *bot.Bot {
+	if b.upload != nil {
+		return b.upload
+	}
 	return b.client
 }
 

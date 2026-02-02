@@ -58,3 +58,14 @@ type UserSettings struct {
 	DefaultPlatform string
 	DefaultQuality  string
 }
+
+// GroupSettings represents group-level preferences for the bot.
+type GroupSettings struct {
+	ID              uint
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+	ChatID          int64
+	DefaultPlatform string
+	DefaultQuality  string
+}

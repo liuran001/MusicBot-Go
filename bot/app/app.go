@@ -65,6 +65,7 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 	if err != nil {
 		return nil, fmt.Errorf("init db: %w", err)
 	}
+	repo.SetDefaults("netease", conf.GetString("DefaultQuality"))
 
 	pool := worker.New(4)
 
@@ -97,9 +98,13 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 
 // Start initializes background services. Telegram startup is added in later waves.
 func (a *App) Start(ctx context.Context) error {
-	me, err := a.Telegram.GetMe(ctx)
+	meCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	me, err := a.Telegram.GetMe(meCtx)
 	if err != nil {
-		return err
+		if a.Logger != nil {
+			a.Logger.Error("getMe failed", "error", err)
+		}
 	}
 	botName := ""
 	if me != nil {
@@ -128,6 +133,8 @@ func (a *App) Start(ctx context.Context) error {
 		DownloadService: downloadService,
 		ID3Service:      id3Service,
 		TagProviders:    tagProviders,
+		UploadQueueSize: 20,
+		UploadBot:       a.Telegram.UploadClient(),
 	}
 
 	settingsHandler := &handler.SettingsHandler{
@@ -171,7 +178,11 @@ func (a *App) Start(ctx context.Context) error {
 // Shutdown releases resources.
 func (a *App) Shutdown(ctx context.Context) error {
 	if a.Pool != nil {
-		return a.Pool.Shutdown(ctx)
+		if err := a.Pool.Shutdown(ctx); err != nil {
+			a.Pool.StopNow()
+			return err
+		}
+		return nil
 	}
 	return nil
 }

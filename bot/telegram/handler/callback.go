@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
 // CallbackMusicHandler handles callback queries for music buttons.
@@ -25,13 +26,20 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *bot.Bot, update *m
 		return
 	}
 
-	// Parse callback data: "music <platform> <trackID> <requesterID>" (new format)
+	// Parse callback data: "music <platform> <trackID> <quality> <requesterID>" (new format)
 	// OR "music <musicID> <requesterID>" (old format for backward compatibility)
 	var platformName string
 	var trackID string
 	var requesterID int64
+	var qualityOverride string
 
-	if len(args) >= 4 {
+	if len(args) >= 5 {
+		// New format: music <platform> <trackID> <quality> <requesterID>
+		platformName = args[1]
+		trackID = args[2]
+		qualityOverride = args[3]
+		requesterID, _ = strconv.ParseInt(args[4], 10, 64)
+	} else if len(args) >= 4 {
 		// New format: music <platform> <trackID> <requesterID>
 		platformName = args[1]
 		trackID = args[2]
@@ -55,6 +63,11 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *bot.Bot, update *m
 		platformName = "netease"
 		trackID = args[1]
 	}
+	if qualityOverride != "" {
+		if _, err := platform.ParseQuality(qualityOverride); err != nil {
+			qualityOverride = ""
+		}
+	}
 
 	msg := query.Message.Message
 	if msg == nil {
@@ -62,10 +75,15 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *bot.Bot, update *m
 	}
 	chatType := msg.Chat.Type
 
+	msgToUse := msg
+	if msg.ReplyToMessage != nil {
+		msgToUse = msg.ReplyToMessage
+	}
+
 	if chatType == "private" {
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		if h.Music != nil {
-			_ = h.Music.processMusic(ctx, b, msg, platformName, trackID)
+			h.Music.dispatch(ctx, b, msgToUse, platformName, trackID, qualityOverride)
 		}
 		return
 	}
@@ -80,10 +98,10 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *bot.Bot, update *m
 	}
 
 	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
-	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msg.Chat.ID, MessageID: msg.ID})
 	if h.Music != nil {
-		_ = h.Music.processMusic(ctx, b, msg, platformName, trackID)
+		h.Music.dispatch(ctx, b, msgToUse, platformName, trackID, qualityOverride)
 	}
+	_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msg.Chat.ID, MessageID: msg.ID})
 }
 
 func isRequesterOrAdmin(ctx context.Context, b *bot.Bot, chatID int64, userID int64, requesterID int64) bool {

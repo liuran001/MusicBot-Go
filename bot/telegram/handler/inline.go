@@ -146,6 +146,15 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *bot.Bot, quer
 	}
 
 	platformName := "netease"
+	qualityValue := "hires"
+	if h.Repo != nil {
+		if settings, err := h.Repo.GetUserSettings(ctx, query.From.ID); err == nil && settings != nil {
+			platformName = settings.DefaultPlatform
+			if strings.TrimSpace(settings.DefaultQuality) != "" {
+				qualityValue = settings.DefaultQuality
+			}
+		}
+	}
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
 		return
@@ -181,7 +190,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *bot.Bot, quer
 			ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()+int64(i)),
 			Title:               track.Title,
 			Description:         artistsStr,
-			InputMessageContent: &models.InputTextMessageContent{MessageText: fmt.Sprintf("/netease %s", track.ID)},
+			InputMessageContent: &models.InputTextMessageContent{MessageText: fmt.Sprintf("/%s %s %s", platformName, track.ID, qualityValue)},
 		}
 		inlineMsgs = append(inlineMsgs, inlineMsg)
 	}

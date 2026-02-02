@@ -60,6 +60,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("CheckMD5", true)
 	v.SetDefault("Database", "cache.db")
 	v.SetDefault("LogLevel", "info")
+	v.SetDefault("DefaultQuality", "hires")
 }
 
 // GetString returns a string value.

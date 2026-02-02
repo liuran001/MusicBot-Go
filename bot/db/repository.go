@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -15,7 +16,9 @@ import (
 
 // Repository provides access to the song cache database.
 type Repository struct {
-	db *gorm.DB
+	db              *gorm.DB
+	defaultPlatform string
+	defaultQuality  string
 }
 
 // NewSQLiteRepository creates a repository backed by SQLite.
@@ -55,6 +58,9 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	if err := db.AutoMigrate(&SongInfoModel{}, &UserSettingsModel{}); err != nil {
 		return nil, err
 	}
+	if err := db.AutoMigrate(&GroupSettingsModel{}); err != nil {
+		return nil, err
+	}
 
 	if err := migrateToMultiPlatform(db); err != nil {
 		return nil, err
@@ -68,7 +74,24 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	return &Repository{db: db}, nil
+	return &Repository{
+		db:              db,
+		defaultPlatform: "netease",
+		defaultQuality:  "hires",
+	}, nil
+}
+
+// SetDefaults sets repository defaults for new settings records.
+func (r *Repository) SetDefaults(defaultPlatform, defaultQuality string) {
+	if r == nil {
+		return
+	}
+	if strings.TrimSpace(defaultPlatform) != "" {
+		r.defaultPlatform = defaultPlatform
+	}
+	if strings.TrimSpace(defaultQuality) != "" {
+		r.defaultQuality = defaultQuality
+	}
 }
 
 func migrateToMultiPlatform(db *gorm.DB) error {
@@ -250,8 +273,8 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 	if err == gorm.ErrRecordNotFound {
 		settings = UserSettingsModel{
 			UserID:          userID,
-			DefaultPlatform: "netease",
-			DefaultQuality:  "high",
+			DefaultPlatform: r.defaultPlatform,
+			DefaultQuality:  r.defaultQuality,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
 			return nil, createErr
@@ -288,6 +311,51 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 	}, nil
 }
 
+// GetGroupSettings retrieves settings for a group, creating default if not exists.
+func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.GroupSettings, error) {
+	var settings GroupSettingsModel
+	err := r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
+	if err == gorm.ErrRecordNotFound {
+		settings = GroupSettingsModel{
+			ChatID:          chatID,
+			DefaultPlatform: r.defaultPlatform,
+			DefaultQuality:  r.defaultQuality,
+		}
+		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
+			return nil, createErr
+		}
+		var deletedAt *time.Time
+		if settings.DeletedAt.Valid {
+			deletedAt = &settings.DeletedAt.Time
+		}
+		return &bot.GroupSettings{
+			ID:              settings.ID,
+			CreatedAt:       settings.CreatedAt,
+			UpdatedAt:       settings.UpdatedAt,
+			DeletedAt:       deletedAt,
+			ChatID:          settings.ChatID,
+			DefaultPlatform: settings.DefaultPlatform,
+			DefaultQuality:  settings.DefaultQuality,
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var deletedAt *time.Time
+	if settings.DeletedAt.Valid {
+		deletedAt = &settings.DeletedAt.Time
+	}
+	return &bot.GroupSettings{
+		ID:              settings.ID,
+		CreatedAt:       settings.CreatedAt,
+		UpdatedAt:       settings.UpdatedAt,
+		DeletedAt:       deletedAt,
+		ChatID:          settings.ChatID,
+		DefaultPlatform: settings.DefaultPlatform,
+		DefaultQuality:  settings.DefaultQuality,
+	}, nil
+}
+
 // UpdateUserSettings updates user settings.
 func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserSettings) error {
 	model := UserSettingsModel{
@@ -297,6 +365,24 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 			UpdatedAt: settings.UpdatedAt,
 		},
 		UserID:          settings.UserID,
+		DefaultPlatform: settings.DefaultPlatform,
+		DefaultQuality:  settings.DefaultQuality,
+	}
+	if settings.DeletedAt != nil {
+		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
+	}
+	return r.db.WithContext(ctx).Save(&model).Error
+}
+
+// UpdateGroupSettings updates group settings.
+func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.GroupSettings) error {
+	model := GroupSettingsModel{
+		Model: gorm.Model{
+			ID:        settings.ID,
+			CreatedAt: settings.CreatedAt,
+			UpdatedAt: settings.UpdatedAt,
+		},
+		ChatID:          settings.ChatID,
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
 	}

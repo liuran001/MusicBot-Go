@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-telegram/bot"
@@ -30,6 +31,38 @@ type MusicHandler struct {
 	CacheDir        string
 	BotName         string
 	Limiter         chan struct{}
+	UploadLimiter   chan struct{}
+	UploadQueue     chan uploadTask
+	UploadQueueSize int
+	UploadBot       *bot.Bot
+	queueMu         sync.Mutex
+	queuedStatus    []queuedStatus
+}
+
+type uploadTask struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	b         *bot.Bot
+	statusBot *bot.Bot
+	statusMsg *models.Message
+	message   *models.Message
+	songInfo  botpkg.SongInfo
+	musicPath string
+	picPath   string
+	cleanup   []string
+	resultCh  chan uploadResult
+	onDone    func(uploadResult)
+}
+
+type queuedStatus struct {
+	bot      *bot.Bot
+	message  *models.Message
+	songInfo botpkg.SongInfo
+}
+
+type uploadResult struct {
+	message *models.Message
+	err     error
 }
 
 // Handle processes music download and send flow.
@@ -43,12 +76,39 @@ func (h *MusicHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Up
 	if !found {
 		return
 	}
+	qualityOverride := extractQualityOverride(message)
 
-	_ = h.processMusic(ctx, b, message, platformName, trackID)
+	h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
 }
 
-func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *models.Message, platformName, trackID string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+func (h *MusicHandler) dispatch(ctx context.Context, b *bot.Bot, message *models.Message, platformName, trackID string, qualityOverride string) {
+	if h.Pool == nil {
+		go func() {
+			_ = h.processMusic(ctx, b, message, platformName, trackID, qualityOverride)
+		}()
+		return
+	}
+
+	go func() {
+		if err := h.Pool.Submit(func() {
+			defer func() {
+				if err := recover(); err != nil {
+					if h.Logger != nil {
+						h.Logger.Error("music task panic", "platform", platformName, "trackID", trackID, "error", err)
+					}
+				}
+			}()
+			_ = h.processMusic(ctx, b, message, platformName, trackID, qualityOverride)
+		}); err != nil {
+			if h.Logger != nil {
+				h.Logger.Error("failed to enqueue music task", "platform", platformName, "trackID", trackID, "error", err)
+			}
+		}
+	}()
+}
+
+func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *models.Message, platformName, trackID string, qualityOverride string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
 	if h.CacheDir == "" {
@@ -64,6 +124,16 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	if h.Limiter == nil {
 		h.Limiter = make(chan struct{}, 4)
 	}
+	if h.UploadLimiter == nil {
+		h.UploadLimiter = make(chan struct{}, 1)
+	}
+	if h.UploadQueueSize <= 0 {
+		h.UploadQueueSize = 20
+	}
+	if h.UploadQueue == nil {
+		h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
+		go h.runUploadWorker()
+	}
 
 	var songInfo botpkg.SongInfo
 	var msgResult *models.Message
@@ -77,11 +147,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		}
 		text := fmt.Sprintf(musicInfoMsg+errText, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
 		if msgResult != nil {
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:    msgResult.Chat.ID,
-				MessageID: msgResult.ID,
-				Text:      text,
-			})
+			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, text)
 		}
 	}
 
@@ -91,11 +157,24 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	quality := platform.QualityHigh
-	if h.Repo != nil && userID != 0 {
-		if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
-			if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
-				quality = q
+	if h.Repo != nil {
+		if message != nil && message.Chat.Type != "private" {
+			if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
+					quality = q
+				}
 			}
+		} else if userID != 0 {
+			if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
+				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
+					quality = q
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(qualityOverride) != "" {
+		if q, err := platform.ParseQuality(qualityOverride); err == nil {
+			quality = q
 		}
 	}
 
@@ -104,18 +183,19 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	if h.Repo != nil {
 		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 		if err == nil && cached != nil {
-			songInfo = *cached
+			if cached.FileID == "" {
+				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
+			} else {
+				songInfo = *cached
 
-			msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 
-			if _, err = h.sendMusic(ctx, b, message, &songInfo, "", ""); err != nil {
-				sendFailed(err)
-				return err
+				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
+					sendFailed(err)
+					return err
+				}
+				return nil
 			}
-			if msgResult != nil {
-				_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID})
-			}
-			return nil
 		}
 	}
 
@@ -127,31 +207,24 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	if h.Repo != nil {
 		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 		if err == nil && cached != nil {
-			songInfo = *cached
-			if msgResult != nil {
-				_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-					ChatID:    msgResult.Chat.ID,
-					MessageID: msgResult.ID,
-					Text:      fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024),
-				})
+			if cached.FileID == "" {
+				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
+			} else {
+				songInfo = *cached
+				if msgResult != nil {
+					msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				}
+				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
+					sendFailed(err)
+					return err
+				}
+				return nil
 			}
-			if _, err = h.sendMusic(ctx, b, message, &songInfo, "", ""); err != nil {
-				sendFailed(err)
-				return err
-			}
-			if msgResult != nil {
-				_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID})
-			}
-			return nil
 		}
 	}
 
 	if msgResult != nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-			ChatID:    msgResult.Chat.ID,
-			MessageID: msgResult.ID,
-			Text:      fetchInfo,
-		})
+		msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfo)
 	}
 
 	if h.PlatformManager == nil {
@@ -164,11 +237,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			h.Logger.Error("platform not found", "platform", platformName)
 		}
 		if msgResult != nil {
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:    msgResult.Chat.ID,
-				MessageID: msgResult.ID,
-				Text:      fetchInfoFailed,
-			})
+			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return fmt.Errorf("platform not found: %s", platformName)
 	}
@@ -179,11 +248,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
 		}
 		if msgResult != nil {
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:    msgResult.Chat.ID,
-				MessageID: msgResult.ID,
-				Text:      fetchInfoFailed,
-			})
+			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return err
 	}
@@ -195,21 +260,13 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
 		}
 		if msgResult != nil {
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:    msgResult.Chat.ID,
-				MessageID: msgResult.ID,
-				Text:      fetchInfoFailed,
-			})
+			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return err
 	}
 	if info == nil || info.URL == "" {
 		if msgResult != nil {
-			_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-				ChatID:    msgResult.Chat.ID,
-				MessageID: msgResult.ID,
-				Text:      fetchInfoFailed,
-			})
+			msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fetchInfoFailed)
 		}
 		return errors.New("download info unavailable")
 	}
@@ -231,25 +288,22 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	if h.Repo != nil && actualQuality != qualityStr {
 		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, actualQuality)
 		if err == nil && cached != nil {
-			songInfo = *cached
-			msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
-			if _, err = h.sendMusic(ctx, b, message, &songInfo, "", ""); err != nil {
-				sendFailed(err)
-				return err
+			if cached.FileID == "" {
+				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, actualQuality)
+			} else {
+				songInfo = *cached
+				msgResult, _ = sendStatusMessage(ctx, b, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
+					sendFailed(err)
+					return err
+				}
+				return nil
 			}
-			if msgResult != nil {
-				_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID})
-			}
-			return nil
 		}
 	}
 
 	if msgResult != nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-			ChatID:    msgResult.Chat.ID,
-			MessageID: msgResult.ID,
-			Text:      fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024),
-		})
+		msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 	}
 
 	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo)
@@ -261,39 +315,16 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		sendFailed(err)
 		return err
 	}
-	defer cleanupFiles(append(cleanupList, musicPath, picPath)...)
+	cleanupList = append(cleanupList, musicPath, picPath)
 
 	if msgResult != nil {
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-			ChatID:    msgResult.Chat.ID,
-			MessageID: msgResult.ID,
-			Text:      fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024),
-		})
+		msgResult = editMessageTextOrSend(ctx, b, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
 	}
 
-	audio, err := h.sendMusic(ctx, b, message, &songInfo, musicPath, picPath)
-	if err != nil {
+	if err := h.sendMusic(ctx, b, msgResult, message, &songInfo, musicPath, picPath, cleanupList, platformName, trackID); err != nil {
+		cleanupFiles(cleanupList...)
 		sendFailed(err)
 		return err
-	}
-
-	if audio.Audio != nil {
-		songInfo.FileID = audio.Audio.FileID
-		if audio.Audio.Thumbnail != nil {
-			songInfo.ThumbFileID = audio.Audio.Thumbnail.FileID
-		}
-	}
-
-	if h.Repo != nil {
-		if err := h.Repo.Create(ctx, &songInfo); err != nil {
-			if h.Logger != nil {
-				h.Logger.Error("failed to save song info", "platform", platformName, "trackID", trackID, "error", err)
-			}
-		}
-	}
-
-	if msgResult != nil {
-		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: msgResult.Chat.ID, MessageID: msgResult.ID})
 	}
 
 	return nil
@@ -356,13 +387,16 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	if coverURL != "" {
 		picPath = filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(coverURL)))
 		if _, err := h.DownloadService.Download(ctx, &platform.DownloadInfo{URL: coverURL}, picPath, nil); err == nil {
-			if stat, statErr := os.Stat(picPath); statErr == nil {
+			if stat, statErr := os.Stat(picPath); statErr == nil && stat.Size() > 0 {
 				songInfo.PicSize = int(stat.Size())
 				cleanupList = append(cleanupList, picPath)
 				if resized, err := resizeImg(picPath); err == nil {
 					resizePicPath = resized
 					cleanupList = append(cleanupList, resizePicPath)
 				}
+			} else {
+				_ = os.Remove(picPath)
+				picPath = ""
 			}
 		} else {
 			picPath = ""
@@ -381,10 +415,10 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 			} else {
 				songInfo.EmbPicSize = int(stat.Size())
 			}
-			if stat.Size() > 200*1024 && resizePicPath != "" {
-				thumbPicPath = resizePicPath
-			}
 		}
+	}
+	if resizePicPath != "" {
+		thumbPicPath = resizePicPath
 	}
 
 	finalDir := filepath.Join(h.CacheDir, fmt.Sprintf("%d", stamp))
@@ -416,26 +450,259 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	return filePath, thumbPicPath, cleanupList, nil
 }
 
-func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo, musicPath, picPath string) (*models.Message, error) {
+func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, statusMsg *models.Message, message *models.Message, songInfo *botpkg.SongInfo, musicPath, picPath string, cleanup []string, platformName, trackID string) error {
+	if h == nil {
+		return errors.New("music handler not configured")
+	}
+	if h.UploadLimiter == nil {
+		h.UploadLimiter = make(chan struct{}, 1)
+	}
+	if h.UploadQueueSize <= 0 {
+		h.UploadQueueSize = 20
+	}
+	if h.UploadQueue == nil {
+		h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
+		go h.runUploadWorker()
+	}
+
+	h.registerQueuedStatus(b, statusMsg, songInfo)
+
+	resultCh := make(chan uploadResult, 1)
+	uploadCtx, cancel := context.WithCancel(context.Background())
+	uploadBot := b
+	if h.UploadBot != nil {
+		uploadBot = h.UploadBot
+	}
+	statusBot := b
+	songCopy := *songInfo
+	cleanupCopy := append([]string(nil), cleanup...)
+	taskMessage := message
+	statusMessage := statusMsg
+	task := uploadTask{
+		ctx:       uploadCtx,
+		cancel:    cancel,
+		b:         uploadBot,
+		statusBot: statusBot,
+		statusMsg: statusMsg,
+		message:   message,
+		songInfo:  songCopy,
+		musicPath: musicPath,
+		picPath:   picPath,
+		cleanup:   cleanupCopy,
+		resultCh:  resultCh,
+		onDone: func(result uploadResult) {
+			if result.message != nil && result.message.Audio != nil {
+				songCopy.FileID = result.message.Audio.FileID
+				if result.message.Audio.Thumbnail != nil {
+					songCopy.ThumbFileID = result.message.Audio.Thumbnail.FileID
+				}
+			}
+			if h.Repo != nil {
+				if result.err == nil && songCopy.FileID != "" {
+					if err := h.Repo.Create(context.Background(), &songCopy); err != nil {
+						if h.Logger != nil {
+							h.Logger.Error("failed to save song info", "platform", platformName, "trackID", trackID, "error", err)
+						}
+					}
+				}
+			}
+			if statusMessage != nil && taskMessage != nil {
+				if result.err == nil {
+					_, _ = statusBot.DeleteMessage(context.Background(), &bot.DeleteMessageParams{ChatID: taskMessage.Chat.ID, MessageID: statusMessage.ID})
+				} else {
+					errText := ""
+					if result.err != nil {
+						errText = result.err.Error()
+					}
+					statusMessage = editMessageTextOrSend(context.Background(), statusBot, statusMessage, taskMessage.Chat.ID, fmt.Sprintf(musicInfoMsg+uploadFailed, songCopy.SongName, songCopy.SongAlbum, songCopy.FileExt, float64(songCopy.MusicSize)/1024/1024, errText))
+				}
+			}
+			cleanupFiles(cleanupCopy...)
+		},
+	}
+	select {
+	case h.UploadQueue <- task:
+		return nil
+	default:
+		cancel()
+		return errors.New("upload queue is full")
+	}
+}
+
+func (h *MusicHandler) runUploadWorker() {
+	for task := range h.UploadQueue {
+		h.dequeueQueuedStatus(task.statusMsg)
+		h.refreshQueuedStatuses()
+		if task.ctx != nil {
+			select {
+			case <-task.ctx.Done():
+				if task.resultCh != nil {
+					task.resultCh <- uploadResult{err: task.ctx.Err()}
+				}
+				continue
+			case h.UploadLimiter <- struct{}{}:
+			}
+		} else {
+			h.UploadLimiter <- struct{}{}
+		}
+		if task.statusMsg != nil && task.statusBot != nil {
+			text := fmt.Sprintf(musicInfoMsg+uploading, task.songInfo.SongName, task.songInfo.SongAlbum, task.songInfo.FileExt, float64(task.songInfo.MusicSize)/1024/1024)
+			updated := editMessageTextOrSend(context.Background(), task.statusBot, task.statusMsg, task.statusMsg.Chat.ID, text)
+			if updated != nil {
+				task.statusMsg = updated
+			}
+		}
+		result := uploadResult{}
+		result.message, result.err = h.sendMusicDirect(task.ctx, task.b, task.message, &task.songInfo, task.musicPath, task.picPath)
+		<-h.UploadLimiter
+		if task.onDone != nil {
+			task.onDone(result)
+		}
+		h.removeQueuedStatus(task.statusMsg)
+		h.refreshQueuedStatuses()
+		if task.resultCh != nil {
+			task.resultCh <- result
+		}
+	}
+}
+
+func (h *MusicHandler) registerQueuedStatus(b *bot.Bot, statusMsg *models.Message, songInfo *botpkg.SongInfo) {
+	if h == nil || statusMsg == nil || songInfo == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	entry := queuedStatus{bot: b, message: statusMsg, songInfo: *songInfo}
+	h.queuedStatus = append(h.queuedStatus, entry)
+	h.refreshQueuedStatusesLocked()
+}
+
+func (h *MusicHandler) removeQueuedStatus(statusMsg *models.Message) {
+	if h == nil || statusMsg == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	filtered := h.queuedStatus[:0]
+	for _, entry := range h.queuedStatus {
+		if entry.message == nil || entry.message.ID == statusMsg.ID {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	h.queuedStatus = filtered
+}
+
+func (h *MusicHandler) dequeueQueuedStatus(statusMsg *models.Message) {
+	if h == nil || statusMsg == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	filtered := h.queuedStatus[:0]
+	removed := false
+	for _, entry := range h.queuedStatus {
+		if !removed && entry.message != nil && entry.message.ID == statusMsg.ID {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	h.queuedStatus = filtered
+}
+
+func (h *MusicHandler) refreshQueuedStatuses() {
+	if h == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	h.refreshQueuedStatusesLocked()
+}
+
+func (h *MusicHandler) refreshQueuedStatusesLocked() {
+	if len(h.queuedStatus) == 0 {
+		return
+	}
+	for idx, entry := range h.queuedStatus {
+		if entry.bot == nil || entry.message == nil {
+			continue
+		}
+		text := fmt.Sprintf(musicInfoMsg+uploading, entry.songInfo.SongName, entry.songInfo.SongAlbum, entry.songInfo.FileExt, float64(entry.songInfo.MusicSize)/1024/1024)
+		if idx > 0 {
+			queueText := fmt.Sprintf("当前正在发送队列中，前面还有 %d 个任务", idx)
+			text = text + "\n" + queueText
+		}
+		params := &bot.EditMessageTextParams{
+			ChatID:    entry.message.Chat.ID,
+			MessageID: entry.message.ID,
+			Text:      text,
+		}
+		_, err := entry.bot.EditMessageText(context.Background(), params)
+		if err != nil && strings.Contains(fmt.Sprintf("%v", err), "message to edit not found") {
+			newMsg, sendErr := entry.bot.SendMessage(context.Background(), &bot.SendMessageParams{ChatID: entry.message.Chat.ID, Text: text})
+			if sendErr == nil && newMsg != nil {
+				entry.message = newMsg
+				h.queuedStatus[idx] = entry
+			}
+		}
+	}
+}
+
+func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo, musicPath, picPath string) (*models.Message, error) {
 	if songInfo == nil {
 		return nil, errors.New("song info required")
 	}
+	uploadCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	threadID := 0
 	if message != nil {
 		threadID = message.MessageThreadID
 	}
 
 	var audioFile models.InputFile
+	openAudioUpload := func() (*models.InputFileUpload, *os.File, error) {
+		if strings.TrimSpace(musicPath) == "" {
+			return nil, nil, errors.New("music file path is empty")
+		}
+		stat, err := os.Stat(musicPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("music file not found: %w", err)
+		}
+		if stat.Size() == 0 {
+			return nil, nil, errors.New("music file is empty")
+		}
+		file, err := os.Open(musicPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &models.InputFileUpload{Filename: filepath.Base(musicPath), Data: file}, file, nil
+	}
+	openThumbUpload := func() (*models.InputFileUpload, *os.File) {
+		if strings.TrimSpace(picPath) == "" {
+			return nil, nil
+		}
+		stat, err := os.Stat(picPath)
+		if err != nil || stat.Size() == 0 {
+			return nil, nil
+		}
+		file, err := os.Open(picPath)
+		if err != nil {
+			return nil, nil
+		}
+		return &models.InputFileUpload{Filename: filepath.Base(picPath), Data: file}, file
+	}
 	if songInfo.FileID != "" {
 		audioFile = &models.InputFileString{Data: songInfo.FileID}
 	} else {
-		file, err := os.Open(musicPath)
+		audioUpload, audioHandle, err := openAudioUpload()
 		if err != nil {
 			return nil, err
 		}
-		defer file.Close()
-		audioFile = &models.InputFileUpload{Filename: filepath.Base(musicPath), Data: file}
-		_, _ = b.SendChatAction(ctx, &bot.SendChatActionParams{ChatID: message.Chat.ID, MessageThreadID: threadID, Action: models.ChatActionUploadDocument})
+		defer audioHandle.Close()
+		audioFile = audioUpload
+		_, _ = b.SendChatAction(uploadCtx, &bot.SendChatActionParams{ChatID: message.Chat.ID, MessageThreadID: threadID, Action: models.ChatActionUploadDocument})
 	}
 
 	caption := buildMusicCaption(songInfo, h.BotName)
@@ -454,28 +721,46 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, message *model
 	if songInfo.ThumbFileID != "" {
 		params.Thumbnail = &models.InputFileString{Data: songInfo.ThumbFileID}
 	} else if picPath != "" {
-		if _, err := os.Stat(picPath); err == nil {
-			pic, err := os.Open(picPath)
-			if err == nil {
-				defer pic.Close()
-				params.Thumbnail = &models.InputFileUpload{Filename: filepath.Base(picPath), Data: pic}
-			}
+		if thumbUpload, thumbHandle := openThumbUpload(); thumbUpload != nil {
+			defer thumbHandle.Close()
+			params.Thumbnail = thumbUpload
 		}
 	}
 
-	audio, err := b.SendAudio(ctx, params)
-	if err != nil && strings.Contains(fmt.Sprintf("%v", err), "replied message not found") {
+	audio, err := b.SendAudio(uploadCtx, params)
+	if err != nil && (strings.Contains(fmt.Sprintf("%v", err), "replied message not found") || strings.Contains(fmt.Sprintf("%v", err), "message to be replied not found")) {
 		params.ReplyParameters = nil
-		audio, err = b.SendAudio(ctx, params)
+		if songInfo.FileID == "" {
+			if audioUpload, audioHandle, fileErr := openAudioUpload(); fileErr == nil {
+				defer audioHandle.Close()
+				params.Audio = audioUpload
+			}
+			params.Thumbnail = nil
+			if thumbUpload, thumbHandle := openThumbUpload(); thumbUpload != nil {
+				defer thumbHandle.Close()
+				params.Thumbnail = thumbUpload
+			}
+		}
+		audio, err = b.SendAudio(uploadCtx, params)
+	}
+	if err != nil && strings.Contains(fmt.Sprintf("%v", err), "file must be non-empty") && songInfo.FileID == "" {
+		params.Thumbnail = nil
+		if strings.TrimSpace(musicPath) == "" {
+			return audio, err
+		}
+		file, fileErr := os.Open(musicPath)
+		if fileErr != nil {
+			return audio, err
+		}
+		defer file.Close()
+		params.Audio = &models.InputFileUpload{Filename: filepath.Base(musicPath), Data: file}
+		audio, err = b.SendAudio(uploadCtx, params)
 	}
 	return audio, err
 }
 
 func buildReplyParams(message *models.Message) *models.ReplyParameters {
 	if message == nil {
-		return nil
-	}
-	if message.Chat.Type != "private" {
 		return nil
 	}
 	return &models.ReplyParameters{MessageID: message.ID}
@@ -489,9 +774,36 @@ func sendStatusMessage(ctx context.Context, b *bot.Bot, chatID int64, threadID i
 		ReplyParameters: replyParams,
 	}
 	msg, err := b.SendMessage(ctx, params)
-	if err != nil && replyParams != nil && strings.Contains(fmt.Sprintf("%v", err), "replied message not found") {
+	if err != nil && replyParams != nil && (strings.Contains(fmt.Sprintf("%v", err), "replied message not found") || strings.Contains(fmt.Sprintf("%v", err), "message to be replied not found")) {
 		params.ReplyParameters = nil
 		msg, err = b.SendMessage(ctx, params)
 	}
 	return msg, err
+}
+
+func editMessageTextOrSend(ctx context.Context, b *bot.Bot, msg *models.Message, chatID int64, text string) *models.Message {
+	if msg == nil {
+		return nil
+	}
+	editParams := &bot.EditMessageTextParams{
+		ChatID:    msg.Chat.ID,
+		MessageID: msg.ID,
+		Text:      text,
+	}
+	editedMsg, err := b.EditMessageText(ctx, editParams)
+	if err == nil {
+		return editedMsg
+	}
+	if !strings.Contains(fmt.Sprintf("%v", err), "message to edit not found") {
+		return msg
+	}
+	sendParams := &bot.SendMessageParams{
+		ChatID: chatID,
+		Text:   text,
+	}
+	newMsg, err := b.SendMessage(ctx, sendParams)
+	if err != nil {
+		return msg
+	}
+	return newMsg
 }

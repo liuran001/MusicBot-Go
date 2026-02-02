@@ -69,8 +69,19 @@ func resizeImg(filePath string) (string, error) {
 	}
 	defer out.Close()
 
-	if err := jpeg.Encode(out, newImg, nil); err != nil {
+	if err := jpeg.Encode(out, newImg, &jpeg.Options{Quality: 85}); err != nil {
 		return "", err
+	}
+	if stat, err := out.Stat(); err == nil && stat.Size() > 200*1024 {
+		if _, err := out.Seek(0, io.SeekStart); err != nil {
+			return "", err
+		}
+		if err := out.Truncate(0); err != nil {
+			return "", err
+		}
+		if err := jpeg.Encode(out, newImg, &jpeg.Options{Quality: 60}); err != nil {
+			return "", err
+		}
 	}
 	return filePath + ".resize.jpg", nil
 }

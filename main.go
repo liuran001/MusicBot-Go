@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/app"
 )
@@ -24,6 +25,13 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		os.Exit(0)
+	}()
 
 	buildInfo := app.BuildInfo{
 		RuntimeVer: fmt.Sprintf(runtime.Version()),
@@ -43,5 +51,8 @@ func main() {
 	}
 
 	<-ctx.Done()
-	_ = application.Shutdown(context.Background())
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	_ = application.Shutdown(shutdownCtx)
+	os.Exit(0)
 }
