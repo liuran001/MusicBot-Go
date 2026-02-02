@@ -377,6 +377,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	musicFileName := fmt.Sprintf("%d-%s.%s", stamp, sanitizeFileName(track.Title), info.Format)
 	filePath := filepath.Join(h.CacheDir, musicFileName)
 
+	lastProgressText := ""
 	progress := func(written, total int64) {
 		if msg == nil {
 			return
@@ -388,15 +389,32 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 			progressPct = float64(written) * 100 / float64(total)
 		}
 		text := fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
+		if msg.Text == text || lastProgressText == text {
+			lastProgressText = text
+			return
+		}
+		lastProgressText = text
 		editParams := &bot.EditMessageTextParams{
 			ChatID:    msg.Chat.ID,
 			MessageID: msg.ID,
 			Text:      text,
 		}
 		if h.RateLimiter != nil {
-			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, editParams)
+			if editedMsg, err := telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, editParams); err == nil {
+				if editedMsg != nil {
+					msg = editedMsg
+				} else {
+					msg.Text = text
+				}
+			}
 		} else {
-			_, _ = b.EditMessageText(ctx, editParams)
+			if editedMsg, err := b.EditMessageText(ctx, editParams); err == nil {
+				if editedMsg != nil {
+					msg = editedMsg
+				} else {
+					msg.Text = text
+				}
+			}
 		}
 	}
 
@@ -720,12 +738,23 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 			queueText := fmt.Sprintf("当前正在发送队列中，前面还有 %d 个任务", idx)
 			text = text + "\n" + queueText
 		}
+		if entry.message.Text == text {
+			continue
+		}
 		params := &bot.EditMessageTextParams{
 			ChatID:    entry.message.Chat.ID,
 			MessageID: entry.message.ID,
 			Text:      text,
 		}
-		_, err := entry.bot.EditMessageText(ctx, params)
+		editedMsg, err := entry.bot.EditMessageText(ctx, params)
+		if err == nil {
+			if editedMsg != nil {
+				h.updateQueuedStatusMessage(entry.message.ID, editedMsg)
+			} else {
+				h.updateQueuedStatusText(entry.message.ID, text)
+			}
+			continue
+		}
 		if err != nil && strings.Contains(fmt.Sprintf("%v", err), "message to edit not found") {
 			newMsg, sendErr := entry.bot.SendMessage(ctx, &bot.SendMessageParams{ChatID: entry.message.Chat.ID, Text: text})
 			if sendErr == nil && newMsg != nil {
@@ -744,6 +773,21 @@ func (h *MusicHandler) updateQueuedStatusMessage(oldMessageID int, newMsg *model
 	for idx, entry := range h.queuedStatus {
 		if entry.message != nil && entry.message.ID == oldMessageID {
 			entry.message = newMsg
+			h.queuedStatus[idx] = entry
+			return
+		}
+	}
+}
+
+func (h *MusicHandler) updateQueuedStatusText(messageID int, text string) {
+	if h == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	for idx, entry := range h.queuedStatus {
+		if entry.message != nil && entry.message.ID == messageID {
+			entry.message.Text = text
 			h.queuedStatus[idx] = entry
 			return
 		}
