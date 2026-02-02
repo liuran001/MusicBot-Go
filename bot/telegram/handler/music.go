@@ -378,8 +378,17 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	filePath := filepath.Join(h.CacheDir, musicFileName)
 
 	lastProgressText := ""
+	lastProgressAt := time.Now()
+	minInterval := 3 * time.Second
 	progress := func(written, total int64) {
 		if msg == nil {
+			return
+		}
+		if total > 0 && written >= total {
+			return
+		}
+		now := time.Now()
+		if now.Sub(lastProgressAt) < minInterval {
 			return
 		}
 		totalMB := float64(total) / 1024 / 1024
@@ -394,6 +403,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 			return
 		}
 		lastProgressText = text
+		lastProgressAt = now
 		editParams := &bot.EditMessageTextParams{
 			ChatID:    msg.Chat.ID,
 			MessageID: msg.ID,
