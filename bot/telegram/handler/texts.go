@@ -26,7 +26,7 @@ Multi\-platform music bot supporting NetEase Cloud Music and more\.
 `
 	musicInfo = `「%s」- %s
 专辑: %s
-#网易云音乐 #%s %.2fMB %.2fkbps
+#%s #%s %.2fMB %.2fkbps
 via @%s`
 	uploadFailed     = "下载/发送失败\n%v"
 	hitCache         = "命中缓存, 正在发送中..."

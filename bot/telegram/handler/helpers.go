@@ -255,7 +255,7 @@ func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
 	songNameHTML := songInfo.SongName
 	artistsHTML := songInfo.SongArtists
 	albumHTML := songInfo.SongAlbum
-	platformTag := "#" + songInfo.Platform
+	platformTag := "#" + platformTag(songInfo.Platform)
 
 	if songInfo.Platform == "netease" || songInfo.Platform == "" {
 		if songInfo.MusicID != 0 {
@@ -283,7 +283,6 @@ func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
 			albumHTML = fmt.Sprintf("<a href=\"https://music.163.com/album?id=%d\">%s</a>", songInfo.AlbumID, songInfo.SongAlbum)
 		}
 
-		platformTag = "#网易云音乐"
 	}
 
 	return fmt.Sprintf("<b>「%s」- %s</b>\n专辑: %s\n<blockquote>%.2fMB %.2fkbps\n%s #%s\n</blockquote>via @%s",
@@ -322,6 +321,13 @@ func platformDisplayName(platformName string) string {
 	default:
 		return platformName
 	}
+}
+
+func platformTag(platformName string) string {
+	if strings.TrimSpace(platformName) == "" {
+		return "music"
+	}
+	return platformName
 }
 
 func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, platformName, trackID string, message *models.Message) {

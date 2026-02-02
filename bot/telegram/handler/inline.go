@@ -17,6 +17,8 @@ type InlineSearchHandler struct {
 	Repo            botpkg.SongRepository
 	PlatformManager platform.Manager
 	BotName         string
+	DefaultPlatform string
+	DefaultQuality  string
 }
 
 func (h *InlineSearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -47,6 +49,10 @@ func (h *InlineSearchHandler) inlineMusic(ctx context.Context, b *bot.Bot, query
 	}
 	info, err := h.Repo.FindByMusicID(ctx, musicID)
 	if err == nil && info != nil && info.FileID != "" && info.SongName != "" {
+		platformName := info.Platform
+		if strings.TrimSpace(platformName) == "" {
+			platformName = h.DefaultPlatform
+		}
 		keyboard := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 			{{Text: fmt.Sprintf("%s- %s", info.SongName, info.SongArtists), URL: fmt.Sprintf("https://music.163.com/song?id=%d", info.MusicID)}},
 			{{Text: sendMeTo, SwitchInlineQuery: fmt.Sprintf("https://music.163.com/song?id=%d", info.MusicID)}},
@@ -56,7 +62,7 @@ func (h *InlineSearchHandler) inlineMusic(ctx context.Context, b *bot.Bot, query
 			ID:             query.ID,
 			DocumentFileID: info.FileID,
 			Title:          fmt.Sprintf("%s - %s", info.SongArtists, info.SongName),
-			Caption:        fmt.Sprintf(musicInfo, info.SongName, info.SongArtists, info.SongAlbum, info.FileExt, float64(info.MusicSize+info.EmbPicSize)/1024/1024, float64(info.BitRate)/1000, h.BotName),
+			Caption:        fmt.Sprintf(musicInfo, info.SongName, info.SongArtists, info.SongAlbum, platformTag(platformName), info.FileExt, float64(info.MusicSize+info.EmbPicSize)/1024/1024, float64(info.BitRate)/1000, h.BotName),
 			ReplyMarkup:    keyboard,
 			Description:    info.SongAlbum,
 		}
@@ -145,8 +151,14 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *bot.Bot, quer
 		return
 	}
 
-	platformName := "netease"
-	qualityValue := "hires"
+	platformName := h.DefaultPlatform
+	qualityValue := h.DefaultQuality
+	if strings.TrimSpace(platformName) == "" {
+		platformName = "netease"
+	}
+	if strings.TrimSpace(qualityValue) == "" {
+		qualityValue = "hires"
+	}
 	if h.Repo != nil {
 		if settings, err := h.Repo.GetUserSettings(ctx, query.From.ID); err == nil && settings != nil {
 			platformName = settings.DefaultPlatform
