@@ -76,6 +76,9 @@ func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
 }
 
 func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadInfo, destPath string, progress ProgressFunc) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if info == nil || info.URL == "" {
 		return 0, errors.New("download info missing")
 	}
@@ -129,7 +132,12 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 		lastErr = err
 		_ = os.Remove(destPath)
 		if attempt < 2 {
-			time.Sleep(time.Duration(1<<attempt) * time.Second)
+			wait := time.Duration(1<<attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(wait):
+			}
 		}
 	}
 	return 0, lastErr
@@ -189,7 +197,23 @@ func (s *DownloadService) downloadOnce(ctx context.Context, rawURL, originalHost
 		return 0, err
 	}
 
-	written, err := util.CopyWithProgress(file, resp.Body, info.Size, progress)
+	throttledProgress := progress
+	if progress != nil {
+		lastUpdate := time.Time{}
+		interval := 500 * time.Millisecond
+		throttledProgress = func(written, total int64) {
+			now := time.Now()
+			if !lastUpdate.IsZero() && now.Sub(lastUpdate) < interval {
+				if total <= 0 || written < total {
+					return
+				}
+			}
+			lastUpdate = now
+			progress(written, total)
+		}
+	}
+
+	written, err := util.CopyWithProgress(file, resp.Body, info.Size, throttledProgress)
 	closeErr := file.Close()
 	if err != nil {
 		return written, err
