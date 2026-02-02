@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -277,7 +278,14 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 			DefaultQuality:  r.defaultQuality,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
-			return nil, createErr
+			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
+				reloadErr := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
+				if reloadErr != nil {
+					return nil, reloadErr
+				}
+			} else {
+				return nil, createErr
+			}
 		}
 		var deletedAt *time.Time
 		if settings.DeletedAt.Valid {
@@ -322,7 +330,14 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 			DefaultQuality:  r.defaultQuality,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
-			return nil, createErr
+			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
+				reloadErr := r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
+				if reloadErr != nil {
+					return nil, reloadErr
+				}
+			} else {
+				return nil, createErr
+			}
 		}
 		var deletedAt *time.Time
 		if settings.DeletedAt.Valid {
