@@ -82,6 +82,27 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	}, nil
 }
 
+// ConfigurePool updates the database connection pool settings.
+func (r *Repository) ConfigurePool(maxOpen, maxIdle int, maxLifetime time.Duration) error {
+	if r == nil || r.db == nil {
+		return errors.New("repository not configured")
+	}
+	sqlDB, err := r.db.DB()
+	if err != nil {
+		return err
+	}
+	if maxOpen >= 0 {
+		sqlDB.SetMaxOpenConns(maxOpen)
+	}
+	if maxIdle >= 0 {
+		sqlDB.SetMaxIdleConns(maxIdle)
+	}
+	if maxLifetime >= 0 {
+		sqlDB.SetConnMaxLifetime(maxLifetime)
+	}
+	return nil
+}
+
 // SetDefaults sets repository defaults for new settings records.
 func (r *Repository) SetDefaults(defaultPlatform, defaultQuality string) {
 	if r == nil {
