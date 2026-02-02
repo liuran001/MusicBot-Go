@@ -87,6 +87,14 @@ type URLMatcher interface {
 	MatchURL(url string) (trackID string, matched bool)
 }
 
+// TextMatcher defines the interface for platforms that support parsing track IDs
+// from arbitrary text input (e.g., short links or plain IDs).
+type TextMatcher interface {
+	// MatchText attempts to extract a track ID from arbitrary text input.
+	// Returns the track ID and true if the text matches this platform's format.
+	MatchText(text string) (trackID string, matched bool)
+}
+
 // Manager provides a registry for multiple platform implementations.
 // This allows the bot to work with multiple music platforms simultaneously.
 type Manager interface {
@@ -105,4 +113,9 @@ type Manager interface {
 	// Returns the platform name, track ID, and true if a match is found.
 	// Returns empty strings and false if no platform matches the URL.
 	MatchURL(url string) (platformName, trackID string, matched bool)
+
+	// MatchText attempts to match arbitrary text against all registered platforms.
+	// Returns the platform name, track ID, and true if a match is found.
+	// Returns empty strings and false if no platform matches the text.
+	MatchText(text string) (platformName, trackID string, matched bool)
 }
