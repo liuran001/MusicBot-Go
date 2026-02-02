@@ -588,12 +588,16 @@ func (h *MusicHandler) runStatusRefresher(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			shouldRefresh := false
 			h.queueMu.Lock()
 			if h.statusDirty {
 				h.statusDirty = false
-				h.refreshQueuedStatusesLocked(ctx)
+				shouldRefresh = true
 			}
 			h.queueMu.Unlock()
+			if shouldRefresh {
+				h.refreshQueuedStatuses(ctx)
+			}
 		}
 	}
 }
@@ -691,19 +695,23 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 	if h == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var snapshot []queuedStatus
 	h.queueMu.Lock()
-	defer h.queueMu.Unlock()
-	h.refreshQueuedStatusesLocked(ctx)
-}
-
-func (h *MusicHandler) refreshQueuedStatusesLocked(ctx context.Context) {
-	if len(h.queuedStatus) == 0 {
+	if len(h.queuedStatus) > 0 {
+		snapshot = make([]queuedStatus, len(h.queuedStatus))
+		copy(snapshot, h.queuedStatus)
+	}
+	h.queueMu.Unlock()
+	if len(snapshot) == 0 {
 		return
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	for idx, entry := range h.queuedStatus {
+	for idx, entry := range snapshot {
 		if entry.bot == nil || entry.message == nil {
 			continue
 		}
@@ -721,9 +729,23 @@ func (h *MusicHandler) refreshQueuedStatusesLocked(ctx context.Context) {
 		if err != nil && strings.Contains(fmt.Sprintf("%v", err), "message to edit not found") {
 			newMsg, sendErr := entry.bot.SendMessage(ctx, &bot.SendMessageParams{ChatID: entry.message.Chat.ID, Text: text})
 			if sendErr == nil && newMsg != nil {
-				entry.message = newMsg
-				h.queuedStatus[idx] = entry
+				h.updateQueuedStatusMessage(entry.message.ID, newMsg)
 			}
+		}
+	}
+}
+
+func (h *MusicHandler) updateQueuedStatusMessage(oldMessageID int, newMsg *models.Message) {
+	if h == nil || newMsg == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	for idx, entry := range h.queuedStatus {
+		if entry.message != nil && entry.message.ID == oldMessageID {
+			entry.message = newMsg
+			h.queuedStatus[idx] = entry
+			return
 		}
 	}
 }
