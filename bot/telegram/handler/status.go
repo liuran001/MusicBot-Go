@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,13 +53,32 @@ func (h *StatusHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 		userCount, _ = h.Repo.CountByUserID(ctx, userID)
 	}
 
-	msgText := fmt.Sprintf(statusInfo, fromCount, chatInfo, chatCount, userID, userID, userCount)
+	sendCount, _ := h.Repo.GetSendCount(ctx)
+	msgText := fmt.Sprintf(statusInfo, fromCount, chatInfo, chatCount, userID, userID, userCount, sendCount)
+
+	if platformCounts, err := h.Repo.CountByPlatform(ctx); err == nil && len(platformCounts) > 0 {
+		platformNames := make([]string, 0, len(platformCounts))
+		for name := range platformCounts {
+			platformNames = append(platformNames, name)
+		}
+		sort.Strings(platformNames)
+		lines := make([]string, 0, len(platformNames))
+		for _, name := range platformNames {
+			display := mdV2Replacer.Replace(platformDisplayName(name))
+			lines = append(lines, fmt.Sprintf("%s: %d", display, platformCounts[name]))
+		}
+		msgText += "\n缓存平台统计:\n" + strings.Join(lines, "\n")
+	}
 
 	if h.PlatformManager != nil {
 		platforms := h.PlatformManager.List()
 		if len(platforms) > 0 {
-			platformsEscaped := mdV2Replacer.Replace(strings.Join(platforms, ", "))
-			msgText += fmt.Sprintf("\n\n📱 Available Platforms: %s", platformsEscaped)
+			displayNames := make([]string, 0, len(platforms))
+			for _, name := range platforms {
+				displayNames = append(displayNames, platformDisplayName(name))
+			}
+			platformsEscaped := mdV2Replacer.Replace(strings.Join(displayNames, ", "))
+			msgText += fmt.Sprintf("\n\n📱 可用平台: %s", platformsEscaped)
 		}
 	}
 

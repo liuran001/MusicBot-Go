@@ -18,6 +18,7 @@ type stubSongRepository struct {
 	fileSongs     map[string]*botpkg.SongInfo     // by FileID
 	userSettings  map[int64]*botpkg.UserSettings  // by UserID
 	groupSettings map[int64]*botpkg.GroupSettings // by ChatID
+	sendCount     int64
 }
 
 func newStubRepo() *stubSongRepository {
@@ -85,6 +86,15 @@ func (r *stubSongRepository) Delete(ctx context.Context, musicID int) error {
 	return nil
 }
 
+func (r *stubSongRepository) DeleteAll(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.songs = make(map[int]*botpkg.SongInfo)
+	r.platformSongs = make(map[string]*botpkg.SongInfo)
+	r.fileSongs = make(map[string]*botpkg.SongInfo)
+	return nil
+}
+
 func (r *stubSongRepository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -130,6 +140,29 @@ func (r *stubSongRepository) CountByChatID(ctx context.Context, chatID int64) (i
 		}
 	}
 	return count, nil
+}
+
+func (r *stubSongRepository) CountByPlatform(ctx context.Context) (map[string]int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]int64)
+	for _, song := range r.songs {
+		result[song.Platform]++
+	}
+	return result, nil
+}
+
+func (r *stubSongRepository) GetSendCount(ctx context.Context) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.sendCount, nil
+}
+
+func (r *stubSongRepository) IncrementSendCount(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sendCount++
+	return nil
 }
 
 func (r *stubSongRepository) Last(ctx context.Context) (*botpkg.SongInfo, error) {

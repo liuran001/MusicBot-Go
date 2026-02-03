@@ -14,7 +14,7 @@
 - 🎵 **多平台支持**: 插件化架构,轻松扩展新音乐平台
 - 🔍 **搜索**: 支持关键词搜索和直接 URL 下载
 - 📝 **歌词**: 获取时间戳歌词或纯文本歌词
-- 🎤 **识曲**: 语音识别功能 (需要 ffmpeg)
+- 🎤 **识曲**: 语音识别功能 (需要 ffmpeg + Node.js)
 - 💾 **智能缓存**: 数据库缓存,避免重复下载
 - ⚡ **高性能**: 并发下载,限流保护
 - 🔌 **插件系统**: 第三方开发者可独立开发平台插件
@@ -23,6 +23,7 @@
 
 - Go 1.25.6+
 - ffmpeg（/recognize 语音识别需要）
+- Node.js + npm（识曲服务需要）
 
 ## 配置
 
@@ -48,7 +49,6 @@ music_u = YOUR_MUSIC_U_COOKIE
 
 ### 动态脚本插件（推荐）
 - 脚本目录：`plugins/scripts/<name>`，目录名需与 `[plugins.<name>]` 一致
-- Meting 脚本插件请使用独立仓库，并将 `PluginScriptDir` 指向其 `scripts` 目录
 - 修改脚本或配置后，管理员可使用 `/reload` 重载（需配置 `BotAdmin`），或直接重启程序
 
 ## 运行
@@ -59,6 +59,25 @@ go build -o MusicBot-Go
 ```
 
 ## 使用方法
+
+### 听歌识曲启动
+
+1) 安装 Node.js，并进入识曲服务目录安装依赖
+
+```bash
+cd plugins/netease/recognize/service
+npm install
+```
+
+2) 确保机器已安装 `ffmpeg`
+
+3) 可选：在配置里设置识曲服务端口（默认 3737）
+
+```ini
+RecognizePort = 3737
+```
+
+4) 重启 Bot，识曲服务会自动启动（启动失败会提示缺少 node_modules）
 
 ### 基本命令
 

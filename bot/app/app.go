@@ -252,29 +252,35 @@ func (a *App) Start(ctx context.Context) error {
 		uploadLimiter = make(chan struct{}, uploadConcurrency)
 	}
 	uploadQueueSize := a.Config.GetInt("UploadQueueSize")
-
-	musicHandler := &handler.MusicHandler{
-		Repo:            a.DB,
-		Pool:            a.Pool,
-		Logger:          a.Logger,
-		CacheDir:        cacheDir,
-		BotName:         botName,
-		PlatformManager: a.PlatformManager,
-		DownloadService: downloadService,
-		ID3Service:      id3Service,
-		TagProviders:    tagProviders,
-		Limiter:         downloadLimiter,
-		UploadLimiter:   uploadLimiter,
-		UploadQueueSize: uploadQueueSize,
-		UploadBot:       a.Telegram.UploadClient(),
-		RateLimiter:     rateLimiter,
-	}
-	musicHandler.StartWorker(ctx)
-
 	defaultPlatform := strings.TrimSpace(a.Config.GetString("DefaultPlatform"))
 	if defaultPlatform == "" {
 		defaultPlatform = "netease"
 	}
+	searchFallback := strings.TrimSpace(a.Config.GetString("SearchFallbackPlatform"))
+	if searchFallback == "" {
+		searchFallback = "netease"
+	}
+
+	musicHandler := &handler.MusicHandler{
+		Repo:             a.DB,
+		Pool:             a.Pool,
+		Logger:           a.Logger,
+		CacheDir:         cacheDir,
+		BotName:          botName,
+		DefaultPlatform:  defaultPlatform,
+		FallbackPlatform: searchFallback,
+		PlatformManager:  a.PlatformManager,
+		DownloadService:  downloadService,
+		ID3Service:       id3Service,
+		TagProviders:     tagProviders,
+		Limiter:          downloadLimiter,
+		UploadLimiter:    uploadLimiter,
+		UploadQueueSize:  uploadQueueSize,
+		UploadBot:        a.Telegram.UploadClient(),
+		RateLimiter:      rateLimiter,
+	}
+	musicHandler.StartWorker(ctx)
+
 	defaultQuality := a.Config.GetString("DefaultQuality")
 	settingsHandler := &handler.SettingsHandler{
 		Repo:            a.DB,
@@ -282,10 +288,6 @@ func (a *App) Start(ctx context.Context) error {
 		RateLimiter:     rateLimiter,
 		DefaultPlatform: defaultPlatform,
 		DefaultQuality:  defaultQuality,
-	}
-	searchFallback := strings.TrimSpace(a.Config.GetString("SearchFallbackPlatform"))
-	if searchFallback == "" {
-		searchFallback = "netease"
 	}
 	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback}
 	searchCallback := &handler.SearchCallbackHandler{Search: searchHandler, RateLimiter: rateLimiter}
@@ -296,7 +298,7 @@ func (a *App) Start(ctx context.Context) error {
 		Search:           searchHandler,
 		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Recognize:        &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger},
-		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, RateLimiter: rateLimiter},
+		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:           &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Settings:         settingsHandler,
 		RmCache:          &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
@@ -311,7 +313,8 @@ func (a *App) Start(ctx context.Context) error {
 	router.Register(a.Telegram.Client(), botName)
 
 	commands := []models.BotCommand{
-		{Command: "start", Description: "开始使用 / 下载音乐"},
+		{Command: "help", Description: "查看使用说明"},
+		{Command: "music", Description: "下载音乐"},
 		{Command: "search", Description: "搜索音乐"},
 		{Command: "settings", Description: "设置默认平台和音质"},
 		{Command: "lyric", Description: "获取歌词"},

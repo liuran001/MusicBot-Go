@@ -16,6 +16,9 @@ import (
 )
 
 type pluginMeta struct {
+	Name      string         `json:"name"`
+	Version   string         `json:"version"`
+	URL       string         `json:"url"`
 	Platforms []platformInfo `json:"platforms"`
 }
 

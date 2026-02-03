@@ -40,6 +40,17 @@ func (SongInfoModel) TableName() string {
 	return "song_infos"
 }
 
+// BotStatModel stores aggregated bot statistics.
+type BotStatModel struct {
+	gorm.Model
+	Key   string `gorm:"uniqueIndex;not null"`
+	Value int64
+}
+
+func (BotStatModel) TableName() string {
+	return "bot_stats"
+}
+
 func toInternal(model SongInfoModel) *bot.SongInfo {
 	return &bot.SongInfo{
 		ID:              model.ID,

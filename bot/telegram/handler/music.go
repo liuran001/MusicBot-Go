@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-flac/go-flac"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -22,25 +26,27 @@ import (
 
 // MusicHandler handles /music and related commands.
 type MusicHandler struct {
-	Repo            botpkg.SongRepository
-	PlatformManager platform.Manager // NEW: Platform-agnostic music platform manager
-	DownloadService *download.DownloadService
-	ID3Service      *id3.ID3Service
-	TagProviders    map[string]id3.ID3TagProvider
-	Pool            botpkg.WorkerPool
-	Logger          botpkg.Logger
-	CacheDir        string
-	BotName         string
-	Limiter         chan struct{}
-	UploadLimiter   chan struct{}
-	UploadQueue     chan uploadTask
-	UploadQueueSize int
-	UploadBot       *bot.Bot
-	RateLimiter     *telegram.RateLimiter
-	initOnce        sync.Once
-	queueMu         sync.Mutex
-	queuedStatus    []queuedStatus
-	statusDirty     bool
+	Repo             botpkg.SongRepository
+	PlatformManager  platform.Manager // NEW: Platform-agnostic music platform manager
+	DownloadService  *download.DownloadService
+	ID3Service       *id3.ID3Service
+	TagProviders     map[string]id3.ID3TagProvider
+	Pool             botpkg.WorkerPool
+	Logger           botpkg.Logger
+	CacheDir         string
+	BotName          string
+	DefaultPlatform  string
+	FallbackPlatform string
+	Limiter          chan struct{}
+	UploadLimiter    chan struct{}
+	UploadQueue      chan uploadTask
+	UploadQueueSize  int
+	UploadBot        *bot.Bot
+	RateLimiter      *telegram.RateLimiter
+	initOnce         sync.Once
+	queueMu          sync.Mutex
+	queuedStatus     []queuedStatus
+	statusDirty      bool
 }
 
 type uploadTask struct {
@@ -98,6 +104,55 @@ func (h *MusicHandler) Handle(ctx context.Context, b *bot.Bot, update *models.Up
 		return
 	}
 	message := update.Message
+	cmd := commandName(message.Text, h.BotName)
+	if cmd == "start" || cmd == "help" {
+		disablePreview := true
+		params := &bot.SendMessageParams{
+			ChatID:             message.Chat.ID,
+			Text:               helpText,
+			ParseMode:          models.ParseModeMarkdown,
+			LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: &disablePreview},
+			ReplyParameters:    &models.ReplyParameters{MessageID: message.ID},
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.SendMessage(ctx, params)
+		}
+		return
+	}
+	if cmd == "music" {
+		args := commandArguments(message.Text)
+		if strings.TrimSpace(args) == "" {
+			params := &bot.SendMessageParams{
+				ChatID:          message.Chat.ID,
+				Text:            inputContent,
+				ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.SendMessage(ctx, params)
+			}
+			return
+		}
+		if platformName, trackID, ok := h.resolveTrackFromQuery(ctx, message, args); ok {
+			qualityOverride := extractQualityOverride(message)
+			h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
+			return
+		}
+		params := &bot.SendMessageParams{
+			ChatID:          message.Chat.ID,
+			Text:            noResults,
+			ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.SendMessage(ctx, params)
+		}
+		return
+	}
 
 	platformName, trackID, found := extractPlatformTrack(message, h.PlatformManager)
 	if !found {
@@ -140,6 +195,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		threadID = message.MessageThreadID
 	}
 	replyParams := buildReplyParams(message)
+	silent := h.shouldSilentAutoFetch(message)
 
 	var songInfo botpkg.SongInfo
 	var msgResult *models.Message
@@ -168,7 +224,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		} else {
 			errText = uploadFailed
 		}
-		text := fmt.Sprintf(musicInfoMsg+errText, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
+		text := fmt.Sprintf(musicInfoMsg+errText, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
 		if msgResult != nil {
 			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
 		}
@@ -211,7 +267,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			} else {
 				songInfo = *cached
 
-				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
 
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -222,7 +278,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		}
 	}
 
-	msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, waitForDown)
+	if !silent {
+		msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, waitForDown)
+	}
 
 	h.Limiter <- struct{}{}
 	defer func() { <-h.Limiter }()
@@ -235,7 +293,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 			} else {
 				songInfo = *cached
 				if msgResult != nil {
-					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
 				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -254,19 +312,37 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		return errors.New("platform manager not configured")
 	}
 
-	plat := h.PlatformManager.Get(platformName)
-	if plat == nil {
-		if h.Logger != nil {
-			h.Logger.Error("platform not found", "platform", platformName)
+	var (
+		track *platform.Track
+		plat  platform.Platform
+	)
+	for {
+		plat = h.PlatformManager.Get(platformName)
+		if plat == nil {
+			if h.Logger != nil {
+				h.Logger.Error("platform not found", "platform", platformName)
+			}
+			if msgResult != nil {
+				msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
+			}
+			return fmt.Errorf("platform not found: %s", platformName)
 		}
-		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
-		}
-		return fmt.Errorf("platform not found: %s", platformName)
-	}
 
-	track, err := plat.GetTrack(ctx, trackID)
-	if err != nil {
+		var err error
+		track, err = plat.GetTrack(ctx, trackID)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, platform.ErrNotFound) {
+			if nextPlatform, nextTrackID, ok := h.resolveFallbackTrack(ctx, message, platformName, trackID); ok {
+				platformName = nextPlatform
+				trackID = nextTrackID
+				if msgResult != nil {
+					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfo)
+				}
+				continue
+			}
+		}
 		if h.Logger != nil {
 			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
 		}
@@ -293,6 +369,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 		}
 		return errors.New("download info unavailable")
 	}
+	if h.Logger != nil {
+		h.Logger.Debug("download url", "platform", platformName, "trackID", trackID, "quality", info.Quality.String(), "url", info.URL)
+	}
 	if info.Format == "" {
 		info.Format = "mp3"
 	}
@@ -315,7 +394,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, actualQuality)
 			} else {
 				songInfo = *cached
-				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+				if !silent {
+					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
+				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
 					return err
@@ -326,7 +407,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
 	}
 
 	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo)
@@ -341,7 +422,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	cleanupList = append(cleanupList, musicPath, picPath)
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024))
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
 	}
 
 	if err := h.sendMusic(ctx, b, msgResult, message, &songInfo, musicPath, picPath, cleanupList, platformName, trackID); err != nil {
@@ -351,6 +432,209 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *bot.Bot, message *mo
 	}
 
 	return nil
+}
+
+func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *models.Message, args string) (string, string, bool) {
+	args = strings.TrimSpace(args)
+	if args == "" || h == nil || h.PlatformManager == nil {
+		return "", "", false
+	}
+
+	fields := strings.Fields(args)
+	if len(fields) >= 2 {
+		if plat := h.PlatformManager.Get(fields[0]); plat != nil {
+			return fields[0], fields[1], true
+		}
+	}
+
+	if urlStr := extractFirstURL(args); urlStr != "" {
+		if plat, id, matched := h.PlatformManager.MatchURL(urlStr); matched {
+			return plat, id, true
+		}
+	}
+
+	if plat, id, matched := h.PlatformManager.MatchText(args); matched {
+		return plat, id, true
+	}
+
+	keyword, requestedPlatform, hasSuffix := parseSearchKeywordPlatform(args)
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return "", "", false
+	}
+
+	primaryPlatform := h.resolveDefaultPlatform(ctx, message)
+	if hasSuffix {
+		primaryPlatform = requestedPlatform
+	}
+	fallbackPlatform := strings.TrimSpace(h.FallbackPlatform)
+	if hasSuffix {
+		fallbackPlatform = ""
+	}
+
+	order := h.buildSearchOrder(primaryPlatform, fallbackPlatform)
+	for _, platformName := range order {
+		plat := h.PlatformManager.Get(platformName)
+		if plat == nil || !plat.SupportsSearch() {
+			continue
+		}
+		limit := searchLimitForPlatform(platformName)
+		tracks, err := plat.Search(ctx, keyword, limit)
+		if err != nil || len(tracks) == 0 {
+			continue
+		}
+		for _, track := range tracks {
+			if strings.TrimSpace(track.ID) != "" {
+				return platformName, track.ID, true
+			}
+		}
+	}
+
+	return "", "", false
+}
+
+func (h *MusicHandler) resolveFallbackTrack(ctx context.Context, message *models.Message, platformName, trackID string) (string, string, bool) {
+	keyword, ok := h.fallbackKeyword(message)
+	if !ok {
+		return "", "", false
+	}
+	resolvedPlatform, resolvedTrackID, ok := h.resolveTrackFromQuery(ctx, message, keyword)
+	if !ok {
+		return "", "", false
+	}
+	if resolvedPlatform == platformName && resolvedTrackID == trackID {
+		return "", "", false
+	}
+	return resolvedPlatform, resolvedTrackID, true
+}
+
+func (h *MusicHandler) fallbackKeyword(message *models.Message) (string, bool) {
+	if message == nil {
+		return "", false
+	}
+	cmd := commandName(message.Text, h.BotName)
+	if cmd != "" && cmd != "music" {
+		return "", false
+	}
+	text := strings.TrimSpace(message.Text)
+	if cmd == "music" {
+		text = strings.TrimSpace(commandArguments(message.Text))
+	}
+	if text == "" {
+		return "", false
+	}
+	if extractFirstURL(text) != "" {
+		return "", false
+	}
+	fields := strings.Fields(text)
+	if len(fields) >= 2 && h.PlatformManager != nil {
+		if h.PlatformManager.Get(fields[0]) != nil {
+			return "", false
+		}
+	}
+	return text, true
+}
+
+func (h *MusicHandler) resolveDefaultPlatform(ctx context.Context, message *models.Message) string {
+	platformName := strings.TrimSpace(h.DefaultPlatform)
+	if platformName == "" {
+		platformName = "netease"
+	}
+	if h.Repo == nil || message == nil {
+		return platformName
+	}
+	if message.Chat.Type != "private" {
+		if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+			if strings.TrimSpace(settings.DefaultPlatform) != "" {
+				platformName = settings.DefaultPlatform
+			}
+		}
+		return platformName
+	}
+	if message.From != nil {
+		if settings, err := h.Repo.GetUserSettings(ctx, message.From.ID); err == nil && settings != nil {
+			if strings.TrimSpace(settings.DefaultPlatform) != "" {
+				platformName = settings.DefaultPlatform
+			}
+		}
+	}
+	return platformName
+}
+
+func (h *MusicHandler) buildSearchOrder(primary, fallback string) []string {
+	seen := make(map[string]struct{})
+	add := func(name string, order []string) []string {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return order
+		}
+		if _, ok := seen[name]; ok {
+			return order
+		}
+		seen[name] = struct{}{}
+		return append(order, name)
+	}
+
+	order := make([]string, 0, 4)
+	order = add(primary, order)
+	order = add(fallback, order)
+
+	for _, name := range h.searchPlatforms() {
+		order = add(name, order)
+	}
+
+	return order
+}
+
+func (h *MusicHandler) searchPlatforms() []string {
+	if h == nil || h.PlatformManager == nil {
+		return nil
+	}
+	names := h.PlatformManager.List()
+	results := make([]string, 0, len(names))
+	for _, name := range names {
+		plat := h.PlatformManager.Get(name)
+		if plat == nil || !plat.SupportsSearch() {
+			continue
+		}
+		results = append(results, name)
+	}
+	return results
+}
+
+func searchLimitForPlatform(platformName string) int {
+	if strings.TrimSpace(platformName) == "netease" {
+		return neteaseSearchLimit
+	}
+	return defaultSearchLimit
+}
+
+func (h *MusicHandler) shouldSilentAutoFetch(message *models.Message) bool {
+	if message == nil {
+		return false
+	}
+	if message.Chat.Type == "private" {
+		return false
+	}
+	if isCommandMessage(message) {
+		return false
+	}
+	text := strings.TrimSpace(message.Text)
+	if strings.HasPrefix(text, "/") {
+		return false
+	}
+	return true
+}
+
+var urlMatcher = regexp.MustCompile(`https?://[^\s]+`)
+
+func extractFirstURL(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	match := urlMatcher.FindString(text)
+	match = strings.TrimRight(match, ".,!?)]}>")
+	return strings.TrimSpace(match)
 }
 
 func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, info *platform.DownloadInfo, msg *models.Message, b *bot.Bot, message *models.Message, songInfo *botpkg.SongInfo) (string, string, []string, error) {
@@ -433,6 +717,9 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 		return "", "", cleanupList, err
 	}
 
+	// Derive bitrate from actual file size + duration (from track or FLAC streaminfo)
+	deriveBitrateFromFile(filePath, songInfo)
+
 	picPath, resizePicPath := "", ""
 	coverURL := ""
 	if track.CoverURL != "" {
@@ -500,18 +787,30 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	}
 	cleanupList = append(cleanupList, filePath, finalDir)
 
-	if h.ID3Service != nil && h.TagProviders != nil {
-		if provider, ok := h.TagProviders[plat.Name()]; ok && provider != nil {
-			tagData, tagErr := provider.GetTagData(ctx, track, info)
-			if tagErr != nil {
-				if h.Logger != nil {
-					h.Logger.Error("failed to get tag data", "platform", plat.Name(), "trackID", trackID, "error", tagErr)
-				}
-			} else {
-				if err := h.ID3Service.EmbedTags(filePath, tagData, embedPicPath); err != nil {
+	if h.ID3Service != nil {
+		var tagData *id3.TagData
+
+		if h.TagProviders != nil {
+			if provider, ok := h.TagProviders[plat.Name()]; ok && provider != nil {
+				var tagErr error
+				tagData, tagErr = provider.GetTagData(ctx, track, info)
+				if tagErr != nil {
 					if h.Logger != nil {
-						h.Logger.Error("failed to embed tags", "platform", plat.Name(), "trackID", trackID, "error", err)
+						h.Logger.Error("failed to get tag data", "platform", plat.Name(), "trackID", trackID, "error", tagErr)
 					}
+					tagData = nil
+				}
+			}
+		}
+
+		if tagData == nil {
+			tagData = h.buildFallbackTagData(ctx, plat, track, embedPicPath)
+		}
+
+		if tagData != nil {
+			if err := h.ID3Service.EmbedTags(filePath, tagData, embedPicPath); err != nil {
+				if h.Logger != nil {
+					h.Logger.Error("failed to embed tags", "platform", plat.Name(), "trackID", trackID, "error", err)
 				}
 			}
 		}
@@ -561,12 +860,15 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, statusMsg *mod
 					songCopy.ThumbFileID = result.message.Audio.Thumbnail.FileID
 				}
 			}
-			if h.Repo != nil {
-				if result.err == nil && songCopy.FileID != "" {
-					if err := h.Repo.Create(baseCtx, &songCopy); err != nil {
-						if h.Logger != nil {
-							h.Logger.Error("failed to save song info", "platform", platformName, "trackID", trackID, "error", err)
-						}
+			if h.Repo != nil && result.err == nil && songCopy.FileID != "" {
+				if err := h.Repo.Create(baseCtx, &songCopy); err != nil {
+					if h.Logger != nil {
+						h.Logger.Error("failed to save song info", "platform", platformName, "trackID", trackID, "error", err)
+					}
+				}
+				if err := h.Repo.IncrementSendCount(baseCtx); err != nil {
+					if h.Logger != nil {
+						h.Logger.Error("failed to update send count", "error", err)
 					}
 				}
 			}
@@ -578,7 +880,7 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *bot.Bot, statusMsg *mod
 					if result.err != nil {
 						errText = result.err.Error()
 					}
-					statusMessage = editMessageTextOrSend(baseCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, fmt.Sprintf(musicInfoMsg+uploadFailed, songCopy.SongName, songCopy.SongAlbum, songCopy.FileExt, float64(songCopy.MusicSize)/1024/1024, errText))
+					statusMessage = editMessageTextOrSend(baseCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, fmt.Sprintf(musicInfoMsg+uploadFailed, songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), errText))
 				}
 			}
 			cleanupFiles(cleanupCopy...)
@@ -650,7 +952,7 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 		h.UploadLimiter <- struct{}{}
 	}
 	if task.statusMsg != nil && task.statusBot != nil {
-		text := fmt.Sprintf(musicInfoMsg+uploading, task.songInfo.SongName, task.songInfo.SongAlbum, task.songInfo.FileExt, float64(task.songInfo.MusicSize)/1024/1024)
+		text := fmt.Sprintf(musicInfoMsg+uploading, task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize))
 		statusCtx := task.ctx
 		if statusCtx == nil {
 			statusCtx = context.Background()
@@ -743,7 +1045,7 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 		if entry.bot == nil || entry.message == nil {
 			continue
 		}
-		text := fmt.Sprintf(musicInfoMsg+uploading, entry.songInfo.SongName, entry.songInfo.SongAlbum, entry.songInfo.FileExt, float64(entry.songInfo.MusicSize)/1024/1024)
+		text := fmt.Sprintf(musicInfoMsg+uploading, entry.songInfo.SongName, entry.songInfo.SongAlbum, formatFileInfo(entry.songInfo.FileExt, entry.songInfo.MusicSize))
 		if idx > 0 {
 			queueText := fmt.Sprintf("当前正在发送队列中，前面还有 %d 个任务", idx)
 			text = text + "\n" + queueText
@@ -999,4 +1301,219 @@ func editMessageTextOrSend(ctx context.Context, b *bot.Bot, rateLimiter *telegra
 		return msg
 	}
 	return newMsg
+}
+
+// deriveBitrateFromFile derives bitrate and updates songInfo from actual file metrics.
+// Uses file size and duration (from track or FLAC streaminfo if available).
+// If duration is missing, attempts ffprobe as fallback.
+// If duration still unknown, clears placeholder bitrate (>=900 kbps).
+// Errors are silently ignored.
+func deriveBitrateFromFile(filePath string, songInfo *botpkg.SongInfo) {
+	if songInfo == nil || strings.TrimSpace(filePath) == "" {
+		return
+	}
+
+	// Get file size
+	stat, err := os.Stat(filePath)
+	if err != nil || stat.Size() <= 0 {
+		return
+	}
+	fileSizeBytes := stat.Size()
+
+	// Correct file extension if FLAC header detected
+	if isValidFLACFile(filePath) && !strings.EqualFold(songInfo.FileExt, "flac") {
+		songInfo.FileExt = "flac"
+	}
+
+	// Determine duration: try existing, then FLAC, then ffprobe
+	durationSeconds := songInfo.Duration
+	if durationSeconds <= 0 || strings.EqualFold(songInfo.FileExt, "flac") {
+		// Try FLAC streaminfo
+		flacDuration := parseFLACDuration(filePath)
+		if flacDuration > 0 {
+			durationSeconds = flacDuration
+			songInfo.Duration = flacDuration
+		}
+	}
+
+	// Fallback: try ffprobe if duration still unknown
+	if durationSeconds <= 0 {
+		ffprobeDuration := getFFprobeDuration(filePath)
+		if ffprobeDuration > 0 {
+			durationSeconds = ffprobeDuration
+			songInfo.Duration = ffprobeDuration
+		}
+	}
+
+	// Prefer ffprobe-reported bitrate if available
+	ffprobeBitrate := getFFprobeBitrate(filePath)
+	if ffprobeBitrate > 0 {
+		songInfo.BitRate = ffprobeBitrate
+	} else if durationSeconds > 0 {
+		bits := fileSizeBytes * 8
+		bitRateBps := int(bits / int64(durationSeconds))
+		if bitRateBps > 0 {
+			songInfo.BitRate = bitRateBps
+		}
+	} else if songInfo.BitRate >= 900000 {
+		// Duration still unknown: clear placeholder bitrate (>= 900 kbps = 900000 bps)
+		songInfo.BitRate = 0
+	}
+
+	// Always update file size from actual file
+	songInfo.MusicSize = int(fileSizeBytes)
+}
+
+func (h *MusicHandler) buildFallbackTagData(ctx context.Context, plat platform.Platform, track *platform.Track, picPath string) *id3.TagData {
+	if track == nil {
+		return nil
+	}
+
+	tagData := &id3.TagData{
+		Title:    track.Title,
+		CoverURL: track.CoverURL,
+	}
+
+	if len(track.Artists) > 0 {
+		artists := make([]string, len(track.Artists))
+		for i, a := range track.Artists {
+			artists[i] = a.Name
+		}
+		tagData.Artist = strings.Join(artists, ", ")
+	}
+
+	if track.Album != nil {
+		tagData.Album = track.Album.Title
+		if len(track.Album.Artists) > 0 {
+			artists := make([]string, len(track.Album.Artists))
+			for i, a := range track.Album.Artists {
+				artists[i] = a.Name
+			}
+			tagData.AlbumArtist = strings.Join(artists, ", ")
+		}
+	}
+
+	if plat.SupportsLyrics() {
+		if lyrics, err := plat.GetLyrics(ctx, track.ID); err == nil && lyrics != nil {
+			if strings.TrimSpace(lyrics.Plain) != "" {
+				tagData.Lyrics = lyrics.Plain
+			}
+		}
+	}
+
+	return tagData
+}
+
+// parseFLACDuration extracts duration in seconds from FLAC file's streaminfo block.
+// Returns 0 if unable to parse or format is invalid.
+func parseFLACDuration(filePath string) int {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	parsed, err := flac.ParseMetadata(file)
+	if err != nil {
+		return 0
+	}
+
+	streamInfo, err := parsed.GetStreamInfo()
+	if err != nil || streamInfo == nil {
+		return 0
+	}
+
+	if streamInfo.SampleRate > 0 && streamInfo.SampleCount > 0 {
+		durationSeconds := int(streamInfo.SampleCount / int64(streamInfo.SampleRate))
+		return durationSeconds
+	}
+
+	return 0
+}
+
+func isValidFLACFile(filePath string) bool {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	header := make([]byte, 4)
+	if _, err := file.Read(header); err != nil {
+		return false
+	}
+
+	return header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43
+}
+
+func getFFprobeDuration(filePath string) int {
+	ffprobePath, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, ffprobePath,
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1:nokey=1",
+		filePath,
+	)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	durStr := strings.TrimSpace(string(output))
+	if durStr == "" {
+		return 0
+	}
+
+	durationFloat, err := strconv.ParseFloat(durStr, 64)
+	if err != nil {
+		return 0
+	}
+
+	if durationFloat <= 0 {
+		return 0
+	}
+
+	return int(durationFloat)
+}
+
+func getFFprobeBitrate(filePath string) int {
+	ffprobePath, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, ffprobePath,
+		"-v", "error",
+		"-show_entries", "format=bit_rate",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		filePath,
+	)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	bitrateStr := strings.TrimSpace(string(output))
+	if bitrateStr == "" || strings.EqualFold(bitrateStr, "N/A") {
+		return 0
+	}
+
+	bitrateFloat, err := strconv.ParseFloat(bitrateStr, 64)
+	if err != nil || bitrateFloat <= 0 {
+		return 0
+	}
+
+	return int(bitrateFloat)
 }

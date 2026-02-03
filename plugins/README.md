@@ -1,6 +1,7 @@
 # 插件开发指南
 
 本指南帮助第三方开发者为 MusicBot-Go 开发新的音乐平台插件。
+如果你希望编写动态脚本插件，请参考 `plugins/scripts/README.md`。
 
 ## 概述
 

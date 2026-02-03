@@ -42,6 +42,32 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *bot.Bot, update *models.
 		}
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(args), "all") {
+		if err := h.Repo.DeleteAll(ctx); err != nil {
+			params := &bot.SendMessageParams{
+				ChatID:          message.Chat.ID,
+				Text:            "清除缓存失败",
+				ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+			}
+			if h.RateLimiter != nil {
+				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.SendMessage(ctx, params)
+			}
+			return
+		}
+		params := &bot.SendMessageParams{
+			ChatID:          message.Chat.ID,
+			Text:            "已清空所有缓存",
+			ReplyParameters: &models.ReplyParameters{MessageID: message.ID},
+		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.SendMessage(ctx, params)
+		}
+		return
+	}
 
 	parts := strings.Fields(args)
 

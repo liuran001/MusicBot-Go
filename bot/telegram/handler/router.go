@@ -30,6 +30,7 @@ type Router struct {
 // Register registers all handlers to the bot.
 func (r *Router) Register(b *bot.Bot, botName string) {
 	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "start"), r.wrapMessage(r.Music))
+	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "help"), r.wrapMessage(r.Music))
 	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "music"), r.wrapMessage(r.Music))
 	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "netease"), r.wrapMessage(r.Music))
 	b.RegisterHandlerMatchFunc(matchCommandFunc(botName, "program"), r.wrapMessage(r.Music))
@@ -76,6 +77,9 @@ func (r *Router) Register(b *bot.Bot, botName string) {
 		if update.Message == nil || update.Message.Text == "" {
 			return false
 		}
+		if hasSearchPlatformSuffix(update.Message.Text) {
+			return false
+		}
 		// Use PlatformManager for dynamic URL matching if available
 		if r.PlatformManager != nil {
 			if _, _, matched := r.PlatformManager.MatchText(update.Message.Text); matched {
@@ -96,6 +100,9 @@ func (r *Router) Register(b *bot.Bot, botName string) {
 			return false
 		}
 		text := update.Message.Text
+		if hasSearchPlatformSuffix(text) {
+			return true
+		}
 		// Use PlatformManager to exclude platform URLs if available
 		if r.PlatformManager != nil {
 			if _, _, matched := r.PlatformManager.MatchText(text); matched {
@@ -183,11 +190,26 @@ func matchCommandFunc(botName, cmd string) func(update *models.Update) bool {
 
 func isReservedCommand(command string) bool {
 	switch command {
-	case "start", "music", "netease", "program", "search", "lyric", "recognize", "about", "status", "settings", "rmcache":
+	case "start", "help", "music", "netease", "program", "search", "lyric", "recognize", "about", "status", "settings", "rmcache":
 		return true
 	case "reload":
 		return true
 	default:
 		return false
 	}
+}
+
+func hasSearchPlatformSuffix(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	keyword := strings.TrimSpace(text)
+	if strings.HasPrefix(keyword, "/") {
+		keyword = commandArguments(keyword)
+	}
+	if strings.TrimSpace(keyword) == "" {
+		return false
+	}
+	_, _, ok := parseSearchKeywordPlatform(keyword)
+	return ok
 }

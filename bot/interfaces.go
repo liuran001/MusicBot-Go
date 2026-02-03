@@ -27,11 +27,15 @@ type SongRepository interface {
 	Create(ctx context.Context, song *SongInfo) error
 	Update(ctx context.Context, song *SongInfo) error
 	Delete(ctx context.Context, musicID int) error
+	DeleteAll(ctx context.Context) error
 	DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error
 	DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error
 	Count(ctx context.Context) (int64, error)
 	CountByUserID(ctx context.Context, userID int64) (int64, error)
 	CountByChatID(ctx context.Context, chatID int64) (int64, error)
+	CountByPlatform(ctx context.Context) (map[string]int64, error)
+	GetSendCount(ctx context.Context) (int64, error)
+	IncrementSendCount(ctx context.Context) error
 	Last(ctx context.Context) (*SongInfo, error)
 	GetUserSettings(ctx context.Context, userID int64) (*UserSettings, error)
 	UpdateUserSettings(ctx context.Context, settings *UserSettings) error

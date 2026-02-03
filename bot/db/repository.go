@@ -56,7 +56,7 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&SongInfoModel{}, &UserSettingsModel{}); err != nil {
+	if err := db.AutoMigrate(&SongInfoModel{}, &UserSettingsModel{}, &BotStatModel{}); err != nil {
 		return nil, err
 	}
 	if err := db.AutoMigrate(&GroupSettingsModel{}); err != nil {
@@ -229,6 +229,16 @@ func (r *Repository) Delete(ctx context.Context, musicID int) error {
 	})
 }
 
+// DeleteAll clears all cached songs.
+func (r *Repository) DeleteAll(ctx context.Context) error {
+	if r == nil || r.db == nil {
+		return errors.New("repository not configured")
+	}
+	return r.db.WithContext(ctx).
+		Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Delete(&SongInfoModel{}).Error
+}
+
 // DeleteByPlatformTrackID removes a song by platform, track ID and quality.
 func (r *Repository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -261,6 +271,62 @@ func (r *Repository) CountByChatID(ctx context.Context, chatID int64) (int64, er
 	var count int64
 	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Where("from_chat_id = ?", chatID).Count(&count).Error
 	return count, err
+}
+
+// CountByPlatform returns cached counts grouped by platform.
+func (r *Repository) CountByPlatform(ctx context.Context) (map[string]int64, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("repository not configured")
+	}
+	rows := make([]struct {
+		Platform string
+		Count    int64
+	}, 0)
+	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).
+		Select("platform, COUNT(*) as count").
+		Group("platform").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		result[row.Platform] = row.Count
+	}
+	return result, nil
+}
+
+// GetSendCount returns total successful send count.
+func (r *Repository) GetSendCount(ctx context.Context) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, errors.New("repository not configured")
+	}
+	var stat BotStatModel
+	err := r.db.WithContext(ctx).Where("key = ?", "send_count").First(&stat).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return stat.Value, nil
+}
+
+// IncrementSendCount increments total successful send count.
+func (r *Repository) IncrementSendCount(ctx context.Context) error {
+	if r == nil || r.db == nil {
+		return errors.New("repository not configured")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&BotStatModel{}).Where("key = ?", "send_count").UpdateColumn("value", gorm.Expr("value + ?", 1))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected > 0 {
+			return nil
+		}
+		return tx.Create(&BotStatModel{Key: "send_count", Value: 1}).Error
+	})
 }
 
 // Last returns the last cached record.

@@ -154,6 +154,11 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *bot.Bot, quer
 	if strings.TrimSpace(fallbackPlatform) == "" {
 		fallbackPlatform = "netease"
 	}
+	keyWord, requestedPlatform, hasPlatformSuffix := parseSearchKeywordPlatform(keyWord)
+	if hasPlatformSuffix {
+		platformName = requestedPlatform
+		fallbackPlatform = ""
+	}
 	if h.Repo != nil {
 		if settings, err := h.Repo.GetUserSettings(ctx, query.From.ID); err == nil && settings != nil {
 			platformName = settings.DefaultPlatform
@@ -304,11 +309,12 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *bot.Bot, quer
 		keyboard = &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	}
 
+	infoLine := formatInlineInfoLine(platformName, info.FileExt, info.MusicSize+info.EmbPicSize, info.BitRate)
 	newAudio := &models.InlineQueryResultCachedDocument{
 		ID:             query.ID,
 		DocumentFileID: info.FileID,
 		Title:          fmt.Sprintf("%s - %s", info.SongArtists, info.SongName),
-		Caption:        fmt.Sprintf(musicInfo, info.SongName, info.SongArtists, info.SongAlbum, platformTag(platformName), info.FileExt, float64(info.MusicSize+info.EmbPicSize)/1024/1024, float64(info.BitRate)/1000, h.BotName),
+		Caption:        fmt.Sprintf(musicInfo, info.SongName, info.SongArtists, info.SongAlbum, infoLine, h.BotName),
 		ReplyMarkup:    keyboard,
 		Description:    info.SongAlbum,
 	}

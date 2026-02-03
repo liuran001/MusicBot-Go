@@ -3,6 +3,8 @@ package dynplugin
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/liuran001/MusicBot-Go/bot/config"
@@ -14,12 +16,21 @@ import (
 type Manager struct {
 	mu        sync.RWMutex
 	platforms map[string]*scriptPlatform
+	plugins   map[string]PluginInfo
 	logger    *logpkg.Logger
+}
+
+// PluginInfo describes metadata for a loaded script plugin.
+type PluginInfo struct {
+	Name    string
+	Version string
+	URL     string
 }
 
 func NewManager(logger *logpkg.Logger) *Manager {
 	return &Manager{
 		platforms: make(map[string]*scriptPlatform),
+		plugins:   make(map[string]PluginInfo),
 		logger:    logger,
 	}
 }
@@ -41,6 +52,7 @@ func (m *Manager) reload(ctx context.Context, cfg *config.Config, platformManage
 		return nil
 	}
 	loaded := make(map[string]struct{})
+	pluginInfos := make(map[string]PluginInfo)
 
 	for _, name := range pluginNames {
 		if name == "" {
@@ -65,6 +77,15 @@ func (m *Manager) reload(ctx context.Context, cfg *config.Config, platformManage
 			}
 			continue
 		}
+		pluginInfo := PluginInfo{
+			Name:    strings.TrimSpace(meta.Name),
+			Version: strings.TrimSpace(meta.Version),
+			URL:     strings.TrimSpace(meta.URL),
+		}
+		if pluginInfo.Name == "" {
+			pluginInfo.Name = name
+		}
+		pluginInfos[name] = pluginInfo
 		for _, info := range meta.Platforms {
 			if info.Name == "" {
 				continue
@@ -98,8 +119,28 @@ func (m *Manager) reload(ctx context.Context, cfg *config.Config, platformManage
 		}
 	}
 	m.mu.RUnlock()
+	m.mu.Lock()
+	m.plugins = pluginInfos
+	m.mu.Unlock()
 
 	return nil
+}
+
+// PluginInfos returns metadata for loaded script plugins.
+func (m *Manager) PluginInfos() []PluginInfo {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]PluginInfo, 0, len(m.plugins))
+	for _, info := range m.plugins {
+		result = append(result, info)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
 }
 
 func pluginEnabled(cfg *config.Config, name string) bool {

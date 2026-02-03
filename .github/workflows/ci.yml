@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ["main"]
+    tags: ["*"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
@@ -16,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -49,6 +52,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Derive build metadata
+        id: build_meta
+        run: |
+          TAG=$(git tag --points-at HEAD | head -n 1)
+          if [ -z "$TAG" ]; then
+            VERSION=$(git rev-parse --short=7 HEAD)
+          else
+            VERSION="$TAG"
+          fi
+          COMMIT=$(git rev-parse HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "build_time=$BUILD_TIME" >> "$GITHUB_OUTPUT"
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -63,7 +82,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           mkdir -p dist
-          go build -trimpath -o "dist/musicbot-go-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
+          go build -trimpath -ldflags "-X main.versionName=${{ steps.build_meta.outputs.version }} -X main.commitSHA=${{ steps.build_meta.outputs.commit }} -X main.buildTime=${{ steps.build_meta.outputs.build_time }}" -o "dist/musicbot-go-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

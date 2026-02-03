@@ -3,6 +3,7 @@
 此目录用于存放 **动态脚本插件**（由 yaegi 解释执行），无需重新编译主程序。
 
 如需将插件放在独立仓库，可将 `PluginScriptDir` 指向该仓库的 `scripts` 目录。
+脚本目录的上层需存在 `go.mod`（加载器会向上查找最多 10 层）。
 
 ## 目录结构
 ```
@@ -22,6 +23,9 @@ func Meta() map[string]interface{}
 `Meta()` 返回结构示例：
 ```json
 {
+  "name": "Meting",
+  "version": "0.1.0",
+  "url": "https://github.com/liuran001/MusicBot-Meting-Plugin",
   "platforms": [
     {
       "name": "tencent",
@@ -38,6 +42,8 @@ func Meta() map[string]interface{}
   ]
 }
 ```
+
+`name/version/url` 会在 `/about` 中展示。
 
 ## 可选实现的函数
 ```go

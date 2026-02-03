@@ -28,7 +28,7 @@ MusicBot-Go/
 │   ├── telegram/                # Telegram Bot 集成
 │   │   ├── bot.go               # Bot 实例创建
 │   │   └── handler/             # 命令处理器
-│   │       ├── music.go         # 音乐下载/发送核心流程
+│   │       ├── music.go         # 音乐下载/发送核心流程 (/music + 关键词回退)
 │   │       ├── search.go        # 搜索处理
 │   │       ├── lyric.go         # 歌词获取
 │   │       ├── settings.go      # 用户设置
@@ -40,7 +40,7 @@ MusicBot-Go/
 │   └── types.go                 # 全局类型定义
 └── plugins/                     # 平台插件
     ├── all/                     # 插件聚合 (空白导入)
-    ├── scripts/                 # 动态脚本插件
+     ├── scripts/                 # 动态脚本插件 (PluginScriptDir)
     └── netease/                 # 网易云音乐插件
         ├── client.go            # API 客户端
         ├── platform.go          # Platform 接口实现
@@ -62,9 +62,11 @@ main.go
             ├─> 加载配置
             ├─> 初始化数据库
              ├─> 加载插件注册表并注册平台
-            ├─> 创建 Telegram Bot
-            ├─> 注册命令处理器
-            └─> 启动 Bot 轮询
+             ├─> 加载动态脚本插件 (PluginScriptDir)
+             ├─> 创建 Telegram Bot
+             ├─> 注册命令处理器
+             ├─> 启动识曲服务 (Node.js)
+             └─> 启动 Bot 轮询
 ```
 
 ### 2. 命令处理流程 (以 /music 为例)
@@ -73,8 +75,9 @@ main.go
 Telegram Update
   └─> Router
         └─> MusicHandler.Handle()
-             ├─> 解析文本/URL
+             ├─> 解析文本/URL/ID/关键词
              ├─> PlatformManager.MatchText()/MatchURL()  # 识别平台
+             ├─> (若为关键词) 按默认平台搜索并回退到其他平台
              ├─> Platform.GetTrack()                     # 获取歌曲信息
              ├─> Repository.FindByPlatformTrackID()      # 检查缓存
              ├─> (缓存未命中)
@@ -90,8 +93,9 @@ Telegram Update
 ```
 Handler
   └─> PlatformManager
-       ├─> Plugins Registry (init 注册工厂)
-       ├─> Contribution (Platform / ID3 / Recognizer)
+        ├─> Plugins Registry (init 注册工厂)
+        ├─> Contribution (Platform / ID3 / Recognizer)
+        ├─> 动态脚本插件 Meta (name/version/url)
        ├─> Registry.GetPlatform("netease")
        ├─> Registry.MatchText(text)/MatchURL(url)
        └─> Platform Interface
@@ -149,8 +153,15 @@ type SongRepository interface {
     Create(ctx context.Context, song *SongInfo) error
     Update(ctx context.Context, song *SongInfo) error
     Delete(ctx context.Context, musicID int) error
+    DeleteAll(ctx context.Context) error
     DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error
     DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error
+    Count(ctx context.Context) (int64, error)
+    CountByUserID(ctx context.Context, userID int64) (int64, error)
+    CountByChatID(ctx context.Context, chatID int64) (int64, error)
+    CountByPlatform(ctx context.Context) (map[string]int64, error)
+    GetSendCount(ctx context.Context) (int64, error)
+    IncrementSendCount(ctx context.Context) error
     GetUserSettings(ctx context.Context, userID int64) (*UserSettings, error)
     UpdateUserSettings(ctx context.Context, settings *UserSettings) error
 }
@@ -197,9 +208,10 @@ type SongRepository interface {
 - 用户可设置默认音质 (standard/high/lossless/hires)
 
 ### 集成点
-- **SearchHandler**: 使用用户默认平台搜索
-- **MusicHandler**: 使用用户默认音质下载
-- **平台回退**: 搜索失败时自动切换到 `SearchFallbackPlatform`
+ - **SearchHandler**: 使用用户默认平台搜索
+ - **MusicHandler**: 使用用户默认音质下载
+ - **平台回退**: 搜索失败时自动切换到 `SearchFallbackPlatform`
+ - **/music 关键词**: 未匹配链接/ID 时执行同样的回退搜索
 
 ### 数据库
 ```sql
@@ -254,7 +266,7 @@ CREATE TABLE user_settings (
 
 ## 技术栈
 
-- **语言**: Go 1.23+
+- **语言**: Go 1.25.6+
 - **Telegram SDK**: github.com/go-telegram/bot
 - **数据库**: SQLite (github.com/glebarez/sqlite + GORM)
 - **配置**: Viper + INI

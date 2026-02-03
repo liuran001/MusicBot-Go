@@ -32,6 +32,9 @@ func extractPlatformTrack(message *models.Message, manager platform.Manager) (pl
 	}
 
 	if manager != nil {
+		if _, _, hasSuffix := parseSearchKeywordPlatform(text); hasSuffix {
+			return "", "", false
+		}
 		if plat, id, matched := manager.MatchText(text); matched {
 			return plat, id, true
 		}
@@ -73,6 +76,26 @@ func commandArguments(text string) string {
 	return strings.TrimSpace(parts[1])
 }
 
+func commandName(text, botName string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return ""
+	}
+	parts := strings.SplitN(text, " ", 2)
+	command := strings.TrimPrefix(parts[0], "/")
+	if command == "" {
+		return ""
+	}
+	if strings.Contains(command, "@") {
+		seg := strings.SplitN(command, "@", 2)
+		command = seg[0]
+		if botName != "" && len(seg) > 1 && seg[1] != "" && seg[1] != botName {
+			return ""
+		}
+	}
+	return command
+}
+
 func isNumeric(s string) bool {
 	_, err := strconv.Atoi(s)
 	return err == nil
@@ -110,7 +133,18 @@ func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
 	songNameHTML := songInfo.SongName
 	artistsHTML := songInfo.SongArtists
 	albumHTML := songInfo.SongAlbum
-	platformTag := "#" + platformTag(songInfo.Platform)
+	infoParts := make([]string, 0, 2)
+	if sizeText := formatFileSize(songInfo.MusicSize + songInfo.EmbPicSize); sizeText != "" {
+		infoParts = append(infoParts, sizeText)
+	}
+	if bitrateText := formatBitrate(songInfo.BitRate); bitrateText != "" {
+		infoParts = append(infoParts, bitrateText)
+	}
+	infoLine := strings.Join(infoParts, " ")
+	if infoLine != "" {
+		infoLine += "\n"
+	}
+	tags := strings.Join(formatInfoTags(songInfo.Platform, songInfo.FileExt), " ")
 
 	if strings.TrimSpace(songInfo.TrackURL) != "" {
 		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", songInfo.TrackURL, songInfo.SongName)
@@ -135,16 +169,54 @@ func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
 		albumHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", songInfo.AlbumURL, songInfo.SongAlbum)
 	}
 
-	return fmt.Sprintf("<b>「%s」- %s</b>\n专辑: %s\n<blockquote>%.2fMB %.2fkbps\n%s #%s\n</blockquote>via @%s",
+	return fmt.Sprintf("<b>「%s」- %s</b>\n专辑: %s\n<blockquote>%s%s\n</blockquote>via @%s",
 		songNameHTML,
 		artistsHTML,
 		albumHTML,
-		float64(songInfo.MusicSize+songInfo.EmbPicSize)/1024/1024,
-		float64(songInfo.BitRate)/1000,
-		platformTag,
-		songInfo.FileExt,
+		infoLine,
+		tags,
 		botName,
 	)
+}
+
+func formatInfoTags(platformName, fileExt string) []string {
+	tags := []string{"#" + platformTag(platformName)}
+	if strings.TrimSpace(fileExt) != "" {
+		tags = append(tags, "#"+fileExt)
+	}
+	return tags
+}
+
+func formatFileSize(musicSize int) string {
+	if musicSize <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2fMB", float64(musicSize)/1024/1024)
+}
+
+func formatBitrate(bitRate int) string {
+	if bitRate <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.2fkbps", float64(bitRate)/1000)
+}
+
+func formatInlineInfoLine(platformName, fileExt string, musicSize int, bitRate int) string {
+	parts := formatInfoTags(platformName, fileExt)
+	if sizeText := formatFileSize(musicSize); sizeText != "" {
+		parts = append(parts, sizeText)
+	}
+	if bitrateText := formatBitrate(bitRate); bitrateText != "" {
+		parts = append(parts, bitrateText)
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatFileInfo(fileExt string, musicSize int) string {
+	if musicSize <= 0 || strings.TrimSpace(fileExt) == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s %.2fMB", fileExt, float64(musicSize)/1024/1024)
 }
 
 func platformEmoji(platformName string) string {
@@ -154,6 +226,8 @@ func platformEmoji(platformName string) string {
 	case "spotify":
 		return "🎧"
 	case "qqmusic":
+		return "🎶"
+	case "tencent":
 		return "🎶"
 	default:
 		return "🎵"
@@ -167,6 +241,8 @@ func platformDisplayName(platformName string) string {
 	case "spotify":
 		return "Spotify"
 	case "qqmusic":
+		return "QQ音乐"
+	case "tencent":
 		return "QQ音乐"
 	default:
 		return platformName

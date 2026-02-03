@@ -34,6 +34,15 @@ const (
 	neteaseSearchLimit = 48
 )
 
+var searchPlatformAliases = map[string]string{
+	"wy":      "netease",
+	"163":     "netease",
+	"netease": "netease",
+	"qq":      "tencent",
+	"tencent": "tencent",
+	"qqmusic": "tencent",
+}
+
 type searchState struct {
 	keyword     string
 	platform    string
@@ -94,6 +103,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 		return
 	}
 
+	keyword, requestedPlatform, hasPlatformSuffix := parseSearchKeywordPlatform(keyword)
 	// Get user's default platform from settings
 	platformName := h.DefaultPlatform
 	if platformName == "" {
@@ -122,6 +132,10 @@ func (h *SearchHandler) Handle(ctx context.Context, b *bot.Bot, update *models.U
 				platformName = settings.DefaultPlatform
 			}
 		}
+	}
+	if hasPlatformSuffix {
+		platformName = requestedPlatform
+		fallbackPlatform = ""
 	}
 
 	plat := h.PlatformManager.Get(platformName)
@@ -317,6 +331,14 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update *
 		_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return
 	}
+	if action == "platform" {
+		if len(parts) < 5 {
+			return
+		}
+		state.platform = strings.TrimSpace(parts[3])
+		page = 1
+		state.limit = h.Search.searchLimit(state.platform)
+	}
 	if action == "home" {
 		page = 1
 	}
@@ -328,6 +350,9 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update *
 	}
 	plat := h.Search.PlatformManager.Get(state.platform)
 	if plat == nil {
+		return
+	}
+	if !plat.SupportsSearch() {
 		return
 	}
 	limit := state.limit
@@ -370,6 +395,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *bot.Bot, update *
 	} else {
 		_, _ = b.EditMessageText(ctx, params)
 	}
+	h.Search.storeSearchState(messageID, state)
 	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 }
 
@@ -477,8 +503,61 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	} else if page == 1 {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
+
+	platforms := h.searchPlatforms()
+	if len(platforms) > 1 {
+		switchRow := make([]models.InlineKeyboardButton, 0, len(platforms))
+		for _, name := range platforms {
+			text := fmt.Sprintf("%s %s", platformEmoji(name), platformDisplayName(name))
+			if name == platformName {
+				text = "✅ " + text
+			}
+			switchRow = append(switchRow, models.InlineKeyboardButton{
+				Text:         text,
+				CallbackData: fmt.Sprintf("search %d platform %s %d", messageID, name, requesterID),
+			})
+		}
+		rows = append(rows, switchRow)
+	}
 	keyboard := &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	return textMessage.String(), keyboard
+}
+
+func (h *SearchHandler) searchPlatforms() []string {
+	if h == nil || h.PlatformManager == nil {
+		return nil
+	}
+	names := h.PlatformManager.List()
+	results := make([]string, 0, len(names))
+	for _, name := range names {
+		plat := h.PlatformManager.Get(name)
+		if plat == nil || !plat.SupportsSearch() {
+			continue
+		}
+		results = append(results, name)
+	}
+	return results
+}
+
+func parseSearchKeywordPlatform(keyword string) (string, string, bool) {
+	trimmed := strings.TrimSpace(keyword)
+	if trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) < 2 {
+		return trimmed, "", false
+	}
+	last := strings.ToLower(parts[len(parts)-1])
+	platformName, ok := searchPlatformAliases[last]
+	if !ok {
+		return trimmed, "", false
+	}
+	mainKeyword := strings.Join(parts[:len(parts)-1], " ")
+	if strings.TrimSpace(mainKeyword) == "" {
+		return trimmed, "", false
+	}
+	return mainKeyword, platformName, true
 }
 
 func (h *SearchHandler) storeSearchState(messageID int, state *searchState) {

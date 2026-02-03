@@ -72,6 +72,9 @@ func extractURL(text string) string {
 
 func parseMusicID(text string) int {
 	messageText := normalizeText(text)
+	if messageText == "" {
+		return 0
+	}
 	urlStr := extractURL(messageText)
 	if urlStr != "" && strings.Contains(urlStr, "song") {
 		parsed, err := url.Parse(urlStr)
@@ -82,7 +85,10 @@ func parseMusicID(text string) int {
 			}
 		}
 	}
-	musicID, _ := strconv.Atoi(linkTestMusic(messageText))
+	if !isDigits(messageText) {
+		return 0
+	}
+	musicID, _ := strconv.Atoi(messageText)
 	return musicID
 }
 
@@ -106,6 +112,18 @@ func extractInt(text string) string {
 		return ""
 	}
 	return matchArr[0]
+}
+
+func isDigits(text string) bool {
+	if text == "" {
+		return false
+	}
+	for _, ch := range text {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func getProgramRealID(programID int) int {

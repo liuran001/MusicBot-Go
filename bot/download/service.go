@@ -75,6 +75,32 @@ func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
 	return s
 }
 
+func (s *DownloadService) FillMetadata(info *platform.DownloadInfo, resp *http.Response) {
+	if info == nil || resp == nil {
+		return
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	contentDisposition := resp.Header.Get("Content-Disposition")
+
+	isAudioContent := strings.HasPrefix(contentType, "audio/")
+	hasFilename := strings.Contains(contentDisposition, "filename")
+
+	if (isAudioContent || hasFilename) && resp.ContentLength > 0 {
+		info.Size = resp.ContentLength
+	}
+
+	if info.Format == "" && contentType != "" {
+		if strings.Contains(contentType, "mpeg") || strings.Contains(contentType, "mp3") {
+			info.Format = "mp3"
+		} else if strings.Contains(contentType, "flac") {
+			info.Format = "flac"
+		} else if strings.Contains(contentType, "aac") || strings.Contains(contentType, "mp4") {
+			info.Format = "m4a"
+		}
+	}
+}
+
 func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadInfo, destPath string, progress ProgressFunc) (int64, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -191,6 +217,8 @@ func (s *DownloadService) downloadOnce(ctx context.Context, rawURL, originalHost
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
+
+	s.FillMetadata(info, resp)
 
 	file, err := os.Create(destPath)
 	if err != nil {
