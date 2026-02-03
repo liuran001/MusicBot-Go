@@ -124,7 +124,8 @@ jobs:
           {
             echo "## Changes"
             if [ -n "$PREV_TAG" ]; then
-              echo "\nFrom $PREV_TAG to $TAG_NAME"
+              echo ""
+              echo "From $PREV_TAG to $TAG_NAME"
               git log --pretty=format:"- %s (%an)" "$PREV_TAG".."$TAG_NAME"
             else
               git log --pretty=format:"- %s (%an)" "$TAG_NAME"
