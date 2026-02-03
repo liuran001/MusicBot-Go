@@ -85,8 +85,11 @@ RecognizePort = 3737
 - `/search <关键词>` - 搜索音乐
 - `/lyric <URL>` - 获取歌词
 - `/recognize` - 识别语音中的歌曲 (回复语音消息)
+- `/settings` - 设置默认平台和音质
 - `/status` - 查看 Bot 状态和支持的平台
 - `/about` - 关于本 Bot
+- `/rmcache <platform> <trackID>|<URL>|all` - 清理缓存（管理员）
+- `/reload` - 重新加载动态脚本插件（管理员）
 
 ### 支持的 URL 格式
 

@@ -40,7 +40,7 @@ MusicBot-Go/
 │   └── types.go                 # 全局类型定义
 └── plugins/                     # 平台插件
     ├── all/                     # 插件聚合 (空白导入)
-     ├── scripts/                 # 动态脚本插件 (PluginScriptDir)
+    ├── scripts/                 # 动态脚本插件 (PluginScriptDir)
     └── netease/                 # 网易云音乐插件
         ├── client.go            # API 客户端
         ├── platform.go          # Platform 接口实现
@@ -144,7 +144,7 @@ type Platform interface {
 
 ### 数据层 (`bot/db/`)
 
-**核心接口**: `SongRepository`
+**核心接口**: `SongRepository`（由 `bot/db/Repository` 实现）
 ```go
 type SongRepository interface {
     FindByMusicID(ctx context.Context, musicID int) (*SongInfo, error)
@@ -162,14 +162,19 @@ type SongRepository interface {
     CountByPlatform(ctx context.Context) (map[string]int64, error)
     GetSendCount(ctx context.Context) (int64, error)
     IncrementSendCount(ctx context.Context) error
+    Last(ctx context.Context) (*SongInfo, error)
     GetUserSettings(ctx context.Context, userID int64) (*UserSettings, error)
     UpdateUserSettings(ctx context.Context, settings *UserSettings) error
+    GetGroupSettings(ctx context.Context, chatID int64) (*GroupSettings, error)
+    UpdateGroupSettings(ctx context.Context, settings *GroupSettings) error
 }
 ```
 
 **数据模型**:
-- `SongModel`: 歌曲缓存
+- `SongInfoModel`: 歌曲缓存
 - `UserSettingsModel`: 用户偏好设置 (默认平台/音质)
+- `GroupSettingsModel`: 群聊偏好设置 (默认平台/音质)
+- `BotStatModel`: 统计信息（发送次数等）
 
 ### Telegram 处理器 (`bot/telegram/handler/`)
 
@@ -206,6 +211,7 @@ type SongRepository interface {
 ### 功能
 - 用户可设置默认音乐平台 (未来多平台时生效)
 - 用户可设置默认音质 (standard/high/lossless/hires)
+- 群聊可设置默认平台/音质（群聊优先级高于用户设置）
 
 ### 集成点
  - **SearchHandler**: 使用用户默认平台搜索
@@ -219,7 +225,18 @@ CREATE TABLE user_settings (
     id INTEGER PRIMARY KEY,
     user_id INTEGER UNIQUE NOT NULL,
     default_platform TEXT DEFAULT 'netease',
-    default_quality TEXT DEFAULT 'high',
+    default_quality TEXT DEFAULT 'hires',
+    created_at DATETIME,
+    updated_at DATETIME
+);
+```
+
+```sql
+CREATE TABLE group_settings (
+    id INTEGER PRIMARY KEY,
+    chat_id INTEGER UNIQUE NOT NULL,
+    default_platform TEXT DEFAULT 'netease',
+    default_quality TEXT DEFAULT 'hires',
     created_at DATETIME,
     updated_at DATETIME
 );
@@ -267,7 +284,7 @@ CREATE TABLE user_settings (
 ## 技术栈
 
 - **语言**: Go 1.25.6+
-- **Telegram SDK**: github.com/go-telegram/bot
+- **Telegram SDK**: github.com/mymmrac/telego
 - **数据库**: SQLite (github.com/glebarez/sqlite + GORM)
 - **配置**: Viper + INI
 - **日志**: slog
