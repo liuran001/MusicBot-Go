@@ -46,6 +46,11 @@ music_u = YOUR_MUSIC_U_COOKIE
 
 详见 `config_example.ini` 获取完整配置选项。
 
+### 动态脚本插件（推荐）
+- 脚本目录：`plugins/scripts/<name>`，目录名需与 `[plugins.<name>]` 一致
+- Meting 脚本插件请使用独立仓库，并将 `PluginScriptDir` 指向其 `scripts` 目录
+- 修改脚本或配置后，管理员可使用 `/reload` 重载（需配置 `BotAdmin`），或直接重启程序
+
 ## 运行
 
 ```bash
@@ -63,7 +68,6 @@ go build -o MusicBot-Go
 - `/recognize` - 识别语音中的歌曲 (回复语音消息)
 - `/status` - 查看 Bot 状态和支持的平台
 - `/about` - 关于本 Bot
-- `/reload` - 重载动态脚本插件 (管理员)
 
 ### 支持的 URL 格式
 
@@ -96,6 +100,7 @@ go build -o MusicBot-Go
 - 将插件源码放在 `plugins/scripts/<name>`
 - 在 `config.ini` 添加 `[plugins.<name>]` 配置
 - 可通过 `PluginScriptDir` 修改脚本目录（默认 `./plugins/scripts`）
+- 修改脚本后管理员可用 `/reload` 重载（需配置 `BotAdmin`）
 
 动态脚本插件最小入口：
 ```go

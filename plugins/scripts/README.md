@@ -2,6 +2,8 @@
 
 此目录用于存放 **动态脚本插件**（由 yaegi 解释执行），无需重新编译主程序。
 
+如需将插件放在独立仓库，可将 `PluginScriptDir` 指向该仓库的 `scripts` 目录。
+
 ## 目录结构
 ```
 plugins/scripts/<name>/
@@ -59,3 +61,7 @@ func GetPlaylist(platform, id string) (map[string]interface{}, error)
 `not_found | unavailable | unsupported | rate_limited | auth_required | invalid`
 
 主程序会将其映射为统一的 platform 错误。
+
+## 重载
+修改脚本后可通过 `/reload` 重载（仅 `BotAdmin` 配置的用户可用）。
+不配置 `BotAdmin` 时需要重启程序生效。
