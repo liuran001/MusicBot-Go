@@ -121,9 +121,22 @@ func isRequesterOrAdmin(ctx context.Context, b *telego.Bot, chatID int64, userID
 		return false
 	}
 	member, err := b.GetChatMember(ctx, &telego.GetChatMemberParams{ChatID: telego.ChatID{ID: chatID}, UserID: userID})
-	if err != nil || member == nil {
+	if err == nil && member != nil {
+		status := member.MemberStatus()
+		if status == telego.MemberStatusCreator || status == telego.MemberStatusAdministrator {
+			return true
+		}
+	}
+	admins, err := b.GetChatAdministrators(ctx, &telego.GetChatAdministratorsParams{ChatID: telego.ChatID{ID: chatID}})
+	if err != nil {
 		return false
 	}
-	status := member.MemberStatus()
-	return status == telego.MemberStatusCreator || status == telego.MemberStatusAdministrator
+	for _, admin := range admins {
+		if admin.MemberUser().ID != userID {
+			continue
+		}
+		status := admin.MemberStatus()
+		return status == telego.MemberStatusCreator || status == telego.MemberStatusAdministrator
+	}
+	return false
 }

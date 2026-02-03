@@ -190,6 +190,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 		},
 	}
 	rows = append(rows, qualityButtons2)
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -256,13 +257,25 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	query := update.CallbackQuery
 	args := strings.Split(query.Data, " ")
 
-	if len(args) < 3 {
+	if len(args) < 2 {
 		return
 	}
 	if query.Message == nil {
 		return
 	}
 	msg := query.Message.Message()
+	if msg == nil {
+		return
+	}
+
+	if args[1] == "close" {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+		_ = b.DeleteMessage(ctx, &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID})
+		return
+	}
+	if len(args) < 3 {
+		return
+	}
 
 	userID := query.From.ID
 	settingType := args[1]
@@ -271,7 +284,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	var settings *botpkg.UserSettings
 	var groupSettings *botpkg.GroupSettings
 	var err error
-	if msg != nil && msg.Chat.Type != "private" {
+	if msg.Chat.Type != "private" {
 		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, 0) {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,

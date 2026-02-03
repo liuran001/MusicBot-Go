@@ -202,6 +202,9 @@ func (r *Repository) FindByFileID(ctx context.Context, fileID string) (*bot.Song
 
 // Create inserts a new song record.
 func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
+	if song != nil && song.ID != 0 {
+		return r.Update(ctx, song)
+	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := toModel(song)
 		if err := tx.Create(model).Error; err != nil {
