@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -13,10 +14,11 @@ import (
 
 // Bot wraps telego with application configuration.
 type Bot struct {
-	client *telego.Bot
-	upload *telego.Bot
-	config *config.Config
-	logger botpkg.Logger
+	client   *telego.Bot
+	upload   *telego.Bot
+	download *telego.Bot
+	config   *config.Config
+	logger   botpkg.Logger
 }
 
 // New creates a new Telegram bot client.
@@ -84,6 +86,22 @@ func New(cfg *config.Config, logger botpkg.Logger) (*Bot, error) {
 		return nil, err
 	}
 
+	apiServer := strings.TrimRight(cfg.GetString("BotAPI"), "/")
+	if apiServer != "" && apiServer != "https://api.telegram.org" {
+		downloadOptions := []telego.BotOption{
+			telego.WithHTTPClient(pollClient),
+			telego.WithLogger(telegoLogger{logger: logger}),
+		}
+		if cfg.GetBool("BotDebug") {
+			downloadOptions = append(downloadOptions, telego.WithDebugMode())
+		}
+		download, err := telego.NewBot(cfg.GetString("BOT_TOKEN"), downloadOptions...)
+		if err != nil {
+			return nil, err
+		}
+		return &Bot{client: client, upload: upload, download: download, config: cfg, logger: logger}, nil
+	}
+
 	return &Bot{client: client, upload: upload, config: cfg, logger: logger}, nil
 }
 
@@ -101,6 +119,14 @@ func (b *Bot) Client() *telego.Bot {
 func (b *Bot) UploadClient() *telego.Bot {
 	if b.upload != nil {
 		return b.upload
+	}
+	return b.client
+}
+
+// DownloadClient exposes a dedicated client for file downloads.
+func (b *Bot) DownloadClient() *telego.Bot {
+	if b.download != nil {
+		return b.download
 	}
 	return b.client
 }

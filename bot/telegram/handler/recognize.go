@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,7 @@ type RecognizeHandler struct {
 	RateLimiter      *telegram.RateLimiter
 	RecognizeService recognize.Service
 	Logger           *logpkg.Logger
+	DownloadBot      *telego.Bot
 }
 
 func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -46,7 +48,11 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	}
 	ensureDir(h.CacheDir)
 
-	fileInfo, err := b.GetFile(ctx, &telego.GetFileParams{FileID: message.ReplyToMessage.Voice.FileID})
+	fileBot := b
+	if h.DownloadBot != nil {
+		fileBot = h.DownloadBot
+	}
+	fileInfo, err := fileBot.GetFile(ctx, &telego.GetFileParams{FileID: message.ReplyToMessage.Voice.FileID})
 	if err != nil || fileInfo == nil || fileInfo.FilePath == "" {
 		sendText(ctx, b, chatID, replyID, "获取语音失败，请稍后重试")
 		return
@@ -55,8 +61,11 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		sendText(ctx, b, chatID, replyID, "语音过大，无法识别")
 		return
 	}
-	audioData, err := downloadTelegramFile(ctx, b, fileInfo.FilePath)
+	audioData, err := downloadTelegramFile(ctx, fileBot, fileInfo.FilePath)
 	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Warn("failed to download voice", "file_path", fileInfo.FilePath, "error", err)
+		}
 		sendText(ctx, b, chatID, replyID, "下载语音失败，请稍后重试")
 		return
 	}
@@ -173,19 +182,55 @@ func downloadTelegramFile(ctx context.Context, b *telego.Bot, filePath string) (
 	if b == nil {
 		return nil, fmt.Errorf("bot client is nil")
 	}
-	fileURL := b.FileDownloadURL(filePath)
+	fileURLs := make([]string, 0, 3)
+	fileURLs = append(fileURLs, b.FileDownloadURL(filePath))
+	trimmed := strings.TrimLeft(filePath, "/")
+	if trimmed != filePath {
+		fileURLs = append(fileURLs, b.FileDownloadURL(trimmed))
+	}
+	if token := b.Token(); token != "" {
+		needle := token + "/"
+		if idx := strings.Index(filePath, needle); idx >= 0 {
+			relative := strings.TrimLeft(filePath[idx+len(needle):], "/")
+			if relative != "" {
+				fileURLs = append(fileURLs, b.FileDownloadURL(relative))
+			}
+		}
+		for _, urlStr := range append([]string(nil), fileURLs...) {
+			noTokenURL := strings.Replace(urlStr, "/file/bot"+token+"/", "/file/", 1)
+			if noTokenURL != urlStr {
+				fileURLs = append(fileURLs, noTokenURL)
+			}
+		}
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for _, fileURL := range fileURLs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = fmt.Errorf("unexpected status: %s", resp.Status)
+			_ = resp.Body.Close()
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return data, nil
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
+	if lastErr == nil {
+		lastErr = errors.New("download failed")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("unexpected status: %s", resp.Status)
-	}
-	return io.ReadAll(resp.Body)
+	return nil, lastErr
 }

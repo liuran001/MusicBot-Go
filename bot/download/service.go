@@ -241,7 +241,11 @@ func (s *DownloadService) downloadOnce(ctx context.Context, rawURL, originalHost
 		}
 	}
 
-	written, err := util.CopyWithProgress(file, resp.Body, info.Size, throttledProgress)
+	totalSize := info.Size
+	if totalSize <= 0 && resp.ContentLength > 0 {
+		totalSize = resp.ContentLength
+	}
+	written, err := util.CopyWithProgress(file, resp.Body, totalSize, throttledProgress)
 	closeErr := file.Close()
 	if err != nil {
 		return written, err

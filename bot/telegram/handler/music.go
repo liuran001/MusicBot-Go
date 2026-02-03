@@ -691,13 +691,15 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 		if now.Sub(lastProgressAt) < minInterval {
 			return
 		}
-		totalMB := float64(total) / 1024 / 1024
 		writtenMB := float64(written) / 1024 / 1024
-		progressPct := 0.0
-		if total > 0 {
-			progressPct = float64(written) * 100 / float64(total)
+		text := ""
+		if total <= 0 {
+			text = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB", track.Title, writtenMB)
+		} else {
+			totalMB := float64(total) / 1024 / 1024
+			progressPct := float64(written) * 100 / float64(total)
+			text = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
 		}
-		text := fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
 		if msg.Text == text || lastProgressText == text {
 			lastProgressText = text
 			return

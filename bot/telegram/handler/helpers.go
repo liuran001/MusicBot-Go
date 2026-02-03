@@ -393,15 +393,20 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 	now := time.Now()
 	if now.Sub(pw.lastUpdate) >= 2*time.Second && pw.msg != nil {
 		downloaded := float64(pw.written) / 1024 / 1024
-		total := float64(pw.total) / 1024 / 1024
-		progress := float64(pw.written) * 100 / float64(pw.total)
-
 		bytesInPeriod := pw.written - pw.lastWritten
 		duration := now.Sub(pw.lastUpdate).Seconds()
 		speed := float64(bytesInPeriod) / duration / 1024 / 1024
 
-		text := fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)\n速度：%.2f MB/s",
-			pw.filename, progress, downloaded, total, speed)
+		text := ""
+		if pw.total <= 0 {
+			text = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB\n速度：%.2f MB/s",
+				pw.filename, downloaded, speed)
+		} else {
+			total := float64(pw.total) / 1024 / 1024
+			progress := float64(pw.written) * 100 / float64(pw.total)
+			text = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)\n速度：%.2f MB/s",
+				pw.filename, progress, downloaded, total, speed)
+		}
 		if pw.msg.Text == text {
 			pw.lastUpdate = now
 			pw.lastWritten = pw.written
