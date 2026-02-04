@@ -1221,6 +1221,7 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		Duration:        songInfo.Duration,
 		ReplyParameters: buildReplyParams(message),
 	}
+	params.ReplyMarkup = buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
 
 	if songInfo.ThumbFileID != "" {
 		params.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
@@ -1403,24 +1404,6 @@ func isInlineStartToken(value string) bool {
 		}
 	}
 	return true
-}
-
-func buildInlineStartParameterToken(platformName, trackID, qualityValue string) string {
-	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) {
-		return ""
-	}
-	qualityValue = strings.TrimSpace(qualityValue)
-	if qualityValue == "" {
-		qualityValue = "hires"
-	}
-	if !isInlineStartToken(qualityValue) {
-		return ""
-	}
-	param := fmt.Sprintf("cache_%s_%s_%s", platformName, trackID, qualityValue)
-	if len(param) > 64 {
-		return ""
-	}
-	return param
 }
 
 // deriveBitrateFromFile derives bitrate and updates songInfo from actual file metrics.

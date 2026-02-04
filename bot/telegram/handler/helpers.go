@@ -271,6 +271,65 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	)
 }
 
+func buildForwardQuery(trackURL, platformName, trackID string) string {
+	if strings.TrimSpace(trackURL) != "" {
+		return strings.TrimSpace(trackURL)
+	}
+	trackID = strings.TrimSpace(trackID)
+	if trackID == "" {
+		return ""
+	}
+	if strings.TrimSpace(platformName) == "qqmusic" {
+		return "qqmusic:" + trackID
+	}
+	return trackID
+}
+
+func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.InlineKeyboardMarkup {
+	query := buildForwardQuery(trackURL, platformName, trackID)
+	if query == "" {
+		return nil
+	}
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{
+		{{Text: sendMeTo, SwitchInlineQuery: &query}},
+	}}
+}
+
+func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {
+	trackID = strings.TrimSpace(trackID)
+	platformName = strings.TrimSpace(platformName)
+	qualityValue = strings.TrimSpace(qualityValue)
+	parts := []string{"/music"}
+	if trackID != "" {
+		parts = append(parts, trackID)
+	}
+	if platformName != "" {
+		parts = append(parts, platformName)
+	}
+	if qualityValue != "" {
+		parts = append(parts, qualityValue)
+	}
+	return strings.Join(parts, " ")
+}
+
+func buildInlineStartParameter(platformName, trackID, qualityValue string) string {
+	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) {
+		return ""
+	}
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if !isInlineStartToken(qualityValue) {
+		return ""
+	}
+	param := fmt.Sprintf("cache_%s_%s_%s", platformName, trackID, qualityValue)
+	if len(param) > 64 {
+		return ""
+	}
+	return param
+}
+
 func formatInfoTags(manager platform.Manager, platformName, fileExt string) []string {
 	tags := []string{"#" + platformTag(manager, platformName)}
 	if strings.TrimSpace(fileExt) != "" {
