@@ -14,17 +14,15 @@ import (
 )
 
 var (
-	regSongQuery = regexp.MustCompile(`(.*)song\?id=`)
-	regSongPath  = regexp.MustCompile("(.*)song/")
-	regProgramQ  = regexp.MustCompile(`(.*)program\?id=`)
-	regProgramP  = regexp.MustCompile("(.*)program/")
-	regDjQuery   = regexp.MustCompile(`(.*)dj\?id=`)
-	regDjPath    = regexp.MustCompile("(.*)dj/")
-	regSlash     = regexp.MustCompile("/(.*)")
-	regAmp       = regexp.MustCompile("&(.*)")
-	regQuestion  = regexp.MustCompile(`\?(.*)`)
-	regInt       = regexp.MustCompile(`\d+`)
-	regURL       = regexp.MustCompile("(http|https)://[\\w\\-_]+(\\.[\\w\\-_]+)+([\\w\\-.,@?^=%&:/~+#]*[\\w\\-@?^=%&/~+#])?")
+	regProgramQ = regexp.MustCompile(`(.*)program\?id=`)
+	regProgramP = regexp.MustCompile(`(.*)program/`)
+	regDjQuery  = regexp.MustCompile(`(.*)dj\?id=`)
+	regDjPath   = regexp.MustCompile(`(.*)dj/`)
+	regSlash    = regexp.MustCompile(`/(.*)`)
+	regAmp      = regexp.MustCompile(`&(.*)`)
+	regQuestion = regexp.MustCompile(`\?(.*)`)
+	regInt      = regexp.MustCompile(`\d+`)
+	regURL      = regexp.MustCompile(`(http|https)://[\w\-_]+(\.[\w\-_]+)+([\w\-.,@?^=%&:/~+#]*[\w\-@?^=%&/~+#])?`)
 )
 
 // MatchText attempts to extract a track ID from arbitrary text input.
@@ -102,10 +100,6 @@ func parseProgramID(text string) int {
 	messageText := normalizeText(text)
 	programID, _ := strconv.Atoi(linkTestProgram(messageText))
 	return programID
-}
-
-func linkTestMusic(text string) string {
-	return extractInt(regSlash.ReplaceAllString(regAmp.ReplaceAllString(regQuestion.ReplaceAllString(regSongPath.ReplaceAllString(regSongQuery.ReplaceAllString(text, ""), ""), ""), ""), ""))
 }
 
 func linkTestProgram(text string) string {

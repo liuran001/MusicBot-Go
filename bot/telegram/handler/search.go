@@ -22,28 +22,16 @@ type SearchHandler struct {
 	RateLimiter      *telegram.RateLimiter
 	DefaultPlatform  string
 	FallbackPlatform string
+	PageSize         int
 	searchMu         sync.Mutex
 	searchCache      map[int]*searchState
 }
 
 const (
-	searchPageSize     = 8
 	searchCacheTTL     = 10 * time.Minute
-	defaultSearchLimit = 10
+	defaultSearchLimit = 48
 	neteaseSearchLimit = 48
 )
-
-var searchPlatformAliases = map[string]string{
-	"wy":      "netease",
-	"163":     "netease",
-	"netease": "netease",
-	"网易云":     "netease",
-	"网易云音乐":   "netease",
-	"qq":      "tencent",
-	"tencent": "tencent",
-	"qqmusic": "tencent",
-	"qq音乐":    "tencent",
-}
 
 type searchState struct {
 	keyword     string
@@ -105,7 +93,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		return
 	}
 
-	keyword, requestedPlatform, qualityOverride := parseTrailingOptions(keyword)
+	keyword, requestedPlatform, qualityOverride := parseTrailingOptions(keyword, h.PlatformManager)
 	hasPlatformSuffix := strings.TrimSpace(requestedPlatform) != ""
 	// Get user's default platform from settings
 	platformName := h.DefaultPlatform
@@ -181,7 +169,6 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 				tracks, err = fallbackPlat.Search(ctx, keyword, fallbackLimit)
 				if err == nil && len(tracks) > 0 {
 					platformName = fallbackPlatform
-					plat = fallbackPlat
 					usedFallback = true
 					searchLimit = fallbackLimit
 				}
@@ -227,8 +214,8 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 
 	var textMessage strings.Builder
 
-	platformEmoji := platformEmoji(platformName)
-	displayName := platformDisplayName(platformName)
+	platformEmoji := platformEmoji(h.PlatformManager, platformName)
+	displayName := platformDisplayName(h.PlatformManager, platformName)
 
 	if usedFallback {
 		textMessage.WriteString(fmt.Sprintf("⚠️ 默认平台搜索失败，已切换到%s\n\n", displayName))
@@ -365,8 +352,9 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		return
 	}
 	limit := state.limit
+	pageSize := h.Search.pageSize()
 	if limit <= 0 {
-		limit = page * searchPageSize
+		limit = page * pageSize
 	}
 	tracks, err := plat.Search(ctx, state.keyword, limit)
 	if err != nil {
@@ -387,7 +375,8 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		}
 		return
 	}
-	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(state.platform), mdV2Replacer.Replace(platformDisplayName(state.platform)))
+	manager := h.Search.PlatformManager
+	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
 	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page)
 	text := textHeader + pageText
 	disablePreview := true
@@ -415,6 +404,16 @@ func (h *SearchHandler) searchLimit(platformName string) int {
 	return defaultSearchLimit
 }
 
+func (h *SearchHandler) pageSize() int {
+	if h == nil {
+		return 8
+	}
+	if h.PageSize > 0 {
+		return h.PageSize
+	}
+	return 8
+}
+
 func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *telego.Message, userID int64) string {
 	qualityValue := "hires"
 	if h.Repo == nil {
@@ -439,21 +438,22 @@ func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *tele
 }
 
 func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int) (string, *telego.InlineKeyboardMarkup) {
+	pageSize := h.pageSize()
 	if page < 1 {
 		page = 1
 	}
 	pageCount := 1
 	if len(tracks) > 0 {
-		pageCount = (len(tracks)-1)/searchPageSize + 1
+		pageCount = (len(tracks)-1)/pageSize + 1
 	}
 	if page > pageCount {
 		page = pageCount
 	}
-	start := (page - 1) * searchPageSize
+	start := (page - 1) * pageSize
 	if start < 0 {
 		start = 0
 	}
-	end := start + searchPageSize
+	end := start + pageSize
 	if end > len(tracks) {
 		end = len(tracks)
 	}
@@ -466,7 +466,7 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	} else {
 		textMessage.WriteString("\n")
 	}
-	buttons := make([]telego.InlineKeyboardButton, 0, searchPageSize)
+	buttons := make([]telego.InlineKeyboardButton, 0, pageSize)
 	for i := start; i < end; i++ {
 		track := tracks[i]
 		escapedTitle := mdV2Replacer.Replace(track.Title)
@@ -501,14 +501,18 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 		if page == 1 {
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)})
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
+			rows = append(rows, navRow)
 		} else if page == pageCount {
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "回到首页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)})
+			rows = append(rows, navRow)
 		} else {
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
+			rows = append(rows, navRow)
+			homeRow := []telego.InlineKeyboardButton{{Text: "回到首页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)}}
+			rows = append(rows, homeRow)
 		}
-		rows = append(rows, navRow)
 	} else if page == 1 {
 		rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
@@ -517,7 +521,7 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	if len(platforms) > 1 {
 		switchRow := make([]telego.InlineKeyboardButton, 0, len(platforms))
 		for _, name := range platforms {
-			text := fmt.Sprintf("%s %s", platformEmoji(name), platformDisplayName(name))
+			text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), platformDisplayName(h.PlatformManager, name))
 			if name == platformName {
 				text = "✅ " + text
 			}
@@ -548,7 +552,7 @@ func (h *SearchHandler) searchPlatforms() []string {
 	return results
 }
 
-func parseSearchKeywordPlatform(keyword string) (string, string, bool) {
+func parseSearchKeywordPlatform(keyword string, manager platform.Manager) (string, string, bool) {
 	trimmed := strings.TrimSpace(keyword)
 	if trimmed == "" {
 		return "", "", false
@@ -557,8 +561,8 @@ func parseSearchKeywordPlatform(keyword string) (string, string, bool) {
 	if len(parts) < 2 {
 		return trimmed, "", false
 	}
-	last := strings.ToLower(parts[len(parts)-1])
-	platformName, ok := searchPlatformAliases[last]
+	last := normalizePlatformToken(strings.ToLower(parts[len(parts)-1]))
+	platformName, ok := resolvePlatformAlias(manager, last)
 	if !ok {
 		return trimmed, "", false
 	}

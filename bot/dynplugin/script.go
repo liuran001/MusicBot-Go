@@ -24,6 +24,10 @@ type pluginMeta struct {
 
 type platformInfo struct {
 	Name              string                `json:"name"`
+	DisplayName       string                `json:"display_name"`
+	Emoji             string                `json:"emoji"`
+	Aliases           []string              `json:"aliases"`
+	AllowGroupURL     bool                  `json:"allow_group_url"`
 	Capabilities      platform.Capabilities `json:"capabilities"`
 	SupportsMatchURL  bool                  `json:"supports_match_url"`
 	SupportsMatchText bool                  `json:"supports_match_text"`
@@ -193,9 +197,6 @@ func (p *scriptPlugin) call(ctx context.Context, fn reflect.Value, resource, id 
 	if !fn.IsValid() {
 		return nil, fmt.Errorf("script function missing")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	inputs := make([]reflect.Value, 0, len(args))
 	for _, arg := range args {
 		inputs = append(inputs, reflect.ValueOf(arg))
@@ -354,6 +355,16 @@ func (s *scriptPlatform) Capabilities() platform.Capabilities {
 		return platform.Capabilities{}
 	}
 	return s.info.Capabilities
+}
+
+func (s *scriptPlatform) Metadata() platform.Meta {
+	return platform.Meta{
+		Name:          s.name,
+		DisplayName:   strings.TrimSpace(s.info.DisplayName),
+		Emoji:         strings.TrimSpace(s.info.Emoji),
+		Aliases:       s.info.Aliases,
+		AllowGroupURL: s.info.AllowGroupURL,
+	}
 }
 
 func (s *scriptPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/db"
 	"github.com/liuran001/MusicBot-Go/bot/download"
@@ -34,6 +35,7 @@ type App struct {
 	PlatformManager  platform.Manager
 	DynPlugins       *dynplugin.Manager
 	AdminIDs         map[int64]struct{}
+	AdminCommands    []admincmd.Command
 	Telegram         *telegram.Bot
 	RecognizeService recognize.Service
 	TagProviders     map[string]id3.ID3TagProvider
@@ -45,6 +47,7 @@ func registerContribution(
 	platformManager platform.Manager,
 	pluginTagProviders map[string]id3.ID3TagProvider,
 	recognizeService *recognize.Service,
+	adminCommands *[]admincmd.Command,
 	contrib *platformplugins.Contribution,
 	log *logpkg.Logger,
 ) {
@@ -71,6 +74,10 @@ func registerContribution(
 		} else if log != nil {
 			log.Warn("multiple recognizers configured; ignoring extra", "plugin", "dynamic")
 		}
+	}
+
+	if adminCommands != nil && len(contrib.Commands) > 0 {
+		*adminCommands = append(*adminCommands, contrib.Commands...)
 	}
 }
 
@@ -124,6 +131,7 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 	dynManager := dynplugin.NewManager(log)
 	adminIDs := parseAdminIDs(conf.GetString("BotAdmin"))
 	pluginTagProviders := make(map[string]id3.ID3TagProvider)
+	adminCommands := make([]admincmd.Command, 0)
 	var recognizeService recognize.Service
 	pluginNames := conf.PluginNames()
 	if len(pluginNames) == 0 {
@@ -155,7 +163,7 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 			}
 			continue
 		}
-		registerContribution(platformManager, pluginTagProviders, &recognizeService, contrib, log)
+		registerContribution(platformManager, pluginTagProviders, &recognizeService, &adminCommands, contrib, log)
 	}
 
 	if err := dynManager.Load(ctx, conf, platformManager); err != nil {
@@ -178,6 +186,7 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 		PlatformManager:  platformManager,
 		DynPlugins:       dynManager,
 		AdminIDs:         adminIDs,
+		AdminCommands:    adminCommands,
 		Telegram:         tele,
 		RecognizeService: recognizeService,
 		TagProviders:     pluginTagProviders,
@@ -262,6 +271,28 @@ func (a *App) Start(ctx context.Context) error {
 		searchFallback = "netease"
 	}
 
+	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+1)
+	adminCommands = append(adminCommands, handler.BuildCheckCookieCommand(a.PlatformManager))
+	adminCommands = append(adminCommands, a.AdminCommands...)
+	adminCommandNames := make([]string, 0, len(adminCommands))
+	for _, cmd := range adminCommands {
+		if strings.TrimSpace(cmd.Name) == "" {
+			continue
+		}
+		adminCommandNames = append(adminCommandNames, cmd.Name)
+	}
+
+	defaultQuality := a.Config.GetString("DefaultQuality")
+	pageSize := a.Config.GetInt("ListPageSize")
+	playlistHandler := &handler.PlaylistHandler{
+		PlatformManager: a.PlatformManager,
+		Repo:            a.DB,
+		RateLimiter:     rateLimiter,
+		DefaultQuality:  defaultQuality,
+		PageSize:        pageSize,
+	}
+	playlistCallback := &handler.PlaylistCallbackHandler{Playlist: playlistHandler, RateLimiter: rateLimiter}
+
 	musicHandler := &handler.MusicHandler{
 		Repo:             a.DB,
 		Pool:             a.Pool,
@@ -270,6 +301,8 @@ func (a *App) Start(ctx context.Context) error {
 		BotName:          botName,
 		DefaultPlatform:  defaultPlatform,
 		FallbackPlatform: searchFallback,
+		AdminIDs:         a.AdminIDs,
+		AdminCommands:    adminCommands,
 		PlatformManager:  a.PlatformManager,
 		DownloadService:  downloadService,
 		ID3Service:       id3Service,
@@ -279,10 +312,10 @@ func (a *App) Start(ctx context.Context) error {
 		UploadQueueSize:  uploadQueueSize,
 		UploadBot:        a.Telegram.UploadClient(),
 		RateLimiter:      rateLimiter,
+		Playlist:         playlistHandler,
 	}
 	musicHandler.StartWorker(ctx)
 
-	defaultQuality := a.Config.GetString("DefaultQuality")
 	settingsHandler := &handler.SettingsHandler{
 		Repo:            a.DB,
 		PlatformManager: a.PlatformManager,
@@ -290,12 +323,19 @@ func (a *App) Start(ctx context.Context) error {
 		DefaultPlatform: defaultPlatform,
 		DefaultQuality:  defaultQuality,
 	}
-	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback}
+	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
+	adminHandler := &handler.AdminCommandHandler{
+		BotName:     botName,
+		AdminIDs:    a.AdminIDs,
+		RateLimiter: rateLimiter,
+		Commands:    adminCommands,
+	}
 	searchCallback := &handler.SearchCallbackHandler{Search: searchHandler, RateLimiter: rateLimiter}
 	reloadHandler := &handler.ReloadHandler{Reload: a.ReloadDynamicPlugins, RateLimiter: rateLimiter, Logger: a.Logger, AdminIDs: a.AdminIDs}
 
 	router := &handler.Router{
 		Music:            musicHandler,
+		Playlist:         playlistHandler,
 		Search:           searchHandler,
 		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Recognize:        &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()},
@@ -306,9 +346,12 @@ func (a *App) Start(ctx context.Context) error {
 		Callback:         &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},
 		SettingsCallback: &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler, RateLimiter: rateLimiter},
 		SearchCallback:   searchCallback,
+		PlaylistCallback: playlistCallback,
 		Reload:           reloadHandler,
+		Admin:            adminHandler,
 		Inline:           &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback},
 		PlatformManager:  a.PlatformManager,
+		AdminCommands:    adminCommandNames,
 	}
 
 	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, nil)

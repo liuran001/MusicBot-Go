@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
@@ -18,6 +19,7 @@ type Contribution struct {
 	Platforms  []platform.Platform
 	ID3        id3.ID3TagProvider
 	Recognizer recognize.Service
+	Commands   []admincmd.Command
 }
 
 // Factory creates a plugin contribution based on config and logger.

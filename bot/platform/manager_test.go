@@ -1065,7 +1065,7 @@ func TestManager_URLMatchingFirstProviderOnly(t *testing.T) {
 		t.Errorf("Expected track ID '123', got '%s'", trackID)
 	}
 
-	platformName, trackID, matched = manager.MatchURL("https://example.com/track/456")
+	_, _, matched = manager.MatchURL("https://example.com/track/456")
 	if matched {
 		t.Error("Expected no match for second provider's URL")
 	}

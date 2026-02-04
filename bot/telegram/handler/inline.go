@@ -54,34 +54,6 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 	}
 }
 
-func (h *InlineSearchHandler) inlineMusic(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, musicID int) {
-	if h.Repo == nil {
-		h.inlineEmpty(ctx, b, query)
-		return
-	}
-	qualityValue := h.resolveDefaultQuality(ctx, query.From.ID)
-	info := h.findCachedSong(ctx, "netease", fmt.Sprintf("%d", musicID), qualityValue)
-	if info != nil {
-		h.inlineCached(ctx, b, query, info, "netease")
-		return
-	}
-
-	inlineMsg := &telego.InlineQueryResultArticle{
-		Type:                telego.ResultTypeArticle,
-		ID:                  query.ID,
-		Title:               noCache,
-		Description:         tapToDownload,
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: query.Query},
-	}
-	_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{
-		InlineQueryID: query.ID,
-		IsPersonal:    false,
-		Results:       []telego.InlineQueryResult{inlineMsg},
-		CacheTime:     60,
-		Button:        &telego.InlineQueryResultsButton{Text: tapMeToDown, StartParameter: fmt.Sprintf("%d", musicID)},
-	})
-}
-
 func (h *InlineSearchHandler) inlineEmpty(ctx context.Context, b *telego.Bot, query *telego.InlineQuery) {
 	inlineMsg := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
@@ -158,7 +130,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 	if strings.TrimSpace(fallbackPlatform) == "" {
 		fallbackPlatform = "netease"
 	}
-	keyWord, requestedPlatform, hasPlatformSuffix := parseSearchKeywordPlatform(keyWord)
+	keyWord, requestedPlatform, hasPlatformSuffix := parseSearchKeywordPlatform(keyWord, h.PlatformManager)
 	if hasPlatformSuffix {
 		platformName = requestedPlatform
 		fallbackPlatform = ""
@@ -183,7 +155,6 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 			fallbackTracks, fallbackErr := fallbackPlat.Search(ctx, keyWord, 10)
 			if fallbackErr == nil && len(fallbackTracks) > 0 {
 				platformName = fallbackPlatform
-				plat = fallbackPlat
 				tracks = fallbackTracks
 				err = nil
 			}
@@ -241,7 +212,7 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 	inlineMsg := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()),
-		Title:               fmt.Sprintf("%s %s", platformEmoji(platformName), platformDisplayName(platformName)),
+		Title:               fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, platformName), platformDisplayName(h.PlatformManager, platformName)),
 		Description:         tapToDownload,
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: fallbackInlineMessageText(query.Query, platformName, trackID, qualityValue)},
 	}
@@ -326,7 +297,7 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 		ID:             query.ID,
 		DocumentFileID: info.FileID,
 		Title:          fmt.Sprintf("%s - %s", songInfo.SongArtists, songInfo.SongName),
-		Caption:        buildMusicCaption(&songInfo, h.BotName),
+		Caption:        buildMusicCaption(h.PlatformManager, &songInfo, h.BotName),
 		ParseMode:      telego.ModeHTML,
 		ReplyMarkup:    keyboard,
 		Description:    songInfo.SongAlbum,

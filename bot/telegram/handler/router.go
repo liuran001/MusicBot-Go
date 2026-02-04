@@ -13,6 +13,7 @@ import (
 // Router registers bot handlers and delegates to feature handlers.
 type Router struct {
 	Music            MessageHandler
+	Playlist         MessageHandler
 	Search           MessageHandler
 	Lyric            MessageHandler
 	Recognize        MessageHandler
@@ -21,11 +22,14 @@ type Router struct {
 	RmCache          MessageHandler
 	Settings         MessageHandler
 	Reload           MessageHandler
+	Admin            MessageHandler
 	Callback         CallbackHandler
 	SettingsCallback CallbackHandler
 	SearchCallback   CallbackHandler
+	PlaylistCallback CallbackHandler
 	Inline           InlineHandler
 	PlatformManager  platform.Manager
+	AdminCommands    []string
 }
 
 // Register registers all handlers to the bot handler.
@@ -47,6 +51,12 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapMessage(r.Settings), matchCommandFunc(botName, "settings"))
 	bh.Handle(r.wrapMessage(r.RmCache), matchCommandFunc(botName, "rmcache"))
 	bh.Handle(r.wrapMessage(r.Reload), matchCommandFunc(botName, "reload"))
+	for _, cmd := range r.AdminCommands {
+		if strings.TrimSpace(cmd) == "" {
+			continue
+		}
+		bh.Handle(r.wrapMessage(r.Admin), matchCommandFunc(botName, cmd))
+	}
 
 	bh.Handle(r.wrapMessage(r.Music), func(ctx context.Context, update telego.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {
@@ -69,20 +79,48 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			}
 		}
 
-		if isReservedCommand(command) {
+		if isReservedCommand(command) || isAdminCommand(command, r.AdminCommands) {
 			return false
 		}
 		if r.PlatformManager == nil {
 			return false
 		}
-		return r.PlatformManager.Get(command) != nil
+		if platformName, ok := r.PlatformManager.ResolveAlias(command); ok {
+			return r.PlatformManager.Get(platformName) != nil
+		}
+		return false
+	})
+
+	bh.Handle(r.wrapMessage(r.Playlist), func(ctx context.Context, update telego.Update) bool {
+		if update.Message == nil || update.Message.Text == "" {
+			return false
+		}
+		if isCommandMessage(update.Message) {
+			return false
+		}
+		if r.PlatformManager == nil {
+			return false
+		}
+		text := update.Message.Text
+		baseText, _, _ := parseTrailingOptions(text, r.PlatformManager)
+		if strings.TrimSpace(baseText) == "" {
+			return false
+		}
+		platformName, _, matched := matchPlaylistURL(r.PlatformManager, baseText)
+		if !matched {
+			return false
+		}
+		if update.Message.Chat.Type != "private" {
+			return isAllowedGroupURLPlatform(platformName, r.PlatformManager)
+		}
+		return true
 	})
 
 	bh.Handle(r.wrapMessage(r.Music), func(ctx context.Context, update telego.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {
 			return false
 		}
-		if hasSearchPlatformSuffix(update.Message.Text) {
+		if hasSearchPlatformSuffix(update.Message.Text, r.PlatformManager) {
 			return false
 		}
 		if update.Message.Chat.Type != "private" {
@@ -95,15 +133,15 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			}
 			for _, urlStr := range urls {
 				if plat, _, matched := r.PlatformManager.MatchURL(urlStr); matched {
-					return isAllowedGroupURLPlatform(plat)
+					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
 				}
 				if plat, _, matched := r.PlatformManager.MatchText(urlStr); matched {
-					return isAllowedGroupURLPlatform(plat)
+					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
 				}
 			}
 			return false
 		}
-		baseText, _, _ := parseTrailingOptions(update.Message.Text)
+		baseText, _, _ := parseTrailingOptions(update.Message.Text, r.PlatformManager)
 		if strings.TrimSpace(baseText) == "" {
 			return false
 		}
@@ -126,14 +164,17 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return false
 		}
 		text := update.Message.Text
-		if hasSearchPlatformSuffix(text) {
+		if hasSearchPlatformSuffix(text, r.PlatformManager) {
 			return true
 		}
-		baseText, _, _ := parseTrailingOptions(text)
+		baseText, _, _ := parseTrailingOptions(text, r.PlatformManager)
 		if strings.TrimSpace(baseText) == "" {
 			return false
 		}
 		if r.PlatformManager != nil {
+			if _, _, matched := matchPlaylistURL(r.PlatformManager, baseText); matched {
+				return false
+			}
 			if _, _, matched := r.PlatformManager.MatchText(baseText); matched {
 				return false
 			}
@@ -147,6 +188,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapCallback(r.Callback), callbackPrefix("music"))
 	bh.Handle(r.wrapCallback(r.SettingsCallback), callbackPrefix("settings"))
 	bh.Handle(r.wrapCallback(r.SearchCallback), callbackPrefix("search"))
+	bh.Handle(r.wrapCallback(r.PlaylistCallback), callbackPrefix("playlist"))
 	bh.Handle(r.wrapInline(r.Inline), func(ctx context.Context, update telego.Update) bool {
 		return update.InlineQuery != nil
 	})
@@ -243,7 +285,19 @@ func isReservedCommand(command string) bool {
 	}
 }
 
-func hasSearchPlatformSuffix(text string) bool {
+func isAdminCommand(command string, commands []string) bool {
+	if strings.TrimSpace(command) == "" {
+		return false
+	}
+	for _, cmd := range commands {
+		if strings.TrimSpace(cmd) == command {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSearchPlatformSuffix(text string, manager platform.Manager) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
@@ -254,7 +308,7 @@ func hasSearchPlatformSuffix(text string) bool {
 	if strings.TrimSpace(keyword) == "" {
 		return false
 	}
-	baseText, platformName, _ := parseTrailingOptions(keyword)
+	baseText, platformName, _ := parseTrailingOptions(keyword, manager)
 	if strings.TrimSpace(platformName) == "" {
 		return false
 	}
@@ -289,11 +343,10 @@ func extractURLs(text string) []string {
 	return urls
 }
 
-func isAllowedGroupURLPlatform(platformName string) bool {
-	switch platformName {
-	case "netease", "tencent", "qq", "qqmusic":
-		return true
-	default:
+func isAllowedGroupURLPlatform(platformName string, manager platform.Manager) bool {
+	if manager == nil {
 		return false
 	}
+	meta, _ := manager.Meta(platformName)
+	return meta.AllowGroupURL
 }

@@ -169,5 +169,4 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 	} else {
 		_, _ = b.SendMessage(ctx, params)
 	}
-	return
 }

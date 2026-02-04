@@ -92,6 +92,55 @@ func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*bot.SongDetai
 	return &result, nil
 }
 
+// GetSongDetailBatch retrieves song detail data for multiple song IDs.
+func (c *Client) GetSongDetailBatch(ctx context.Context, musicIDs []int) (*bot.SongDetail, error) {
+	if len(musicIDs) == 0 {
+		return nil, nil
+	}
+	if c.logger != nil {
+		c.logger.Debug("fetching song detail batch", "count", len(musicIDs))
+	}
+	var result bot.SongDetail
+	err := c.execute(ctx, func() error {
+		data, err := api.GetSongDetail(c.data, musicIDs)
+		if err != nil {
+			if c.logger != nil {
+				c.logger.Error("api.GetSongDetail batch failed", "count", len(musicIDs), "error", err)
+			}
+			return err
+		}
+		result = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetPlaylistDetail retrieves playlist detail data.
+func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*bot.PlaylistDetail, error) {
+	if c.logger != nil {
+		c.logger.Debug("fetching playlist detail", "playlist_id", playlistID)
+	}
+	var result bot.PlaylistDetail
+	err := c.execute(ctx, func() error {
+		data, err := api.GetPlaylistDetail(c.data, playlistID)
+		if err != nil {
+			if c.logger != nil {
+				c.logger.Error("api.GetPlaylistDetail failed", "playlist_id", playlistID, "error", err)
+			}
+			return err
+		}
+		result = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // GetSongURL retrieves song URL data.
 func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*bot.SongURL, error) {
 	var result bot.SongURL

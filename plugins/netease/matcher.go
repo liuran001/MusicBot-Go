@@ -93,6 +93,67 @@ func (m *URLMatcher) MatchURL(rawURL string) (trackID string, matched bool) {
 	return "", false
 }
 
+// MatchPlaylistURL implements platform.PlaylistURLMatcher.
+// It attempts to extract a playlist ID from a NetEase music URL.
+// Supports the following URL patterns:
+//   - https://music.163.com/playlist?id=1234567
+//   - https://music.163.com/#/playlist?id=1234567
+//   - https://y.music.163.com/m/playlist?id=1234567 (mobile)
+func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched bool) {
+	if rawURL == "" {
+		return "", false
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", false
+	}
+
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return "", false
+	}
+	if !strings.Contains(hostname, "music.163.com") {
+		return "", false
+	}
+
+	if !hasPlaylistMarker(parsed.Path, parsed.Fragment) {
+		return "", false
+	}
+
+	queryString := parsed.RawQuery
+	if queryString == "" && parsed.Fragment != "" {
+		parts := strings.Split(parsed.Fragment, "?")
+		if len(parts) > 1 {
+			queryString = parts[len(parts)-1]
+		}
+	}
+
+	if queryString != "" {
+		params, err := url.ParseQuery(queryString)
+		if err != nil {
+			return "", false
+		}
+		id := params.Get("id")
+		if id != "" {
+			if len(id) < 5 {
+				return "", false
+			}
+			return id, true
+		}
+	}
+
+	pathSegments := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
+	if len(pathSegments) >= 2 {
+		lastSegment := pathSegments[len(pathSegments)-1]
+		if lastSegment != "" && allDigits(lastSegment) && len(lastSegment) >= 5 {
+			return lastSegment, true
+		}
+	}
+
+	return "", false
+}
+
 func hasSongMarker(path, fragment string) bool {
 	for _, seg := range strings.Split(strings.Trim(path, "/"), "/") {
 		if seg == "song" {
@@ -106,6 +167,24 @@ func hasSongMarker(path, fragment string) bool {
 	frag = strings.SplitN(frag, "?", 2)[0]
 	parts := strings.Split(strings.Trim(frag, "/"), "/")
 	if len(parts) > 0 && parts[0] == "song" {
+		return true
+	}
+	return false
+}
+
+func hasPlaylistMarker(path, fragment string) bool {
+	for _, seg := range strings.Split(strings.Trim(path, "/"), "/") {
+		if seg == "playlist" {
+			return true
+		}
+	}
+	if fragment == "" {
+		return false
+	}
+	frag := strings.TrimPrefix(fragment, "/")
+	frag = strings.SplitN(frag, "?", 2)[0]
+	parts := strings.Split(strings.Trim(frag, "/"), "/")
+	if len(parts) > 0 && parts[0] == "playlist" {
 		return true
 	}
 	return false

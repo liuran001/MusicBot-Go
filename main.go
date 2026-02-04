@@ -41,9 +41,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := application.Start(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start application: %v\n", err)
-		os.Exit(1)
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- application.Start(ctx)
+	}()
+
+	select {
+	case err := <-startErr:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to start application: %v\n", err)
+			os.Exit(1)
+		}
+	case <-ctx.Done():
 	}
 
 	<-ctx.Done()

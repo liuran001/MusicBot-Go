@@ -215,6 +215,8 @@ type stubPlatformManager struct {
 	platforms map[string]platform.Platform
 	urlRules  map[string]urlRule
 	textRules map[string]textRule
+	aliases   map[string]string
+	metas     map[string]platform.Meta
 }
 
 type urlRule struct {
@@ -232,6 +234,8 @@ func newStubManager() *stubPlatformManager {
 		platforms: make(map[string]platform.Platform),
 		urlRules:  make(map[string]urlRule),
 		textRules: make(map[string]textRule),
+		aliases:   make(map[string]string),
+		metas:     make(map[string]platform.Meta),
 	}
 }
 
@@ -239,6 +243,22 @@ func (m *stubPlatformManager) Register(plat platform.Platform) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.platforms[plat.Name()] = plat
+	if metaProvider, ok := plat.(platform.MetadataProvider); ok {
+		meta := metaProvider.Metadata()
+		if meta.Name == "" {
+			meta.Name = plat.Name()
+		}
+		m.metas[meta.Name] = meta
+		for _, alias := range meta.Aliases {
+			aliasKey := platform.NormalizeAliasToken(alias)
+			if aliasKey == "" {
+				continue
+			}
+			if _, exists := m.aliases[aliasKey]; !exists {
+				m.aliases[aliasKey] = meta.Name
+			}
+		}
+	}
 }
 
 func (m *stubPlatformManager) Get(name string) platform.Platform {
@@ -273,6 +293,42 @@ func (m *stubPlatformManager) MatchText(text string) (platformName, trackID stri
 		return rule.platformName, rule.trackID, true
 	}
 	return "", "", false
+}
+
+func (m *stubPlatformManager) ResolveAlias(alias string) (string, bool) {
+	key := platform.NormalizeAliasToken(alias)
+	if key == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.platforms[key]; ok {
+		return key, true
+	}
+	if name, ok := m.aliases[key]; ok {
+		return name, true
+	}
+	return "", false
+}
+
+func (m *stubPlatformManager) Meta(name string) (platform.Meta, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	meta, ok := m.metas[name]
+	if !ok {
+		return platform.Meta{Name: name, DisplayName: name, Emoji: "🎵"}, false
+	}
+	return meta, true
+}
+
+func (m *stubPlatformManager) ListMeta() []platform.Meta {
+	names := m.List()
+	metas := make([]platform.Meta, 0, len(names))
+	for _, name := range names {
+		meta, _ := m.Meta(name)
+		metas = append(metas, meta)
+	}
+	return metas
 }
 
 func (m *stubPlatformManager) AddURLRule(url, platformName, trackID string) {

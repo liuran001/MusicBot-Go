@@ -42,6 +42,9 @@ type SongInfo struct {
 // SongDetail represents NetEase song detail response.
 type SongDetail = types.SongsDetailData
 
+// PlaylistDetail represents NetEase playlist detail response.
+type PlaylistDetail = types.PlaylistDetailData
+
 // SongURL represents NetEase song URL response.
 type SongURL = types.SongsURLData
 

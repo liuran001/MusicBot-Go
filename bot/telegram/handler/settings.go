@@ -205,11 +205,11 @@ func (h *SettingsHandler) formatQualityButton(quality string, isSelected bool) s
 }
 
 func (h *SettingsHandler) getPlatformEmoji(platform string) string {
-	return platformEmoji(platform)
+	return platformEmoji(h.PlatformManager, platform)
 }
 
 func (h *SettingsHandler) getPlatformDisplayName(platform string) string {
-	return platformDisplayName(platform)
+	return platformDisplayName(h.PlatformManager, platform)
 }
 
 func (h *SettingsHandler) getQualityEmoji(quality string) string {

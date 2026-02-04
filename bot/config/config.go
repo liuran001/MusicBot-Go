@@ -74,6 +74,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("EnableMultipartDownload", true)
 	v.SetDefault("MultipartConcurrency", 4)
 	v.SetDefault("MultipartMinSizeMB", 5)
+	v.SetDefault("ListPageSize", 8)
 	v.SetDefault("WorkerPoolSize", 4)
 	v.SetDefault("RecognizePort", 3737)
 	v.SetDefault("RateLimitPerSecond", 1.0)

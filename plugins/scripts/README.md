@@ -28,7 +28,11 @@ func Meta() map[string]interface{}
   "url": "https://github.com/liuran001/MusicBot-Meting-Plugin",
   "platforms": [
     {
-      "name": "tencent",
+      "name": "qqmusic",
+      "display_name": "QQ音乐",
+      "emoji": "🎶",
+      "aliases": ["qqmusic", "qq", "tencent"],
+      "allow_group_url": true,
       "capabilities": {
         "download": true,
         "search": true,
@@ -44,6 +48,7 @@ func Meta() map[string]interface{}
 ```
 
 `name/version/url` 会在 `/about` 中展示。
+`display_name/emoji/aliases/allow_group_url` 用于平台别名解析与 UI 展示。
 
 ## 可选实现的函数
 ```go

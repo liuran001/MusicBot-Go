@@ -1,12 +1,11 @@
 package handler
 
 import (
-	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -29,10 +28,10 @@ func extractPlatformTrack(message *telego.Message, manager platform.Manager) (pl
 			}
 		}
 	}
-	text, _, _ = parseTrailingOptions(text)
+	text, _, _ = parseTrailingOptions(text, manager)
 
 	if manager != nil {
-		if _, _, hasSuffix := parseSearchKeywordPlatform(text); hasSuffix {
+		if _, _, hasSuffix := parseSearchKeywordPlatform(text, manager); hasSuffix {
 			return "", "", false
 		}
 		if plat, id, matched := manager.MatchText(text); matched {
@@ -46,7 +45,7 @@ func extractPlatformTrack(message *telego.Message, manager platform.Manager) (pl
 	return "", "", false
 }
 
-func extractQualityOverride(message *telego.Message) string {
+func extractQualityOverride(message *telego.Message, manager platform.Manager) string {
 	if message == nil || message.Text == "" {
 		return ""
 	}
@@ -54,7 +53,7 @@ func extractQualityOverride(message *telego.Message) string {
 	if args == "" {
 		args = message.Text
 	}
-	_, _, quality := parseTrailingOptions(args)
+	_, _, quality := parseTrailingOptions(args, manager)
 	return quality
 }
 
@@ -90,7 +89,7 @@ func commandName(text, botName string) string {
 	return command
 }
 
-func parseTrailingOptions(text string) (baseText, platformName, quality string) {
+func parseTrailingOptions(text string, manager platform.Manager) (baseText, platformName, quality string) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return "", "", ""
@@ -109,13 +108,46 @@ func parseTrailingOptions(text string) (baseText, platformName, quality string) 
 	}
 	if len(fields) > 0 {
 		last := normalizePlatformToken(strings.ToLower(fields[len(fields)-1]))
-		if mapped, ok := searchPlatformAliases[last]; ok {
+		if mapped, ok := resolvePlatformAlias(manager, last); ok {
 			platformName = mapped
 			fields = fields[:len(fields)-1]
 		}
 	}
 	baseText = strings.TrimSpace(strings.Join(fields, " "))
 	return baseText, platformName, quality
+}
+
+var urlMatcher = regexp.MustCompile(`https?://[^\s]+`)
+
+func extractFirstURL(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	match := urlMatcher.FindString(text)
+	match = strings.TrimRight(match, ".,!?)]}>")
+	return strings.TrimSpace(match)
+}
+
+func matchPlaylistURL(manager platform.Manager, text string) (platformName, playlistID string, matched bool) {
+	if manager == nil {
+		return "", "", false
+	}
+	urlStr := extractFirstURL(text)
+	if urlStr == "" {
+		return "", "", false
+	}
+	for _, name := range manager.List() {
+		plat := manager.Get(name)
+		if plat == nil {
+			continue
+		}
+		if matcher, ok := plat.(platform.PlaylistURLMatcher); ok {
+			if id, ok := matcher.MatchPlaylistURL(urlStr); ok {
+				return name, id, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func normalizeQualityToken(token string) string {
@@ -185,7 +217,7 @@ func cleanupFiles(paths ...string) {
 	}
 }
 
-func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
+func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
 	if songInfo == nil {
 		return ""
 	}
@@ -204,7 +236,7 @@ func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
 	if infoLine != "" {
 		infoLine += "\n"
 	}
-	tags := strings.Join(formatInfoTags(songInfo.Platform, songInfo.FileExt), " ")
+	tags := strings.Join(formatInfoTags(manager, songInfo.Platform, songInfo.FileExt), " ")
 
 	if strings.TrimSpace(songInfo.TrackURL) != "" {
 		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", songInfo.TrackURL, songInfo.SongName)
@@ -239,8 +271,8 @@ func buildMusicCaption(songInfo *botpkg.SongInfo, botName string) string {
 	)
 }
 
-func formatInfoTags(platformName, fileExt string) []string {
-	tags := []string{"#" + platformTag(platformName)}
+func formatInfoTags(manager platform.Manager, platformName, fileExt string) []string {
+	tags := []string{"#" + platformTag(manager, platformName)}
 	if strings.TrimSpace(fileExt) != "" {
 		tags = append(tags, "#"+fileExt)
 	}
@@ -261,17 +293,6 @@ func formatBitrate(bitRate int) string {
 	return fmt.Sprintf("%.2fkbps", float64(bitRate)/1000)
 }
 
-func formatInlineInfoLine(platformName, fileExt string, musicSize int, bitRate int) string {
-	parts := formatInfoTags(platformName, fileExt)
-	if sizeText := formatFileSize(musicSize); sizeText != "" {
-		parts = append(parts, sizeText)
-	}
-	if bitrateText := formatBitrate(bitRate); bitrateText != "" {
-		parts = append(parts, bitrateText)
-	}
-	return strings.Join(parts, " ")
-}
-
 func formatFileInfo(fileExt string, musicSize int) string {
 	if musicSize <= 0 || strings.TrimSpace(fileExt) == "" {
 		return ""
@@ -279,42 +300,75 @@ func formatFileInfo(fileExt string, musicSize int) string {
 	return fmt.Sprintf("%s %.2fMB", fileExt, float64(musicSize)/1024/1024)
 }
 
-func platformEmoji(platformName string) string {
-	switch platformName {
-	case "netease":
-		return "🎵"
-	case "spotify":
-		return "🎧"
-	case "qqmusic":
-		return "🎶"
-	case "tencent":
-		return "🎶"
-	default:
-		return "🎵"
+func platformEmoji(manager platform.Manager, platformName string) string {
+	meta := resolvePlatformMeta(manager, platformName)
+	if strings.TrimSpace(meta.Emoji) != "" {
+		return meta.Emoji
 	}
+	return "🎵"
 }
 
-func platformDisplayName(platformName string) string {
-	switch platformName {
-	case "netease":
-		return "网易云音乐"
-	case "spotify":
-		return "Spotify"
-	case "qqmusic":
-		return "QQ音乐"
-	case "tencent":
-		return "QQ音乐"
-	default:
-		return platformName
+func platformDisplayName(manager platform.Manager, platformName string) string {
+	meta := resolvePlatformMeta(manager, platformName)
+	if strings.TrimSpace(meta.DisplayName) != "" {
+		return meta.DisplayName
 	}
+	return platformName
 }
 
-func platformTag(platformName string) string {
-	display := strings.TrimSpace(platformDisplayName(platformName))
+func platformTag(manager platform.Manager, platformName string) string {
+	display := strings.TrimSpace(platformDisplayName(manager, platformName))
 	if display == "" {
 		return "music"
 	}
 	return display
+}
+
+func resolvePlatformMeta(manager platform.Manager, platformName string) platform.Meta {
+	trimmed := strings.TrimSpace(platformName)
+	if trimmed == "" {
+		return platform.Meta{Name: "", DisplayName: "", Emoji: "🎵"}
+	}
+	if manager == nil {
+		return platform.Meta{Name: trimmed, DisplayName: trimmed, Emoji: "🎵"}
+	}
+	if meta, ok := manager.Meta(trimmed); ok {
+		return meta
+	}
+	return platform.Meta{Name: trimmed, DisplayName: trimmed, Emoji: "🎵"}
+}
+
+func resolvePlatformAlias(manager platform.Manager, token string) (string, bool) {
+	if manager == nil {
+		return "", false
+	}
+	return manager.ResolveAlias(token)
+}
+
+func matchPlatformTrack(manager platform.Manager, platformName, text string) (string, bool) {
+	if manager == nil {
+		return "", false
+	}
+	platformName = strings.TrimSpace(platformName)
+	text = strings.TrimSpace(text)
+	if platformName == "" || text == "" {
+		return "", false
+	}
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return "", false
+	}
+	if matcher, ok := plat.(platform.URLMatcher); ok {
+		if id, ok := matcher.MatchURL(text); ok {
+			return id, true
+		}
+	}
+	if matcher, ok := plat.(platform.TextMatcher); ok {
+		if id, ok := matcher.MatchText(text); ok {
+			return id, true
+		}
+	}
+	return text, true
 }
 
 func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, platformName, trackID string, message *telego.Message) {
@@ -373,58 +427,4 @@ func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, pla
 			songInfo.FromUserName = message.From.Username
 		}
 	}
-}
-
-type progressWriter struct {
-	ctx         context.Context
-	bot         *telego.Bot
-	msg         *telego.Message
-	total       int64
-	written     int64
-	lastUpdate  time.Time
-	lastWritten int64
-	filename    string
-}
-
-func (pw *progressWriter) Write(p []byte) (n int, err error) {
-	n = len(p)
-	pw.written += int64(n)
-
-	now := time.Now()
-	if now.Sub(pw.lastUpdate) >= 2*time.Second && pw.msg != nil {
-		downloaded := float64(pw.written) / 1024 / 1024
-		bytesInPeriod := pw.written - pw.lastWritten
-		duration := now.Sub(pw.lastUpdate).Seconds()
-		speed := float64(bytesInPeriod) / duration / 1024 / 1024
-
-		text := ""
-		if pw.total <= 0 {
-			text = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB\n速度：%.2f MB/s",
-				pw.filename, downloaded, speed)
-		} else {
-			total := float64(pw.total) / 1024 / 1024
-			progress := float64(pw.written) * 100 / float64(pw.total)
-			text = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)\n速度：%.2f MB/s",
-				pw.filename, progress, downloaded, total, speed)
-		}
-		if pw.msg.Text == text {
-			pw.lastUpdate = now
-			pw.lastWritten = pw.written
-			return n, nil
-		}
-
-		_, err = pw.bot.EditMessageText(pw.ctx, &telego.EditMessageTextParams{
-			ChatID:    telego.ChatID{ID: pw.msg.Chat.ID},
-			MessageID: pw.msg.MessageID,
-			Text:      text,
-		})
-		if err == nil {
-			pw.msg.Text = text
-		}
-
-		pw.lastUpdate = now
-		pw.lastWritten = pw.written
-	}
-
-	return n, nil
 }

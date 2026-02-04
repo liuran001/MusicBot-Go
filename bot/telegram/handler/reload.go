@@ -65,11 +65,3 @@ func (h *ReloadHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		_, _ = b.SendMessage(ctx, params)
 	}
 }
-
-func isBotAdmin(adminIDs map[int64]struct{}, userID int64) bool {
-	if len(adminIDs) == 0 {
-		return false
-	}
-	_, ok := adminIDs[userID]
-	return ok
-}
