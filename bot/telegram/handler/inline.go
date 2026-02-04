@@ -209,12 +209,16 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 		return
 	}
 	qualityValue := h.resolveDefaultQuality(ctx, query.From.ID)
+	messageText := strings.TrimSpace(query.Query)
+	if messageText == "" {
+		messageText = buildInlineMusicCommand(platformName, trackID, qualityValue)
+	}
 	inlineMsg := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()),
 		Title:               fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, platformName), platformDisplayName(h.PlatformManager, platformName)),
 		Description:         tapToDownload,
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: fallbackInlineMessageText(query.Query, platformName, trackID, qualityValue)},
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: messageText},
 	}
 	params := &telego.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
@@ -223,7 +227,10 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 		CacheTime:     60,
 	}
 	if startParam := buildInlineStartParameter(platformName, trackID, qualityValue); startParam != "" {
-		params.Button = &telego.InlineQueryResultsButton{Text: tapMeToDown, StartParameter: startParam}
+		params.Button = &telego.InlineQueryResultsButton{
+			Text:           tapToDownload,
+			StartParameter: startParam,
+		}
 	}
 	_ = b.AnswerInlineQuery(ctx, params)
 }
@@ -270,27 +277,7 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 	if strings.TrimSpace(songInfo.TrackURL) == "" && platformName == "netease" && trackID != "" {
 		songInfo.TrackURL = fmt.Sprintf("https://music.163.com/song?id=%s", trackID)
 	}
-	commandQuery := ""
-	if trackID != "" {
-		commandQuery = fmt.Sprintf("/%s %s %s", platformName, trackID, qualityValue)
-	}
-
-	var rows [][]telego.InlineKeyboardButton
-	linkURL := strings.TrimSpace(songInfo.TrackURL)
-	if linkURL != "" {
-		rows = append(rows, []telego.InlineKeyboardButton{
-			{Text: fmt.Sprintf("%s- %s", songInfo.SongName, songInfo.SongArtists), URL: linkURL},
-		})
-	}
-	if commandQuery != "" {
-		rows = append(rows, []telego.InlineKeyboardButton{
-			{Text: sendMeTo, SwitchInlineQuery: &commandQuery},
-		})
-	}
-	var keyboard *telego.InlineKeyboardMarkup
-	if len(rows) > 0 {
-		keyboard = &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
-	}
+	keyboard := buildForwardKeyboard(songInfo.TrackURL, platformName, trackID)
 
 	newAudio := &telego.InlineQueryResultCachedDocument{
 		Type:           telego.ResultTypeDocument,
@@ -309,17 +296,6 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 		IsPersonal:    false,
 		CacheTime:     3600,
 	})
-}
-
-func fallbackInlineMessageText(queryText, platformName, trackID, qualityValue string) string {
-	if strings.TrimSpace(queryText) != "" {
-		return queryText
-	}
-	return fmt.Sprintf("/%s %s %s", platformName, trackID, qualityValue)
-}
-
-func buildInlineStartParameter(platformName, trackID, qualityValue string) string {
-	return buildInlineStartParameterToken(platformName, trackID, qualityValue)
 }
 
 func (h *InlineSearchHandler) resolveDefaultQuality(ctx context.Context, userID int64) string {
