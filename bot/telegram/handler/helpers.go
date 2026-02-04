@@ -1,18 +1,22 @@
 package handler
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/mymmrac/telego"
 )
 
-func extractPlatformTrack(message *telego.Message, manager platform.Manager) (platformName, trackID string, found bool) {
+func extractPlatformTrack(ctx context.Context, message *telego.Message, manager platform.Manager) (platformName, trackID string, found bool) {
 	if message == nil || message.Text == "" {
 		return "", "", false
 	}
@@ -34,10 +38,14 @@ func extractPlatformTrack(message *telego.Message, manager platform.Manager) (pl
 		if _, _, hasSuffix := parseSearchKeywordPlatform(text, manager); hasSuffix {
 			return "", "", false
 		}
-		if plat, id, matched := manager.MatchText(text); matched {
+		if _, _, matched := matchPlaylistURL(ctx, manager, text); matched {
+			return "", "", false
+		}
+		resolvedText := resolveShortLinkText(ctx, manager, text)
+		if plat, id, matched := manager.MatchText(resolvedText); matched {
 			return plat, id, true
 		}
-		if plat, id, matched := manager.MatchURL(text); matched {
+		if plat, id, matched := manager.MatchURL(resolvedText); matched {
 			return plat, id, true
 		}
 	}
@@ -128,11 +136,109 @@ func extractFirstURL(text string) string {
 	return strings.TrimSpace(match)
 }
 
-func matchPlaylistURL(manager platform.Manager, text string) (platformName, playlistID string, matched bool) {
+func resolveShortLinkText(ctx context.Context, manager platform.Manager, text string) string {
+	urlStr := extractFirstURL(text)
+	if urlStr == "" {
+		return text
+	}
+	resolved, err := resolveShortURL(ctx, manager, urlStr)
+	if err != nil || resolved == "" || resolved == urlStr {
+		return text
+	}
+	return strings.Replace(text, urlStr, resolved, 1)
+}
+
+func extractResolvedURL(ctx context.Context, manager platform.Manager, text string) string {
+	urlStr := extractFirstURL(text)
+	if urlStr == "" {
+		return ""
+	}
+	resolved, err := resolveShortURL(ctx, manager, urlStr)
+	if err != nil || resolved == "" {
+		return urlStr
+	}
+	return resolved
+}
+
+func resolveShortURL(ctx context.Context, manager platform.Manager, urlStr string) (string, error) {
+	parsed, err := url.Parse(urlStr)
+	if err != nil {
+		return urlStr, err
+	}
+	if !shouldResolveHost(parsed.Hostname(), manager) {
+		return urlStr, nil
+	}
+	client := &http.Client{
+		Timeout: 8 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return urlStr, err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := client.Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			location := strings.TrimSpace(resp.Header.Get("Location"))
+			if location != "" {
+				if resolved, err := parsed.Parse(location); err == nil {
+					return resolved.String(), nil
+				}
+				return location, nil
+			}
+		}
+		if resp.Request != nil && resp.Request.URL != nil {
+			return resp.Request.URL.String(), nil
+		}
+	}
+	client = &http.Client{Timeout: 8 * time.Second}
+	req, err = http.NewRequestWithContext(ctx, http.MethodHead, urlStr, nil)
+	if err != nil {
+		return urlStr, err
+	}
+	resp, err = client.Do(req)
+	if err != nil {
+		return urlStr, err
+	}
+	defer resp.Body.Close()
+	if resp.Request != nil && resp.Request.URL != nil {
+		return resp.Request.URL.String(), nil
+	}
+	return urlStr, nil
+}
+
+func shouldResolveHost(host string, manager platform.Manager) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || manager == nil {
+		return false
+	}
+	for _, name := range manager.List() {
+		plat := manager.Get(name)
+		if plat == nil {
+			continue
+		}
+		provider, ok := plat.(platform.ShortLinkProvider)
+		if !ok {
+			continue
+		}
+		for _, domain := range provider.ShortLinkHosts() {
+			if strings.EqualFold(strings.TrimSpace(domain), host) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchPlaylistURL(ctx context.Context, manager platform.Manager, text string) (platformName, playlistID string, matched bool) {
 	if manager == nil {
 		return "", "", false
 	}
-	urlStr := extractFirstURL(text)
+	urlStr := extractResolvedURL(ctx, manager, text)
 	if urlStr == "" {
 		return "", "", false
 	}
@@ -404,7 +510,7 @@ func resolvePlatformAlias(manager platform.Manager, token string) (string, bool)
 	return manager.ResolveAlias(token)
 }
 
-func matchPlatformTrack(manager platform.Manager, platformName, text string) (string, bool) {
+func matchPlatformTrack(ctx context.Context, manager platform.Manager, platformName, text string) (string, bool) {
 	if manager == nil {
 		return "", false
 	}
@@ -413,6 +519,11 @@ func matchPlatformTrack(manager platform.Manager, platformName, text string) (st
 	if platformName == "" || text == "" {
 		return "", false
 	}
+	if _, _, matched := matchPlaylistURL(ctx, manager, text); matched {
+		return "", false
+	}
+	resolvedText := resolveShortLinkText(ctx, manager, text)
+	text = strings.TrimSpace(resolvedText)
 	plat := manager.Get(platformName)
 	if plat == nil {
 		return "", false

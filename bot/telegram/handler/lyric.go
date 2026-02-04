@@ -65,7 +65,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		return
 	}
 
-	platformName, trackID, found := extractPlatformTrackFromMessage(args, h.PlatformManager)
+	platformName, trackID, found := extractPlatformTrackFromMessage(ctx, args, h.PlatformManager)
 	if !found {
 		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: noResults}
 		if h.RateLimiter != nil {
@@ -112,15 +112,19 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	h.sendLyrics(ctx, b, msgResult, message, lyrics)
 }
 
-func extractPlatformTrackFromMessage(messageText string, mgr platform.Manager) (platformName, trackID string, found bool) {
+func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mgr platform.Manager) (platformName, trackID string, found bool) {
 	if messageText == "" {
 		return "", "", false
 	}
 	if mgr != nil {
-		if platformName, trackID, matched := mgr.MatchText(messageText); matched {
+		resolvedText := resolveShortLinkText(ctx, mgr, messageText)
+		if _, _, matched := matchPlaylistURL(ctx, mgr, resolvedText); matched {
+			return "", "", false
+		}
+		if platformName, trackID, matched := mgr.MatchText(resolvedText); matched {
 			return platformName, trackID, true
 		}
-		if platformName, trackID, matched := mgr.MatchURL(messageText); matched {
+		if platformName, trackID, matched := mgr.MatchURL(resolvedText); matched {
 			return platformName, trackID, true
 		}
 	}

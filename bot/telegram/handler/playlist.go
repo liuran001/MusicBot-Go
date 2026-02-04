@@ -67,7 +67,7 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	if baseText == "" {
 		return false
 	}
-	platformName, playlistID, ok := matchPlaylistURL(h.PlatformManager, baseText)
+	platformName, playlistID, ok := matchPlaylistURL(ctx, h.PlatformManager, baseText)
 	if !ok {
 		return false
 	}

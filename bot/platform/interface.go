@@ -98,6 +98,12 @@ type PlaylistURLMatcher interface {
 	MatchPlaylistURL(url string) (playlistID string, matched bool)
 }
 
+// ShortLinkProvider defines the interface for platforms that declare short-link hosts
+// which should be resolved before URL matching.
+type ShortLinkProvider interface {
+	ShortLinkHosts() []string
+}
+
 // TextMatcher defines the interface for platforms that support parsing track IDs
 // from arbitrary text input (e.g., short links or plain IDs).
 type TextMatcher interface {

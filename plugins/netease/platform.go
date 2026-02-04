@@ -177,6 +177,11 @@ func (n *NeteasePlatform) MatchPlaylistURL(url string) (playlistID string, match
 	return matcher.MatchPlaylistURL(url)
 }
 
+// ShortLinkHosts implements platform.ShortLinkProvider.
+func (n *NeteasePlatform) ShortLinkHosts() []string {
+	return []string{"163cn.tv", "163cn.link"}
+}
+
 // GetTrack retrieves detailed information about a track by its ID.
 func (n *NeteasePlatform) GetTrack(ctx context.Context, trackID string) (*platform.Track, error) {
 	musicID, err := strconv.Atoi(trackID)

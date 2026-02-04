@@ -36,12 +36,15 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	message := update.Message
 	chatID := message.Chat.ID
 	replyID := message.MessageID
-
-	if message.ReplyToMessage == nil || message.ReplyToMessage.Voice == nil {
+	voiceMessage := message.ReplyToMessage
+	if voiceMessage != nil && voiceMessage.Voice != nil {
+		replyID = voiceMessage.MessageID
+	} else if message.Voice != nil {
+		voiceMessage = message
+	} else {
 		sendText(ctx, b, chatID, replyID, "请回复一条语音留言")
 		return
 	}
-	replyID = message.ReplyToMessage.MessageID
 
 	if h.CacheDir == "" {
 		h.CacheDir = "./cache"
@@ -52,7 +55,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	if h.DownloadBot != nil {
 		fileBot = h.DownloadBot
 	}
-	fileInfo, err := fileBot.GetFile(ctx, &telego.GetFileParams{FileID: message.ReplyToMessage.Voice.FileID})
+	fileInfo, err := fileBot.GetFile(ctx, &telego.GetFileParams{FileID: voiceMessage.Voice.FileID})
 	if err != nil || fileInfo == nil || fileInfo.FilePath == "" {
 		sendText(ctx, b, chatID, replyID, "获取语音失败，请稍后重试")
 		return
@@ -119,7 +122,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	}
 
 	if h.Music != nil {
-		h.Music.dispatch(ctx, b, message.ReplyToMessage, result.Platform, result.TrackID, "")
+		h.Music.dispatch(ctx, b, voiceMessage, result.Platform, result.TrackID, "")
 	}
 }
 

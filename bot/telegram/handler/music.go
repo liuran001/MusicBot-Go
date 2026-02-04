@@ -197,14 +197,14 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 			if baseText == "" {
 				return
 			}
-			if trackID, matched := matchPlatformTrack(h.PlatformManager, platformName, baseText); matched {
+			if trackID, matched := matchPlatformTrack(ctx, h.PlatformManager, platformName, baseText); matched {
 				h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
 				return
 			}
 		}
 	}
 
-	platformName, trackID, found := extractPlatformTrack(message, h.PlatformManager)
+	platformName, trackID, found := extractPlatformTrack(ctx, message, h.PlatformManager)
 	if !found {
 		return
 	}
@@ -511,13 +511,17 @@ func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *teleg
 		}
 	}
 
-	if urlStr := extractFirstURL(baseText); urlStr != "" {
+	resolvedText := resolveShortLinkText(ctx, h.PlatformManager, baseText)
+	if _, _, matched := matchPlaylistURL(ctx, h.PlatformManager, resolvedText); matched {
+		return "", "", false
+	}
+	if urlStr := extractFirstURL(resolvedText); urlStr != "" {
 		if plat, id, matched := h.PlatformManager.MatchURL(urlStr); matched {
 			return plat, id, true
 		}
 	}
 
-	if plat, id, matched := h.PlatformManager.MatchText(baseText); matched {
+	if plat, id, matched := h.PlatformManager.MatchText(resolvedText); matched {
 		return plat, id, true
 	}
 

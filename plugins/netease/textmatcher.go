@@ -1,13 +1,10 @@
 package netease
 
 import (
-	"crypto/tls"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/XiaoMengXinX/Music163Api-Go/api"
 	"github.com/XiaoMengXinX/Music163Api-Go/utils"
@@ -26,15 +23,11 @@ var (
 )
 
 // MatchText attempts to extract a track ID from arbitrary text input.
-// It supports short links, direct URLs, program IDs, and plain numeric IDs.
+// It supports direct URLs, program IDs, and plain numeric IDs. Short links are resolved upstream.
 func (n *NeteasePlatform) MatchText(text string) (trackID string, matched bool) {
 	cleaned := normalizeText(text)
 	if cleaned == "" {
 		return "", false
-	}
-
-	if resolved := resolveShortURL(cleaned); resolved != "" {
-		cleaned = resolved
 	}
 
 	if urlStr := extractURL(cleaned); urlStr != "" {
@@ -135,40 +128,4 @@ func getProgramRealID(programID int) int {
 		return programDetail.Program.MainSong.ID
 	}
 	return 0
-}
-
-func resolveShortURL(text string) string {
-	urlStr := extractURL(text)
-	if urlStr == "" {
-		return ""
-	}
-	if !strings.Contains(urlStr, "163cn.tv") && !strings.Contains(urlStr, "163cn.link") {
-		return ""
-	}
-	parsed, err := url.Parse(urlStr)
-	if err != nil {
-		return ""
-	}
-	req, err := http.NewRequest("GET", urlStr, nil)
-	if err != nil {
-		return ""
-	}
-	transport := &http.Transport{}
-	if host := strings.ToLower(parsed.Hostname()); host == "163cn.link" || host == "163cn.tv" {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   10 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	location := resp.Header.Get("location")
-	return strings.TrimSpace(location)
 }

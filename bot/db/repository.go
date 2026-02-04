@@ -12,6 +12,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/liuran001/MusicBot-Go/bot"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -207,7 +208,40 @@ func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := toModel(song)
-		if err := tx.Create(model).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "platform"},
+				{Name: "track_id"},
+				{Name: "quality"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"updated_at",
+				"music_id",
+				"song_name",
+				"song_artists",
+				"song_artists_ids",
+				"song_album",
+				"album_id",
+				"track_url",
+				"album_url",
+				"song_artists_urls",
+				"file_ext",
+				"music_size",
+				"pic_size",
+				"emb_pic_size",
+				"bit_rate",
+				"duration",
+				"file_id",
+				"thumb_file_id",
+				"from_user_id",
+				"from_user_name",
+				"from_chat_id",
+				"from_chat_name",
+			}),
+		}).Create(model).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform = ? AND track_id = ? AND quality = ?", model.Platform, model.TrackID, model.Quality).First(model).Error; err != nil {
 			return err
 		}
 		song.ID = model.ID

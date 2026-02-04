@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"testing"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -99,7 +100,7 @@ func TestExtractPlatformTrack_CommandArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &telego.Message{Text: tt.text}
-			gotPlatform, gotTrackID, gotFound := extractPlatformTrack(msg, mgr)
+			gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), msg, mgr)
 			if gotPlatform != tt.wantPlatform || gotTrackID != tt.wantTrackID || gotFound != tt.wantFound {
 				t.Errorf("extractPlatformTrack() = (%q, %q, %v), want (%q, %q, %v)",
 					gotPlatform, gotTrackID, gotFound, tt.wantPlatform, tt.wantTrackID, tt.wantFound)
@@ -146,7 +147,7 @@ func TestExtractPlatformTrack_MatchText(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &telego.Message{Text: tt.text}
-			gotPlatform, gotTrackID, gotFound := extractPlatformTrack(msg, mgr)
+			gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), msg, mgr)
 			if gotPlatform != tt.wantPlatform || gotTrackID != tt.wantTrackID || gotFound != tt.wantFound {
 				t.Errorf("extractPlatformTrack() = (%q, %q, %v), want (%q, %q, %v)",
 					gotPlatform, gotTrackID, gotFound, tt.wantPlatform, tt.wantTrackID, tt.wantFound)
@@ -193,7 +194,7 @@ func TestExtractPlatformTrack_MatchURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &telego.Message{Text: tt.text}
-			gotPlatform, gotTrackID, gotFound := extractPlatformTrack(msg, mgr)
+			gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), msg, mgr)
 			if gotPlatform != tt.wantPlatform || gotTrackID != tt.wantTrackID || gotFound != tt.wantFound {
 				t.Errorf("extractPlatformTrack() = (%q, %q, %v), want (%q, %q, %v)",
 					gotPlatform, gotTrackID, gotFound, tt.wantPlatform, tt.wantTrackID, tt.wantFound)
@@ -204,7 +205,7 @@ func TestExtractPlatformTrack_MatchURL(t *testing.T) {
 
 func TestExtractPlatformTrack_NilMessage(t *testing.T) {
 	mgr := newStubManager()
-	gotPlatform, gotTrackID, gotFound := extractPlatformTrack(nil, mgr)
+	gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), nil, mgr)
 	if gotPlatform != "" || gotTrackID != "" || gotFound != false {
 		t.Errorf("extractPlatformTrack(nil) = (%q, %q, %v), want (\"\", \"\", false)",
 			gotPlatform, gotTrackID, gotFound)
@@ -214,7 +215,7 @@ func TestExtractPlatformTrack_NilMessage(t *testing.T) {
 func TestExtractPlatformTrack_EmptyText(t *testing.T) {
 	mgr := newStubManager()
 	msg := &telego.Message{Text: ""}
-	gotPlatform, gotTrackID, gotFound := extractPlatformTrack(msg, mgr)
+	gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), msg, mgr)
 	if gotPlatform != "" || gotTrackID != "" || gotFound != false {
 		t.Errorf("extractPlatformTrack(empty) = (%q, %q, %v), want (\"\", \"\", false)",
 			gotPlatform, gotTrackID, gotFound)

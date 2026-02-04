@@ -106,7 +106,8 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 		}
 	}
 	if h.PlatformManager != nil {
-		if platformName, trackID, matched := h.PlatformManager.MatchText(args); matched {
+		resolvedArgs := resolveShortLinkText(ctx, h.PlatformManager, args)
+		if platformName, trackID, matched := h.PlatformManager.MatchText(resolvedArgs); matched {
 			if err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID); err == nil {
 				params := &telego.SendMessageParams{
 					ChatID:          telego.ChatID{ID: message.Chat.ID},
@@ -132,7 +133,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 			}
 			return
 		}
-		if platformName, trackID, matched := h.PlatformManager.MatchURL(args); matched {
+		if platformName, trackID, matched := h.PlatformManager.MatchURL(resolvedArgs); matched {
 			if err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID); err == nil {
 				params := &telego.SendMessageParams{
 					ChatID:          telego.ChatID{ID: message.Chat.ID},

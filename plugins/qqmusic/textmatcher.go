@@ -1,11 +1,8 @@
 package qqmusic
 
 import (
-	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
-	"time"
 )
 
 type TextMatcher struct{}
@@ -27,11 +24,6 @@ func (m *TextMatcher) MatchText(text string) (trackID string, matched bool) {
 	if urlStr := extractURL(text); urlStr != "" {
 		if id, ok := NewURLMatcher().MatchURL(urlStr); ok {
 			return id, true
-		}
-		if resolved := resolveTencentShortURL(urlStr); resolved != "" {
-			if id, ok := NewURLMatcher().MatchURL(resolved); ok {
-				return id, true
-			}
 		}
 	}
 	if isTencentSongMID(text) {
@@ -64,43 +56,6 @@ func extractURL(text string) string {
 	match := urlPattern.FindString(text)
 	match = strings.TrimRight(match, ".,!?)]}>")
 	return strings.TrimSpace(match)
-}
-
-func resolveTencentShortURL(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return ""
-	}
-	host := strings.ToLower(parsed.Hostname())
-	pathValue := strings.Trim(parsed.Path, "/")
-	if !strings.Contains(host, "y.qq.com") {
-		return ""
-	}
-	if pathValue != "base/fcgi-bin/u" {
-		return ""
-	}
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	resp, err := client.Get(parsed.String())
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 300 || resp.StatusCode > 399 {
-		return ""
-	}
-	location := strings.TrimSpace(resp.Header.Get("Location"))
-	if location == "" {
-		return ""
-	}
-	if resolved, err := parsed.Parse(location); err == nil {
-		return resolved.String()
-	}
-	return location
 }
 
 func isTencentSongMID(text string) bool {

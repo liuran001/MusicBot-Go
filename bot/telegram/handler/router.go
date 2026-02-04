@@ -62,6 +62,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		if update.Message == nil || update.Message.Text == "" {
 			return false
 		}
+		if update.Message.Chat.Type == "private" && update.Message.Voice != nil {
+			return false
+		}
 		text := strings.TrimSpace(update.Message.Text)
 		if !strings.HasPrefix(text, "/") {
 			return false
@@ -91,11 +94,21 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		return false
 	})
 
+	bh.Handle(r.wrapMessage(r.Recognize), func(ctx context.Context, update telego.Update) bool {
+		if update.Message == nil || update.Message.Voice == nil {
+			return false
+		}
+		return update.Message.Chat.Type == "private"
+	})
+
 	bh.Handle(r.wrapMessage(r.Playlist), func(ctx context.Context, update telego.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {
 			return false
 		}
 		if isCommandMessage(update.Message) {
+			return false
+		}
+		if update.Message.Voice != nil {
 			return false
 		}
 		if r.PlatformManager == nil {
@@ -106,7 +119,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		if strings.TrimSpace(baseText) == "" {
 			return false
 		}
-		platformName, _, matched := matchPlaylistURL(r.PlatformManager, baseText)
+		platformName, _, matched := matchPlaylistURL(ctx, r.PlatformManager, baseText)
 		if !matched {
 			return false
 		}
@@ -132,10 +145,11 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 				return false
 			}
 			for _, urlStr := range urls {
-				if plat, _, matched := r.PlatformManager.MatchURL(urlStr); matched {
+				resolvedURL := extractResolvedURL(ctx, r.PlatformManager, urlStr)
+				if plat, _, matched := r.PlatformManager.MatchURL(resolvedURL); matched {
 					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
 				}
-				if plat, _, matched := r.PlatformManager.MatchText(urlStr); matched {
+				if plat, _, matched := r.PlatformManager.MatchText(resolvedURL); matched {
 					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
 				}
 			}
@@ -146,10 +160,11 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return false
 		}
 		if r.PlatformManager != nil {
-			if _, _, matched := r.PlatformManager.MatchText(baseText); matched {
+			resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
+			if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
 				return true
 			}
-			if _, _, matched := r.PlatformManager.MatchURL(baseText); matched {
+			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 				return true
 			}
 		}
@@ -163,6 +178,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		if update.Message.Chat.Type != "private" {
 			return false
 		}
+		if update.Message.Voice != nil {
+			return false
+		}
 		text := update.Message.Text
 		if hasSearchPlatformSuffix(text, r.PlatformManager) {
 			return true
@@ -172,13 +190,14 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return false
 		}
 		if r.PlatformManager != nil {
-			if _, _, matched := matchPlaylistURL(r.PlatformManager, baseText); matched {
+			resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
+			if _, _, matched := matchPlaylistURL(ctx, r.PlatformManager, resolvedText); matched {
 				return false
 			}
-			if _, _, matched := r.PlatformManager.MatchText(baseText); matched {
+			if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
 				return false
 			}
-			if _, _, matched := r.PlatformManager.MatchURL(baseText); matched {
+			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 				return false
 			}
 		}

@@ -35,14 +35,19 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 		h.inlineSearch(ctx, b, query)
 	default:
 		if h.PlatformManager != nil {
-			platformName, trackID, matched := h.PlatformManager.MatchText(query.Query)
+			resolvedQuery := resolveShortLinkText(ctx, h.PlatformManager, query.Query)
+			if _, _, matched := matchPlaylistURL(ctx, h.PlatformManager, resolvedQuery); matched {
+				h.inlineEmpty(ctx, b, query)
+				return
+			}
+			platformName, trackID, matched := h.PlatformManager.MatchText(resolvedQuery)
 			if matched {
 				if h.inlineCachedOrCommand(ctx, b, query, platformName, trackID) {
 					return
 				}
 				return
 			}
-			platformName, trackID, matched = h.PlatformManager.MatchURL(query.Query)
+			platformName, trackID, matched = h.PlatformManager.MatchURL(resolvedQuery)
 			if matched {
 				if h.inlineCachedOrCommand(ctx, b, query, platformName, trackID) {
 					return
