@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestExtractPlatformTrackFromMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotPlatform, gotTrackID, gotFound := extractPlatformTrackFromMessage(tt.messageText, mgr)
+			gotPlatform, gotTrackID, gotFound := extractPlatformTrackFromMessage(context.Background(), tt.messageText, mgr)
 			if gotPlatform != tt.wantPlatform || gotTrackID != tt.wantTrackID || gotFound != tt.wantFound {
 				t.Errorf("extractPlatformTrackFromMessage() = (%q, %q, %v), want (%q, %q, %v)",
 					gotPlatform, gotTrackID, gotFound, tt.wantPlatform, tt.wantTrackID, tt.wantFound)
@@ -62,7 +63,7 @@ func TestExtractPlatformTrackFromMessage(t *testing.T) {
 }
 
 func TestExtractPlatformTrackFromMessage_NilManager(t *testing.T) {
-	gotPlatform, gotTrackID, gotFound := extractPlatformTrackFromMessage("test", nil)
+	gotPlatform, gotTrackID, gotFound := extractPlatformTrackFromMessage(context.Background(), "test", nil)
 	if gotPlatform != "" || gotTrackID != "" || gotFound != false {
 		t.Errorf("extractPlatformTrackFromMessage(nil manager) = (%q, %q, %v), want (\"\", \"\", false)",
 			gotPlatform, gotTrackID, gotFound)
