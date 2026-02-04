@@ -36,13 +36,11 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 
 	fromCount, _ := h.Repo.Count(ctx)
 	chatCount, _ := h.Repo.CountByChatID(ctx, message.Chat.ID)
-	chatInfo := message.Chat.Title
+	chatInfo := mdV2Replacer.Replace(message.Chat.Title)
 	if message.Chat.Username != "" && message.Chat.Title == "" {
 		chatInfo = fmt.Sprintf("[%s](tg://user?id=%d)", mdV2Replacer.Replace(message.Chat.Username), message.Chat.ID)
 	} else if message.Chat.Username != "" {
 		chatInfo = fmt.Sprintf("[%s](https://t.me/%s)", mdV2Replacer.Replace(message.Chat.Title), message.Chat.Username)
-	} else {
-		chatInfo = fmt.Sprintf("%s", mdV2Replacer.Replace(message.Chat.Title))
 	}
 
 	userID := int64(0)
@@ -63,7 +61,7 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		sort.Strings(platformNames)
 		lines := make([]string, 0, len(platformNames))
 		for _, name := range platformNames {
-			display := mdV2Replacer.Replace(platformDisplayName(name))
+			display := mdV2Replacer.Replace(platformDisplayName(h.PlatformManager, name))
 			lines = append(lines, fmt.Sprintf("%s: %d", display, platformCounts[name]))
 		}
 		msgText += "\n缓存平台统计:\n" + strings.Join(lines, "\n")
@@ -74,7 +72,7 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		if len(platforms) > 0 {
 			displayNames := make([]string, 0, len(platforms))
 			for _, name := range platforms {
-				displayNames = append(displayNames, platformDisplayName(name))
+				displayNames = append(displayNames, platformDisplayName(h.PlatformManager, name))
 			}
 			platformsEscaped := mdV2Replacer.Replace(strings.Join(displayNames, ", "))
 			msgText += fmt.Sprintf("\n\n📱 可用平台: %s", platformsEscaped)

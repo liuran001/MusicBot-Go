@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform/registry"
@@ -18,6 +19,8 @@ type DefaultManager struct {
 	mu       sync.RWMutex
 	// providers maps platform name to a list of providers in registration order
 	providers map[string][]Platform
+	meta      map[string]Meta
+	aliases   map[string]string
 }
 
 // NewManager creates a new manager instance with the default global registry.
@@ -25,6 +28,8 @@ func NewManager() *DefaultManager {
 	return &DefaultManager{
 		registry:  registry.Default,
 		providers: make(map[string][]Platform),
+		meta:      make(map[string]Meta),
+		aliases:   make(map[string]string),
 	}
 }
 
@@ -34,6 +39,8 @@ func NewManagerWithRegistry(reg *registry.Registry) *DefaultManager {
 	return &DefaultManager{
 		registry:  reg,
 		providers: make(map[string][]Platform),
+		meta:      make(map[string]Meta),
+		aliases:   make(map[string]string),
 	}
 }
 
@@ -46,6 +53,12 @@ func (m *DefaultManager) Register(platform Platform) {
 
 	name := platform.Name()
 	m.providers[name] = append(m.providers[name], platform)
+	meta := buildMeta(platform, name)
+	if existing, ok := m.meta[name]; ok {
+		meta = mergeMeta(existing, meta)
+	}
+	m.meta[name] = meta
+	m.indexAliases(meta)
 
 	// For URL matching, register only the first provider for each platform name
 	// to preserve URL matching behavior (first registered provider handles MatchURL)
@@ -351,6 +364,140 @@ func (m *DefaultManager) MatchText(text string) (platformName, trackID string, m
 		}
 	}
 	return "", "", false
+}
+
+// ResolveAlias resolves a platform alias to its canonical platform name.
+func (m *DefaultManager) ResolveAlias(alias string) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	key := normalizeAlias(alias)
+	if key == "" {
+		return "", false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.providers[key]; ok {
+		return key, true
+	}
+	if name, ok := m.aliases[key]; ok {
+		return name, true
+	}
+	return "", false
+}
+
+// Meta returns metadata for a platform name.
+func (m *DefaultManager) Meta(name string) (Meta, bool) {
+	if m == nil {
+		return Meta{}, false
+	}
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return Meta{}, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	meta, ok := m.meta[trimmed]
+	if !ok {
+		return Meta{Name: trimmed, DisplayName: trimmed, Emoji: "🎵"}, false
+	}
+	return meta, true
+}
+
+// ListMeta returns metadata for all registered platforms.
+func (m *DefaultManager) ListMeta() []Meta {
+	if m == nil {
+		return nil
+	}
+	names := m.List()
+	metas := make([]Meta, 0, len(names))
+	for _, name := range names {
+		meta, _ := m.Meta(name)
+		metas = append(metas, meta)
+	}
+	return metas
+}
+
+func (m *DefaultManager) indexAliases(meta Meta) {
+	for _, alias := range meta.Aliases {
+		key := normalizeAlias(alias)
+		if key == "" {
+			continue
+		}
+		if existing, ok := m.aliases[key]; ok {
+			if existing == meta.Name {
+				continue
+			}
+			continue
+		}
+		m.aliases[key] = meta.Name
+	}
+}
+
+func buildMeta(platform Platform, name string) Meta {
+	meta := Meta{}
+	if provider, ok := platform.(MetadataProvider); ok {
+		meta = provider.Metadata()
+	}
+	if meta.Name == "" {
+		meta.Name = name
+	}
+	if meta.DisplayName == "" {
+		meta.DisplayName = meta.Name
+	}
+	if meta.Emoji == "" {
+		meta.Emoji = "🎵"
+	}
+	return meta
+}
+
+func mergeMeta(oldMeta, newMeta Meta) Meta {
+	if newMeta.Name == "" {
+		newMeta.Name = oldMeta.Name
+	}
+	if newMeta.DisplayName == "" {
+		newMeta.DisplayName = oldMeta.DisplayName
+	}
+	if newMeta.Emoji == "" {
+		newMeta.Emoji = oldMeta.Emoji
+	}
+	newMeta.AllowGroupURL = newMeta.AllowGroupURL || oldMeta.AllowGroupURL
+	newMeta.Aliases = mergeAliases(oldMeta.Aliases, newMeta.Aliases)
+	return newMeta
+}
+
+func mergeAliases(existing, incoming []string) []string {
+	if len(existing) == 0 {
+		return incoming
+	}
+	if len(incoming) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{})
+	merged := make([]string, 0, len(existing)+len(incoming))
+	for _, alias := range existing {
+		key := normalizeAlias(alias)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, alias)
+	}
+	for _, alias := range incoming {
+		key := normalizeAlias(alias)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, alias)
+	}
+	return merged
 }
 
 // GetPlatform retrieves a platform by name and returns an error if not found.

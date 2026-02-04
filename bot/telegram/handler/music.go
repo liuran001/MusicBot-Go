@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/go-flac/go-flac"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/download"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -36,13 +36,15 @@ type MusicHandler struct {
 	BotName          string
 	DefaultPlatform  string
 	FallbackPlatform string
+	AdminIDs         map[int64]struct{}
+	AdminCommands    []admincmd.Command
+	Playlist         *PlaylistHandler
 	Limiter          chan struct{}
 	UploadLimiter    chan struct{}
 	UploadQueue      chan uploadTask
 	UploadQueueSize  int
 	UploadBot        *telego.Bot
 	RateLimiter      *telegram.RateLimiter
-	initOnce         sync.Once
 	queueMu          sync.Mutex
 	queuedStatus     []queuedStatus
 	statusDirty      bool
@@ -112,9 +114,20 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 	}
 	if cmd == "start" || cmd == "help" {
+		isAdmin := false
+		if message.From != nil {
+			isAdmin = isBotAdmin(h.AdminIDs, message.From.ID)
+		}
+		adminHelp := h.AdminCommands
+		if isAdmin {
+			adminHelp = append([]admincmd.Command{
+				{Name: "reload", Description: "重载动态插件"},
+				{Name: "rmcache", Description: "清除缓存（/rmcache <平台>|all）"},
+			}, adminHelp...)
+		}
 		params := &telego.SendMessageParams{
 			ChatID:             telego.ChatID{ID: message.Chat.ID},
-			Text:               helpText,
+			Text:               buildHelpText(h.PlatformManager, isAdmin, adminHelp),
 			ParseMode:          telego.ModeMarkdownV2,
 			LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 			ReplyParameters:    &telego.ReplyParameters{MessageID: message.MessageID},
@@ -141,8 +154,13 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 			}
 			return
 		}
+		if h.Playlist != nil {
+			if h.Playlist.TryHandle(ctx, b, update) {
+				return
+			}
+		}
 		if platformName, trackID, ok := h.resolveTrackFromQuery(ctx, message, args); ok {
-			qualityOverride := extractQualityOverride(message)
+			qualityOverride := extractQualityOverride(message, h.PlatformManager)
 			h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
 			return
 		}
@@ -158,12 +176,39 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 		return
 	}
+	if cmd != "" && cmd != "start" && cmd != "help" && cmd != "music" && h.PlatformManager != nil {
+		if platformName, ok := resolvePlatformAlias(h.PlatformManager, cmd); ok {
+			args := commandArguments(message.Text)
+			if strings.TrimSpace(args) == "" {
+				params := &telego.SendMessageParams{
+					ChatID:          telego.ChatID{ID: message.Chat.ID},
+					Text:            inputContent,
+					ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
+				}
+				if h.RateLimiter != nil {
+					_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+				} else {
+					_, _ = b.SendMessage(ctx, params)
+				}
+				return
+			}
+			baseText, _, qualityOverride := parseTrailingOptions(args, h.PlatformManager)
+			baseText = strings.TrimSpace(baseText)
+			if baseText == "" {
+				return
+			}
+			if trackID, matched := matchPlatformTrack(h.PlatformManager, platformName, baseText); matched {
+				h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
+				return
+			}
+		}
+	}
 
 	platformName, trackID, found := extractPlatformTrack(message, h.PlatformManager)
 	if !found {
 		return
 	}
-	qualityOverride := extractQualityOverride(message)
+	qualityOverride := extractQualityOverride(message, h.PlatformManager)
 
 	h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
 }
@@ -446,7 +491,7 @@ func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *teleg
 		return "", "", false
 	}
 
-	baseText, platformSuffix, _ := parseTrailingOptions(args)
+	baseText, platformSuffix, _ := parseTrailingOptions(args, h.PlatformManager)
 	baseText = strings.TrimSpace(baseText)
 	if baseText == "" {
 		return "", "", false
@@ -454,8 +499,10 @@ func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *teleg
 
 	fields := strings.Fields(baseText)
 	if len(fields) >= 2 {
-		if plat := h.PlatformManager.Get(fields[0]); plat != nil {
-			return fields[0], fields[1], true
+		if platformName, ok := resolvePlatformAlias(h.PlatformManager, fields[0]); ok {
+			if plat := h.PlatformManager.Get(platformName); plat != nil {
+				return platformName, fields[1], true
+			}
 		}
 	}
 	if platformSuffix != "" && len(fields) == 1 {
@@ -635,22 +682,7 @@ func (h *MusicHandler) shouldSilentAutoFetch(message *telego.Message) bool {
 	if isCommandMessage(message) {
 		return false
 	}
-	text := strings.TrimSpace(message.Text)
-	if strings.HasPrefix(text, "/") {
-		return false
-	}
-	return true
-}
-
-var urlMatcher = regexp.MustCompile(`https?://[^\s]+`)
-
-func extractFirstURL(text string) string {
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	match := urlMatcher.FindString(text)
-	match = strings.TrimRight(match, ".,!?)]}>")
-	return strings.TrimSpace(match)
+	return !strings.HasPrefix(strings.TrimSpace(message.Text), "/")
 }
 
 func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, info *platform.DownloadInfo, msg *telego.Message, b *telego.Bot, message *telego.Message, songInfo *botpkg.SongInfo) (string, string, []string, error) {
@@ -678,17 +710,14 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	filePath := filepath.Join(h.CacheDir, musicFileName)
 
 	lastProgressText := ""
-	lastProgressAt := time.Now()
-	minInterval := 3 * time.Second
+	lastProgressAt := time.Time{}
+	minInterval := 1 * time.Second
 	progress := func(written, total int64) {
 		if msg == nil {
 			return
 		}
-		if total > 0 && written >= total {
-			return
-		}
 		now := time.Now()
-		if now.Sub(lastProgressAt) < minInterval {
+		if !lastProgressAt.IsZero() && now.Sub(lastProgressAt) < minInterval {
 			return
 		}
 		writtenMB := float64(written) / 1024 / 1024
@@ -699,6 +728,9 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 			totalMB := float64(total) / 1024 / 1024
 			progressPct := float64(written) * 100 / float64(total)
 			text = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
+		}
+		if total > 0 && written >= total && lastProgressText != "" {
+			return
 		}
 		if msg.Text == text || lastProgressText == text {
 			lastProgressText = text
@@ -1177,7 +1209,7 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		_ = b.SendChatAction(uploadCtx, &telego.SendChatActionParams{ChatID: telego.ChatID{ID: message.Chat.ID}, MessageThreadID: threadID, Action: telego.ChatActionUploadDocument})
 	}
 
-	caption := buildMusicCaption(songInfo, h.BotName)
+	caption := buildMusicCaption(h.PlatformManager, songInfo, h.BotName)
 	params := &telego.SendAudioParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,

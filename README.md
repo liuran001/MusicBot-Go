@@ -4,7 +4,7 @@
 
 **当前支持平台**:
 - 网易云音乐 (NetEase Cloud Music)
-- 更多平台即将到来...
+- QQ音乐 (QQ Music)
 
 > **原始项目**: [XiaoMengXinX/Music163bot-Go](https://github.com/XiaoMengXinX/Music163bot-Go)  
 > 本项目基于原项目进行了重构，采用插件化架构以支持多音乐平台。
@@ -43,6 +43,13 @@ BOT_TOKEN = YOUR_BOT_TOKEN
 [plugins.netease]
 # MUSIC_U Cookie (用于下载无损音质)
 music_u = YOUR_MUSIC_U_COOKIE
+```
+
+#### QQ音乐
+```ini
+[plugins.qqmusic]
+# QQ音乐 Cookie (用于高音质/Hi-Res)
+cookie = YOUR_QQMUSIC_COOKIE
 ```
 
 详见 `config_example.ini` 获取完整配置选项。
@@ -97,6 +104,18 @@ RecognizePort = 3737
 - `https://music.163.com/song?id=12345`
 - `https://music.163.com/#/song?id=12345`
 - `https://y.music.163.com/m/song?id=12345` (移动端)
+
+**QQ音乐**:
+- `https://y.qq.com/n/ryqq_v2/songDetail/003IGhQO0JdnuC`
+- `https://y.qq.com/n/ryqq_v2/playlist/114514`
+- `https://y.qq.com/n/ryqq_v2/albumDetail/003MNOTS3FmvaO`
+
+### 分页配置
+
+搜索与歌单共用单页展示条数：
+```ini
+ListPageSize = 8
+```
 
 ### 使用示例
 

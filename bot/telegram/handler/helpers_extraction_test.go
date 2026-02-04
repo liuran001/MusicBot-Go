@@ -287,7 +287,7 @@ func TestExtractQualityOverride(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &telego.Message{Text: tt.text}
-			got := extractQualityOverride(msg)
+			got := extractQualityOverride(msg, nil)
 			if got != tt.want {
 				t.Errorf("extractQualityOverride(%q) = %q, want %q", tt.text, got, tt.want)
 			}
@@ -296,7 +296,7 @@ func TestExtractQualityOverride(t *testing.T) {
 }
 
 func TestExtractQualityOverride_NilMessage(t *testing.T) {
-	got := extractQualityOverride(nil)
+	got := extractQualityOverride(nil, nil)
 	if got != "" {
 		t.Errorf("extractQualityOverride(nil) = %q, want \"\"", got)
 	}

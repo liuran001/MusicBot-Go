@@ -41,12 +41,20 @@ MusicBot-Go/
 └── plugins/                     # 平台插件
     ├── all/                     # 插件聚合 (空白导入)
     ├── scripts/                 # 动态脚本插件 (PluginScriptDir)
-    └── netease/                 # 网易云音乐插件
+    ├── netease/                 # 网易云音乐插件
+    │   ├── client.go            # API 客户端
+    │   ├── platform.go          # Platform 接口实现
+    │   ├── matcher.go           # URL 匹配器
+    │   ├── textmatcher.go       # 文本匹配器 (短链/纯 ID)
+    │   ├── recognizer.go        # 识曲适配器
+    │   ├── register.go          # 插件注册
+    │   └── *_test.go            # 单元测试
+    └── qqmusic/                 # QQ音乐插件
         ├── client.go            # API 客户端
         ├── platform.go          # Platform 接口实现
         ├── matcher.go           # URL 匹配器
         ├── textmatcher.go       # 文本匹配器 (短链/纯 ID)
-        ├── recognizer.go        # 识曲适配器
+        ├── refresh.go           # Cookie 刷新/检查
         ├── register.go          # 插件注册
         └── *_test.go            # 单元测试
 ```

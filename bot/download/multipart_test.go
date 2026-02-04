@@ -3,7 +3,6 @@ package download
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -169,7 +168,7 @@ func TestMultipartDownload_SmallFile(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		io.WriteString(w, string(testData))
+		_, _ = w.Write(testData)
 	}))
 	defer server.Close()
 

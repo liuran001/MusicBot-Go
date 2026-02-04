@@ -24,7 +24,7 @@ func TestBuildMusicCaption(t *testing.T) {
 		MusicSize:   1024,
 		BitRate:     320000,
 	}
-	caption := buildMusicCaption(info, "botname")
+	caption := buildMusicCaption(nil, info, "botname")
 	if caption == "" {
 		t.Fatalf("expected caption")
 	}

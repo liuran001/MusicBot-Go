@@ -87,6 +87,17 @@ type URLMatcher interface {
 	MatchURL(url string) (trackID string, matched bool)
 }
 
+// PlaylistURLMatcher defines the interface for platforms that support playlist URL matching.
+// This allows extracting playlist IDs from platform-specific URLs.
+//
+// Implementations should be safe for concurrent use by multiple goroutines.
+type PlaylistURLMatcher interface {
+	// MatchPlaylistURL attempts to extract a playlist ID from a platform-specific URL.
+	// Returns the playlist ID and true if the URL matches this platform's playlist format,
+	// or an empty string and false if the URL is not recognized.
+	MatchPlaylistURL(url string) (playlistID string, matched bool)
+}
+
 // TextMatcher defines the interface for platforms that support parsing track IDs
 // from arbitrary text input (e.g., short links or plain IDs).
 type TextMatcher interface {
@@ -118,4 +129,13 @@ type Manager interface {
 	// Returns the platform name, track ID, and true if a match is found.
 	// Returns empty strings and false if no platform matches the text.
 	MatchText(text string) (platformName, trackID string, matched bool)
+
+	// ResolveAlias resolves a platform alias to its canonical platform name.
+	ResolveAlias(alias string) (platformName string, matched bool)
+
+	// Meta returns metadata for a platform name.
+	Meta(name string) (Meta, bool)
+
+	// ListMeta returns metadata for all registered platforms.
+	ListMeta() []Meta
 }

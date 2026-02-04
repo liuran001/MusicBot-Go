@@ -2,10 +2,8 @@ package download
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -170,73 +168,6 @@ func (md *MultipartDownloader) Download(ctx context.Context, rawURL string, info
 	}
 
 	return md.downloadMultipart(ctx, rawURL, info, destPath, totalSize, progress)
-}
-
-// downloadSingleThread performs traditional single-connection download
-func (md *MultipartDownloader) downloadSingleThread(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, progress ProgressFunc) (int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	for k, v := range info.Headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := md.client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
-
-	file, err := os.Create(destPath)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	totalSize := resp.ContentLength
-	if totalSize <= 0 && info.Size > 0 {
-		totalSize = info.Size
-	}
-
-	buf := make([]byte, 32*1024)
-	var written int64
-
-	for {
-		select {
-		case <-ctx.Done():
-			return written, ctx.Err()
-		default:
-		}
-
-		nr, err := resp.Body.Read(buf)
-		if nr > 0 {
-			nw, ew := file.Write(buf[0:nr])
-			if nw > 0 {
-				written += int64(nw)
-				if progress != nil {
-					progress(written, totalSize)
-				}
-			}
-			if ew != nil {
-				return written, ew
-			}
-			if nr != nw {
-				return written, io.ErrShortWrite
-			}
-		}
-		if err != nil {
-			if err == io.EOF {
-				return written, nil
-			}
-			return written, err
-		}
-	}
 }
 
 // downloadMultipart performs concurrent chunk downloads
@@ -454,26 +385,4 @@ func (md *MultipartDownloader) mergeParts(parts []*partDownload, destPath string
 	}
 
 	return totalWritten, nil
-}
-
-// newClientWithTimeout creates a new HTTP client with custom timeout for multipart downloads
-func newClientWithTimeout(timeout time.Duration) *http.Client {
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   20,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: false},
-	}
-
-	return &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-	}
 }
