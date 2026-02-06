@@ -275,7 +275,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		} else {
 			errText = uploadFailed
 		}
-		text := fmt.Sprintf(musicInfoMsg+errText, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
+		text := buildMusicInfoTextf(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), errText, strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
 		if msgResult != nil {
 			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
 		}
@@ -318,7 +318,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 
-				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
+				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
 
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -344,7 +344,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 				if msgResult != nil {
-					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
+					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
 				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -446,7 +446,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 				if !silent {
-					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, fmt.Sprintf(musicInfoMsg+hitCache, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
+					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
 				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -458,7 +458,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+downloading, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
 	}
 
 	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo)
@@ -473,7 +473,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	cleanupList = append(cleanupList, musicPath, picPath)
 
 	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fmt.Sprintf(musicInfoMsg+uploading, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize)))
+		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploading))
 	}
 
 	if err := h.sendMusic(ctx, b, msgResult, message, &songInfo, musicPath, picPath, cleanupList, platformName, trackID); err != nil {
@@ -931,7 +931,7 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 					if result.err != nil {
 						errText = result.err.Error()
 					}
-					statusMessage = editMessageTextOrSend(baseCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, fmt.Sprintf(musicInfoMsg+uploadFailed, songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), errText))
+					statusMessage = editMessageTextOrSend(baseCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, buildMusicInfoTextf(songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), uploadFailed, errText))
 				}
 			}
 			cleanupFiles(cleanupCopy...)
@@ -1003,7 +1003,7 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 		h.UploadLimiter <- struct{}{}
 	}
 	if task.statusMsg != nil && task.statusBot != nil {
-		text := fmt.Sprintf(musicInfoMsg+uploading, task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize))
+		text := buildMusicInfoText(task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize), uploading)
 		statusCtx := task.ctx
 		if statusCtx == nil {
 			statusCtx = context.Background()
@@ -1096,7 +1096,7 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 		if entry.bot == nil || entry.message == nil {
 			continue
 		}
-		text := fmt.Sprintf(musicInfoMsg+uploading, entry.songInfo.SongName, entry.songInfo.SongAlbum, formatFileInfo(entry.songInfo.FileExt, entry.songInfo.MusicSize))
+		text := buildMusicInfoText(entry.songInfo.SongName, entry.songInfo.SongAlbum, formatFileInfo(entry.songInfo.FileExt, entry.songInfo.MusicSize), uploading)
 		if idx > 0 {
 			queueText := fmt.Sprintf("当前正在发送队列中，前面还有 %d 个任务", idx)
 			text = text + "\n" + queueText

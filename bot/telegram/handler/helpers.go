@@ -337,6 +337,29 @@ func cleanupFiles(paths ...string) {
 	}
 }
 
+func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
+	songName = strings.TrimSpace(songName)
+	fileInfo = strings.TrimSpace(fileInfo)
+	songAlbum = strings.TrimSpace(songAlbum)
+
+	var builder strings.Builder
+	builder.WriteString(songName)
+	builder.WriteString("\n")
+	if songAlbum != "" {
+		builder.WriteString("专辑: ")
+		builder.WriteString(songAlbum)
+		builder.WriteString("\n")
+	}
+	builder.WriteString(fileInfo)
+	builder.WriteString("\n")
+	builder.WriteString(suffix)
+	return builder.String()
+}
+
+func buildMusicInfoTextf(songName, songAlbum, fileInfo, suffixFmt string, args ...interface{}) string {
+	return fmt.Sprintf(buildMusicInfoText(songName, songAlbum, fileInfo, suffixFmt), args...)
+}
+
 func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
 	if songInfo == nil {
 		return ""
@@ -380,11 +403,15 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	if strings.TrimSpace(songInfo.AlbumURL) != "" {
 		albumHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", songInfo.AlbumURL, songInfo.SongAlbum)
 	}
+	albumLine := ""
+	if strings.TrimSpace(songInfo.SongAlbum) != "" {
+		albumLine = fmt.Sprintf("专辑: %s\n", albumHTML)
+	}
 
-	return fmt.Sprintf("<b>「%s」- %s</b>\n专辑: %s\n<blockquote>%s%s\n</blockquote>via @%s",
+	return fmt.Sprintf("<b>「%s」- %s</b>\n%s<blockquote>%s%s\n</blockquote>via @%s",
 		songNameHTML,
 		artistsHTML,
-		albumHTML,
+		albumLine,
 		infoLine,
 		tags,
 		botName,

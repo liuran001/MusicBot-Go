@@ -24,10 +24,6 @@ var (
 \[编译日期\] %s
 \[运行环境\] %s
 %s`
-	musicInfoMsg = `%s
-专辑: %s
-%s
-`
 	uploadFailed     = "下载/发送失败\n%v"
 	hitCache         = "命中缓存, 正在发送中..."
 	inputIDorKeyword = "请输入歌曲ID或歌曲关键词，或使用 /rmcache all 清空所有缓存"
