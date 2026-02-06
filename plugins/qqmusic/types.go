@@ -94,3 +94,19 @@ type qqPlaylistData struct {
 	Creator     qqPlaylistCreator `json:"creator"`
 	CreatorName string            `json:"creator_name"`
 }
+
+type qqAlbumSongItem struct {
+	SongInfo qqPlaylistSong `json:"songInfo"`
+}
+
+type qqAlbumData struct {
+	ID       string
+	Mid      string
+	Name     string
+	Desc     string
+	CoverURL string
+	Creator  string
+	Artists  []qqSinger
+	Total    int
+	Songlist []qqPlaylistSong
+}

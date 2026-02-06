@@ -535,6 +535,114 @@ func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*qqPlaylis
 	return &playlistData, nil
 }
 
+func (c *Client) GetAlbum(ctx context.Context, albumID string) (*qqAlbumData, error) {
+	albumID = strings.TrimSpace(albumID)
+	if albumID == "" {
+		return nil, platform.NewNotFoundError("qqmusic", "album", "")
+	}
+
+	limit := platform.PlaylistLimitFromContext(ctx)
+	if limit <= 0 {
+		limit = 10000
+	}
+	offset := platform.PlaylistOffsetFromContext(ctx)
+	if offset < 0 {
+		offset = 0
+	}
+
+	var numericAlbumID int64
+	if parsedID, err := strconv.ParseInt(albumID, 10, 64); err == nil {
+		numericAlbumID = parsedID
+	}
+
+	payload := map[string]interface{}{
+		"comm": map[string]interface{}{
+			"ct": 24,
+			"cv": 10000,
+		},
+		"albumSonglist": map[string]interface{}{
+			"module": "music.musichallAlbum.AlbumSongList",
+			"method": "GetAlbumSongList",
+			"param": map[string]interface{}{
+				"albumMid": albumID,
+				"albumID":  numericAlbumID,
+				"begin":    offset,
+				"num":      limit,
+				"order":    2,
+			},
+		},
+	}
+
+	endpoint := musicuEndpoint + "?format=json&inCharset=utf8&outCharset=utf8"
+	body, err := c.postJSON(ctx, endpoint, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Code          int `json:"code"`
+		AlbumSonglist struct {
+			Code int `json:"code"`
+			Data struct {
+				AlbumMid string            `json:"albumMid"`
+				TotalNum int               `json:"totalNum"`
+				SongList []qqAlbumSongItem `json:"songList"`
+			} `json:"data"`
+		} `json:"albumSonglist"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("qqmusic: decode album detail: %w", err)
+	}
+	if resp.Code != 0 || resp.AlbumSonglist.Code != 0 {
+		return nil, platform.NewUnavailableError("qqmusic", "album", albumID)
+	}
+
+	data := resp.AlbumSonglist.Data
+	if len(data.SongList) == 0 && data.TotalNum == 0 {
+		return nil, platform.NewNotFoundError("qqmusic", "album", albumID)
+	}
+
+	album := &qqAlbumData{
+		Mid:   strings.TrimSpace(data.AlbumMid),
+		Total: data.TotalNum,
+	}
+
+	album.Songlist = make([]qqPlaylistSong, 0, len(data.SongList))
+	for _, item := range data.SongList {
+		album.Songlist = append(album.Songlist, item.SongInfo)
+	}
+
+	if len(album.Songlist) > 0 {
+		first := album.Songlist[0]
+		album.Name = strings.TrimSpace(first.AlbumName)
+		if album.Name == "" {
+			album.Name = strings.TrimSpace(first.Album.Name)
+		}
+		if album.Mid == "" {
+			album.Mid = strings.TrimSpace(first.AlbumMID)
+		}
+		if album.Mid == "" {
+			album.Mid = strings.TrimSpace(first.Album.Mid)
+		}
+		if first.Album.ID > 0 {
+			album.ID = strconv.FormatInt(first.Album.ID, 10)
+		}
+		if album.Mid != "" {
+			album.CoverURL = buildAlbumCoverURL(album.Mid)
+		}
+		album.Artists = append(album.Artists, first.Singer...)
+	}
+
+	if album.ID == "" {
+		album.ID = albumID
+	}
+	if album.Mid == "" && isTencentSongMID(albumID) {
+		album.Mid = albumID
+	}
+
+	return album, nil
+}
+
 func (c *Client) GetLyrics(ctx context.Context, songMid string) (string, string, error) {
 	query := url.Values{}
 	query.Set("songmid", songMid)

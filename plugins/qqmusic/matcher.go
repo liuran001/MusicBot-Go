@@ -79,6 +79,23 @@ func matchQQMusicPlaylistURL(parsed *url.URL) (string, bool) {
 		return "", false
 	}
 	pathValue := strings.Trim(parsed.Path, "/")
+	albumPatterns := []string{
+		`^n/ryqq/albumDetail/([^/?#]+)$`,
+		`^n/ryqq_v2/albumDetail/([^/?#]+)$`,
+		`^n/yqq/album/([^/?#]+)\.html$`,
+		`^n2/m/share/details/album\.html$`,
+		`^n3/other/pages/details/album\.html$`,
+		`^albumDetail/([^/?#]+)$`,
+		`^album/([^/?#]+)$`,
+	}
+	for _, pattern := range albumPatterns {
+		re := regexp.MustCompile(pattern)
+		if match := re.FindStringSubmatch(pathValue); len(match) == 2 {
+			if albumID := encodeAlbumCollectionID(match[1]); albumID != "" {
+				return albumID, true
+			}
+		}
+	}
 	patterns := []string{
 		`^n/ryqq/playlist/([^/?#]+)$`,
 		`^n/ryqq_v2/playlist/([^/?#]+)$`,
@@ -93,6 +110,33 @@ func matchQQMusicPlaylistURL(parsed *url.URL) (string, bool) {
 		}
 	}
 	query := parsed.Query()
+	if albumMid := strings.TrimSpace(query.Get("albummid")); albumMid != "" {
+		if albumID := encodeAlbumCollectionID(albumMid); albumID != "" {
+			return albumID, true
+		}
+	}
+	if albumMid := strings.TrimSpace(query.Get("albumMid")); albumMid != "" {
+		if albumID := encodeAlbumCollectionID(albumMid); albumID != "" {
+			return albumID, true
+		}
+	}
+	if albumID := strings.TrimSpace(query.Get("albumid")); albumID != "" {
+		if encoded := encodeAlbumCollectionID(albumID); encoded != "" {
+			return encoded, true
+		}
+	}
+	if albumID := strings.TrimSpace(query.Get("albumId")); albumID != "" {
+		if encoded := encodeAlbumCollectionID(albumID); encoded != "" {
+			return encoded, true
+		}
+	}
+	if hasQQAlbumMarker(pathValue) {
+		if id := strings.TrimSpace(query.Get("id")); id != "" {
+			if encoded := encodeAlbumCollectionID(id); encoded != "" {
+				return encoded, true
+			}
+		}
+	}
 	if disstid := strings.TrimSpace(query.Get("disstid")); disstid != "" {
 		return disstid, true
 	}
@@ -106,4 +150,12 @@ func matchQQMusicPlaylistURL(parsed *url.URL) (string, bool) {
 		return tid, true
 	}
 	return "", false
+}
+
+func hasQQAlbumMarker(pathValue string) bool {
+	pathValue = strings.ToLower(strings.TrimSpace(pathValue))
+	if pathValue == "" {
+		return false
+	}
+	return strings.Contains(pathValue, "album")
 }

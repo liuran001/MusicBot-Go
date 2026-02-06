@@ -261,3 +261,56 @@ func TestURLMatcherDifferentInstances(t *testing.T) {
 		t.Errorf("Different matcher instances returned different results")
 	}
 }
+
+func TestURLMatcherMatchPlaylistURL(t *testing.T) {
+	matcher := NewURLMatcher()
+	tests := []struct {
+		name      string
+		url       string
+		wantID    string
+		wantMatch bool
+	}{
+		{
+			name:      "playlist url",
+			url:       "https://music.163.com/playlist?id=19723756",
+			wantID:    "19723756",
+			wantMatch: true,
+		},
+		{
+			name:      "playlist hash url",
+			url:       "https://music.163.com/#/playlist?id=19723756",
+			wantID:    "19723756",
+			wantMatch: true,
+		},
+		{
+			name:      "album url",
+			url:       "https://music.163.com/album?id=3411281",
+			wantID:    "album:3411281",
+			wantMatch: true,
+		},
+		{
+			name:      "album hash url",
+			url:       "https://music.163.com/#/album?id=3411281",
+			wantID:    "album:3411281",
+			wantMatch: true,
+		},
+		{
+			name:      "song url should not match playlist",
+			url:       "https://music.163.com/song?id=1463165983",
+			wantID:    "",
+			wantMatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotMatch := matcher.MatchPlaylistURL(tt.url)
+			if gotMatch != tt.wantMatch {
+				t.Fatalf("MatchPlaylistURL() matched=%v, want=%v", gotMatch, tt.wantMatch)
+			}
+			if gotID != tt.wantID {
+				t.Fatalf("MatchPlaylistURL() id=%q, want=%q", gotID, tt.wantID)
+			}
+		})
+	}
+}

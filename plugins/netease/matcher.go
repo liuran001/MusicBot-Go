@@ -117,7 +117,13 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 		return "", false
 	}
 
-	if !hasPlaylistMarker(parsed.Path, parsed.Fragment) {
+	kind := ""
+	if hasPlaylistMarker(parsed.Path, parsed.Fragment) {
+		kind = "playlist"
+	} else if hasAlbumMarker(parsed.Path, parsed.Fragment) {
+		kind = "album"
+	}
+	if kind == "" {
 		return "", false
 	}
 
@@ -139,6 +145,12 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 			if len(id) < 5 {
 				return "", false
 			}
+			if kind == "album" {
+				if encoded := encodeAlbumCollectionID(id); encoded != "" {
+					return encoded, true
+				}
+				return "", false
+			}
 			return id, true
 		}
 	}
@@ -147,6 +159,12 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 	if len(pathSegments) >= 2 {
 		lastSegment := pathSegments[len(pathSegments)-1]
 		if lastSegment != "" && allDigits(lastSegment) && len(lastSegment) >= 5 {
+			if kind == "album" {
+				if encoded := encodeAlbumCollectionID(lastSegment); encoded != "" {
+					return encoded, true
+				}
+				return "", false
+			}
 			return lastSegment, true
 		}
 	}
@@ -185,6 +203,24 @@ func hasPlaylistMarker(path, fragment string) bool {
 	frag = strings.SplitN(frag, "?", 2)[0]
 	parts := strings.Split(strings.Trim(frag, "/"), "/")
 	if len(parts) > 0 && parts[0] == "playlist" {
+		return true
+	}
+	return false
+}
+
+func hasAlbumMarker(path, fragment string) bool {
+	for _, seg := range strings.Split(strings.Trim(path, "/"), "/") {
+		if seg == "album" {
+			return true
+		}
+	}
+	if fragment == "" {
+		return false
+	}
+	frag := strings.TrimPrefix(fragment, "/")
+	frag = strings.SplitN(frag, "?", 2)[0]
+	parts := strings.Split(strings.Trim(frag, "/"), "/")
+	if len(parts) > 0 && parts[0] == "album" {
 		return true
 	}
 	return false

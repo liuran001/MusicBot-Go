@@ -160,6 +160,17 @@ func extractResolvedURL(ctx context.Context, manager platform.Manager, text stri
 	return resolved
 }
 
+const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+
+func applyBrowserHeaders(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("User-Agent", browserUA)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+}
+
 func resolveShortURL(ctx context.Context, manager platform.Manager, urlStr string) (string, error) {
 	parsed, err := url.Parse(urlStr)
 	if err != nil {
@@ -178,6 +189,7 @@ func resolveShortURL(ctx context.Context, manager platform.Manager, urlStr strin
 	if err != nil {
 		return urlStr, err
 	}
+	applyBrowserHeaders(req)
 	req.Header.Set("Range", "bytes=0-0")
 	resp, err := client.Do(req)
 	if err == nil {
@@ -196,10 +208,12 @@ func resolveShortURL(ctx context.Context, manager platform.Manager, urlStr strin
 		}
 	}
 	client = &http.Client{Timeout: 8 * time.Second}
-	req, err = http.NewRequestWithContext(ctx, http.MethodHead, urlStr, nil)
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return urlStr, err
 	}
+	applyBrowserHeaders(req)
+	req.Header.Set("Range", "bytes=0-0")
 	resp, err = client.Do(req)
 	if err != nil {
 		return urlStr, err
