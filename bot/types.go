@@ -63,6 +63,7 @@ type UserSettings struct {
 	UserID          int64
 	DefaultPlatform string
 	DefaultQuality  string
+	AutoDeleteList  bool
 }
 
 // GroupSettings represents group-level preferences for the bot.
@@ -74,4 +75,5 @@ type GroupSettings struct {
 	ChatID          int64
 	DefaultPlatform string
 	DefaultQuality  string
+	AutoDeleteList  bool
 }

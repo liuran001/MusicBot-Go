@@ -145,6 +145,7 @@ type UserSettingsModel struct {
 	UserID          int64  `gorm:"uniqueIndex;not null"`
 	DefaultPlatform string `gorm:"not null;default:'netease'"`
 	DefaultQuality  string `gorm:"not null;default:'hires'"`
+	AutoDeleteList  bool   `gorm:"not null;default:false"`
 }
 
 func (UserSettingsModel) TableName() string {
@@ -157,6 +158,7 @@ type GroupSettingsModel struct {
 	ChatID          int64  `gorm:"uniqueIndex;not null"`
 	DefaultPlatform string `gorm:"not null;default:'netease'"`
 	DefaultQuality  string `gorm:"not null;default:'hires'"`
+	AutoDeleteList  bool   `gorm:"not null;default:true"`
 }
 
 func (GroupSettingsModel) TableName() string {

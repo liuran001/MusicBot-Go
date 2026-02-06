@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
 	"github.com/mymmrac/telego"
@@ -87,7 +88,15 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	if chatType == "private" {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		if h.Music != nil {
-			h.Music.dispatch(ctx, b, msgToUse, platformName, trackID, qualityOverride)
+			h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, trackID, qualityOverride)
+		}
+		if h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil) {
+			deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
+			if h.RateLimiter != nil {
+				_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+			} else {
+				_ = b.DeleteMessage(ctx, deleteParams)
+			}
 		}
 		return
 	}
@@ -102,15 +111,44 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+	autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
 	if h.Music != nil {
-		h.Music.dispatch(ctx, b, msgToUse, platformName, trackID, qualityOverride)
+		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, trackID, qualityOverride)
 	}
-	deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
-	if h.RateLimiter != nil {
-		_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
-	} else {
-		_ = b.DeleteMessage(ctx, deleteParams)
+	if autoDelete {
+		deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
+		if h.RateLimiter != nil {
+			_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+		} else {
+			_ = b.DeleteMessage(ctx, deleteParams)
+		}
 	}
+}
+
+func (h *CallbackMusicHandler) shouldAutoDeleteListMessage(ctx context.Context, msg *telego.Message, userID int64, userSettings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) bool {
+	if msg == nil {
+		return false
+	}
+	if msg.Chat.Type == "private" {
+		if userSettings != nil {
+			return userSettings.AutoDeleteList
+		}
+		if h != nil && h.Music != nil && h.Music.Repo != nil && userID != 0 {
+			if settings, err := h.Music.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
+				return settings.AutoDeleteList
+			}
+		}
+		return false
+	}
+	if groupSettings != nil {
+		return groupSettings.AutoDeleteList
+	}
+	if h != nil && h.Music != nil && h.Music.Repo != nil {
+		if settings, err := h.Music.Repo.GetGroupSettings(ctx, msg.Chat.ID); err == nil && settings != nil {
+			return settings.AutoDeleteList
+		}
+	}
+	return true
 }
 
 func isRequesterOrAdmin(ctx context.Context, b *telego.Bot, chatID int64, userID int64, requesterID int64) bool {

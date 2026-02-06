@@ -103,7 +103,13 @@ func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.Us
 	sb.WriteString(fmt.Sprintf("🎵 默认平台: %s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
 
 	qualityEmoji := h.getQualityEmoji(qualityValue)
-	sb.WriteString(fmt.Sprintf("🎧 默认音质: %s %s\n\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
+	sb.WriteString(fmt.Sprintf("🎧 默认音质: %s %s\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
+	autoDeleteEnabled := h.resolveAutoDeleteList(chatType, settings, groupSettings)
+	autoDeleteText := "关闭"
+	if autoDeleteEnabled {
+		autoDeleteText = "开启"
+	}
+	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删除列表消息: %s\n\n", autoDeleteText))
 
 	if len(platforms) > 1 {
 		sb.WriteString("💡 可用平台: ")
@@ -190,9 +196,44 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 		},
 	}
 	rows = append(rows, qualityButtons2)
+	autoDeleteEnabled := h.resolveAutoDeleteList(chatType, settings, groupSettings)
+	rows = append(rows, []telego.InlineKeyboardButton{
+		{
+			Text:         h.formatToggleButton("自动删列表", autoDeleteEnabled),
+			CallbackData: fmt.Sprintf("settings autodelete %s", h.toggleValue(autoDeleteEnabled)),
+		},
+	})
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func (h *SettingsHandler) resolveAutoDeleteList(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) bool {
+	if chatType != "private" {
+		if groupSettings != nil {
+			return groupSettings.AutoDeleteList
+		}
+		return true
+	}
+	if settings != nil {
+		return settings.AutoDeleteList
+	}
+	return false
+}
+
+func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string {
+	state := "关闭"
+	if enabled {
+		state = "开启"
+	}
+	return fmt.Sprintf("%s: %s", label, state)
+}
+
+func (h *SettingsHandler) toggleValue(enabled bool) string {
+	if enabled {
+		return "off"
+	}
+	return "on"
 }
 
 func (h *SettingsHandler) formatQualityButton(quality string, isSelected bool) string {
@@ -355,6 +396,30 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				settings.DefaultQuality = settingValue
 				changed = true
 				responseText = fmt.Sprintf("✅ 音质已设置为 %s", h.SettingsHandler.getQualityDisplayName(settingValue))
+			}
+		}
+	case "autodelete":
+		if settingValue != "on" && settingValue != "off" {
+			break
+		}
+		enabled := settingValue == "on"
+		if msg != nil && msg.Chat.Type != "private" {
+			if groupSettings != nil && groupSettings.AutoDeleteList != enabled {
+				groupSettings.AutoDeleteList = enabled
+				changed = true
+				if enabled {
+					responseText = "✅ 已开启自动删除列表"
+				} else {
+					responseText = "✅ 已关闭自动删除列表"
+				}
+			}
+		} else if settings != nil && settings.AutoDeleteList != enabled {
+			settings.AutoDeleteList = enabled
+			changed = true
+			if enabled {
+				responseText = "✅ 已开启自动删除列表"
+			} else {
+				responseText = "✅ 已关闭自动删除列表"
 			}
 		}
 	}
