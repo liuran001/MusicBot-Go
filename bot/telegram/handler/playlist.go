@@ -18,11 +18,14 @@ import (
 const (
 	playlistFetchChunkSize = 30
 	playlistCacheTTL       = 10 * time.Minute
+	collectionTypeAlbum    = "album"
+	collectionTypePlaylist = "playlist"
 )
 
 type playlistState struct {
 	playlist     platform.Playlist
 	platform     string
+	collection   string
 	quality      string
 	requesterID  int64
 	updatedAt    time.Time
@@ -71,13 +74,18 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	if !ok {
 		return false
 	}
+	collectionType := detectCollectionType(playlistID, "")
+	fetchingText := fetchingPlaylist
+	if collectionType == collectionTypeAlbum {
+		fetchingText = "正在获取专辑..."
+	}
 
 	threadID := message.MessageThreadID
 	replyParams := buildReplyParams(message)
 	msgResult, err := b.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,
-		Text:            fetchingPlaylist,
+		Text:            fetchingText,
 		ReplyParameters: replyParams,
 	})
 	if err != nil {
@@ -109,8 +117,14 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		h.editPlaylistMessage(ctx, b, msgResult, errText, nil)
 		return true
 	}
+	collectionType = detectCollectionType(playlistID, playlist.URL)
+	collectionLabel := collectionTypeLabel(collectionType)
 	if playlist == nil || len(playlist.Tracks) == 0 {
-		h.editPlaylistMessage(ctx, b, msgResult, playlistEmpty, nil)
+		emptyText := playlistEmpty
+		if collectionType == collectionTypeAlbum {
+			emptyText = "专辑为空"
+		}
+		h.editPlaylistMessage(ctx, b, msgResult, emptyText, nil)
 		return true
 	}
 
@@ -130,8 +144,8 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	}
 	platformEmoji := platformEmoji(h.PlatformManager, platformName)
 	displayName := platformDisplayName(h.PlatformManager, platformName)
-	textHeader := fmt.Sprintf("%s *%s* 歌单\n\n", platformEmoji, mdV2Replacer.Replace(displayName))
-	textHeader += formatPlaylistInfo(playlist)
+	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji, mdV2Replacer.Replace(displayName), collectionLabel)
+	textHeader += formatPlaylistInfo(playlist, collectionLabel)
 	pageText, keyboard := h.buildPlaylistPage(pageTracks, effectiveTotal, pageOffset, platformName, qualityValue, requesterID, msgResult.MessageID, 1)
 	combinedText := textHeader + pageText
 	h.editPlaylistMessage(ctx, b, msgResult, combinedText, keyboard)
@@ -139,6 +153,7 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	h.storePlaylistState(msgResult.MessageID, &playlistState{
 		playlist:     *playlist,
 		platform:     platformName,
+		collection:   collectionType,
 		quality:      qualityValue,
 		requesterID:  requesterID,
 		updatedAt:    time.Now(),
@@ -205,10 +220,12 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	if !ok {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 			CallbackQueryID: query.ID,
-			Text:            "歌单已过期，请重新发送链接",
+			Text:            "列表已过期，请重新发送链接",
 		})
 		return
 	}
+	collectionType := detectCollectionType(state.collection, state.playlist.URL)
+	collectionLabel := collectionTypeLabel(collectionType)
 	if action == "close" {
 		deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
 		if h.RateLimiter != nil {
@@ -240,13 +257,13 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	if state.lazy {
 		plat := h.Playlist.PlatformManager.Get(state.platform)
 		if plat == nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "歌单加载失败"})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: collectionLabel + "加载失败"})
 			return
 		}
 		var err error
 		pageTracks, pageOffset, err = h.Playlist.getCachedPage(ctx, plat, state, page)
 		if err != nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "歌单加载失败"})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: collectionLabel + "加载失败"})
 			return
 		}
 		if len(pageTracks) == 0 {
@@ -258,8 +275,8 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	}
 
 	manager := h.Playlist.PlatformManager
-	textHeader := fmt.Sprintf("%s *%s* 歌单\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
-	textHeader += formatPlaylistInfo(&state.playlist)
+	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)), collectionLabel)
+	textHeader += formatPlaylistInfo(&state.playlist, collectionLabel)
 	pageText, keyboard := h.Playlist.buildPlaylistPage(pageTracks, effectiveTotal, pageOffset, state.platform, state.quality, state.requesterID, messageID, page)
 	text := textHeader + pageText
 	params := &telego.EditMessageTextParams{
@@ -572,17 +589,21 @@ func (h *PlaylistHandler) refreshChunkAtOffset(ctx context.Context, plat platfor
 	return nil
 }
 
-func formatPlaylistInfo(playlist *platform.Playlist) string {
+func formatPlaylistInfo(playlist *platform.Playlist, collectionLabel string) string {
 	if playlist == nil {
 		return ""
+	}
+	collectionLabel = strings.TrimSpace(collectionLabel)
+	if collectionLabel == "" {
+		collectionLabel = collectionTypeLabel(collectionTypePlaylist)
 	}
 	var builder strings.Builder
 	if title := strings.TrimSpace(playlist.Title); title != "" {
 		escapedTitle := mdV2Replacer.Replace(title)
 		if strings.TrimSpace(playlist.URL) != "" {
-			builder.WriteString(fmt.Sprintf("歌单: [%s](%s)\n", escapedTitle, playlist.URL))
+			builder.WriteString(fmt.Sprintf("%s: [%s](%s)\n", collectionLabel, escapedTitle, playlist.URL))
 		} else {
-			builder.WriteString(fmt.Sprintf("歌单: %s\n", escapedTitle))
+			builder.WriteString(fmt.Sprintf("%s: %s\n", collectionLabel, escapedTitle))
 		}
 	}
 	if creator := strings.TrimSpace(playlist.Creator); creator != "" {
@@ -596,10 +617,57 @@ func formatPlaylistInfo(playlist *platform.Playlist) string {
 		builder.WriteString(fmt.Sprintf("曲目数: %d\n", trackCount))
 	}
 	if desc := strings.TrimSpace(playlist.Description); desc != "" {
-		builder.WriteString(fmt.Sprintf("简介: %s\n", mdV2Replacer.Replace(truncateText(desc, 120))))
+		if quote := formatExpandableQuote(mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
+			builder.WriteString(quote)
+			builder.WriteString("\n")
+		}
 	}
 	builder.WriteString("\n")
 	return builder.String()
+}
+
+func detectCollectionType(rawID, collectionURL string) string {
+	trimmedID := strings.ToLower(strings.TrimSpace(rawID))
+	if strings.HasPrefix(trimmedID, "album:") {
+		return collectionTypeAlbum
+	}
+	trimmedURL := strings.ToLower(strings.TrimSpace(collectionURL))
+	if strings.Contains(trimmedURL, "/album") {
+		return collectionTypeAlbum
+	}
+	if rawType := strings.ToLower(strings.TrimSpace(rawID)); rawType == collectionTypeAlbum || rawType == collectionTypePlaylist {
+		return rawType
+	}
+	return collectionTypePlaylist
+}
+
+func collectionTypeLabel(collectionType string) string {
+	if strings.EqualFold(strings.TrimSpace(collectionType), collectionTypeAlbum) {
+		return "专辑"
+	}
+	return "歌单"
+}
+
+func formatExpandableQuote(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	quoted := make([]string, 0, len(lines)+1)
+	quoted = append(quoted, ">简介")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		quoted = append(quoted, ">"+line)
+	}
+	if len(quoted) == 1 {
+		return ""
+	}
+	quoted[len(quoted)-1] = quoted[len(quoted)-1] + "||"
+	return strings.Join(quoted, "\n")
 }
 
 func truncateText(text string, limit int) string {
