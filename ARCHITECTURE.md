@@ -29,6 +29,7 @@ MusicBot-Go/
 │   │   ├── bot.go               # Bot 实例创建
 │   │   └── handler/             # 命令处理器
 │   │       ├── music.go         # 音乐下载/发送核心流程 (/music + 关键词回退)
+│   │       ├── playlist.go      # 专辑/歌单分页选择与回调处理
 │   │       ├── search.go        # 搜索处理
 │   │       ├── lyric.go         # 歌词获取
 │   │       ├── settings.go      # 用户设置
@@ -82,6 +83,7 @@ main.go
 ```
 Telegram Update
   └─> Router
+        ├─> PlaylistHandler.TryHandle()             # 先识别专辑/歌单链接并进入分页选择
         └─> MusicHandler.Handle()
              ├─> 解析文本/URL/ID/关键词
              ├─> PlatformManager.MatchText()/MatchURL()  # 识别平台
@@ -94,6 +96,18 @@ Telegram Update
              │    ├─> 处理封面/元数据
              │    └─> Repository.Create()                # 保存缓存
              └─> Bot.SendAudio()                  # 发送给用户
+```
+
+### 2.1 专辑/歌单展示流程
+
+```
+Telegram Update
+  └─> Router
+        └─> PlaylistHandler.TryHandle()
+             ├─> PlatformManager.MatchPlaylistURL()      # 识别专辑/歌单链接
+             ├─> Platform.GetPlaylist()                  # 拉取曲目列表
+             ├─> 按 ListPageSize 分页并生成按钮
+             └─> 回调翻页/关闭
 ```
 
 ### 3. 平台插件系统
