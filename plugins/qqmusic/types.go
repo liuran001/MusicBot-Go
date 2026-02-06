@@ -63,6 +63,7 @@ type qqFileInfo struct {
 	Size320   int64  `json:"size_320mp3"`
 	SizeFlac  int64  `json:"size_flac"`
 	SizeHiRes int64  `json:"size_hires"`
+	CoverMid  string `json:"-"`
 }
 
 type qqPlaylistSong struct {

@@ -703,6 +703,7 @@ func (c *Client) GetSongFileInfo(ctx context.Context, songMid string) (*qqFileIn
 			Data struct {
 				TrackInfo struct {
 					File qqFileInfo `json:"file"`
+					VS   []string   `json:"vs"`
 				} `json:"track_info"`
 			} `json:"data"`
 		} `json:"req"`
@@ -710,10 +711,14 @@ func (c *Client) GetSongFileInfo(ctx context.Context, songMid string) (*qqFileIn
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("qqmusic: decode file info: %w", err)
 	}
-	if resp.Req.Data.TrackInfo.File.MediaMid == "" {
+	file := resp.Req.Data.TrackInfo.File
+	if len(resp.Req.Data.TrackInfo.VS) > 1 {
+		file.CoverMid = strings.TrimSpace(resp.Req.Data.TrackInfo.VS[1])
+	}
+	if file.MediaMid == "" {
 		return nil, platform.NewUnavailableError("qqmusic", "track", songMid)
 	}
-	return &resp.Req.Data.TrackInfo.File, nil
+	return &file, nil
 }
 
 func (c *Client) GetVKey(ctx context.Context, songMid, mediaMid, qualityCode, ext, uin, authst string) (string, error) {

@@ -185,6 +185,16 @@ func (q *QQMusicPlatform) GetTrack(ctx context.Context, trackID string) (*platfo
 		return nil, err
 	}
 	track := convertSongDetail(detail)
+	if strings.TrimSpace(track.CoverURL) == "" {
+		songMid := strings.TrimSpace(detail.Mid)
+		if songMid != "" {
+			if fileInfo, fileErr := q.client.GetSongFileInfo(ctx, songMid); fileErr == nil && fileInfo != nil {
+				if coverMid := strings.TrimSpace(fileInfo.CoverMid); coverMid != "" {
+					track.CoverURL = buildSongCoverURL(coverMid)
+				}
+			}
+		}
+	}
 	if track.ID == "" {
 		return nil, platform.NewNotFoundError("qqmusic", "track", trackID)
 	}
@@ -449,6 +459,7 @@ func convertSearchSong(song qqSearchSong) platform.Track {
 	if trackID == "" && song.SongID != 0 {
 		trackID = fmt.Sprintf("%d", song.SongID)
 	}
+	coverURL := buildTrackCoverURL(song.AlbumMID)
 	artists := make([]platform.Artist, 0, len(song.Singer))
 	for _, singer := range song.Singer {
 		artists = append(artists, platform.Artist{
@@ -477,7 +488,7 @@ func convertSearchSong(song qqSearchSong) platform.Track {
 		Artists:  artists,
 		Album:    album,
 		Duration: duration,
-		CoverURL: buildAlbumCoverURL(song.AlbumMID),
+		CoverURL: coverURL,
 		URL:      buildTrackURL(trackID),
 	}
 }
@@ -517,6 +528,7 @@ func convertPlaylistSong(song qqPlaylistSong) platform.Track {
 	if albumMID == "" {
 		albumMID = strings.TrimSpace(song.Album.Mid)
 	}
+	coverURL := buildTrackCoverURL(albumMID)
 	var album *platform.Album
 	if albumName != "" || albumMID != "" {
 		album = &platform.Album{
@@ -536,7 +548,7 @@ func convertPlaylistSong(song qqPlaylistSong) platform.Track {
 		Artists:  artists,
 		Album:    album,
 		Duration: duration,
-		CoverURL: buildAlbumCoverURL(albumMID),
+		CoverURL: coverURL,
 		URL:      buildTrackURL(trackID),
 	}
 }
@@ -559,6 +571,7 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 	if albumTitle == "" {
 		albumTitle = strings.TrimSpace(detail.Album.Name)
 	}
+	coverURL := buildTrackCoverURL(detail.Album.Mid)
 	var album *platform.Album
 	if albumTitle != "" || strings.TrimSpace(detail.Album.Mid) != "" {
 		album = &platform.Album{
@@ -582,7 +595,7 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 		Artists:  artists,
 		Album:    album,
 		Duration: duration,
-		CoverURL: buildAlbumCoverURL(detail.Album.Mid),
+		CoverURL: coverURL,
 		URL:      buildTrackURL(trackID),
 	}
 }
@@ -618,12 +631,32 @@ func buildArtistURL(artistMid string) string {
 	return "https://y.qq.com/n/ryqq_v2/singer/" + artistMid
 }
 
+func buildArtistCoverURL(artistMid string) string {
+	artistMid = strings.TrimSpace(artistMid)
+	if artistMid == "" {
+		return ""
+	}
+	return "https://y.gtimg.cn/music/photo_new/T001R300x300M000" + artistMid + ".jpg"
+}
+
+func buildSongCoverURL(songCoverMid string) string {
+	songCoverMid = strings.TrimSpace(songCoverMid)
+	if songCoverMid == "" {
+		return ""
+	}
+	return "https://y.qq.com/music/photo_new/T062M000" + songCoverMid + ".jpg"
+}
+
 func buildAlbumCoverURL(albumMid string) string {
 	albumMid = strings.TrimSpace(albumMid)
 	if albumMid == "" {
 		return ""
 	}
 	return "https://y.gtimg.cn/music/photo_new/T002M000" + albumMid + ".jpg"
+}
+
+func buildTrackCoverURL(albumMid string) string {
+	return buildAlbumCoverURL(albumMid)
 }
 
 var lyricLineRe = regexp.MustCompile(`^\[(\d+):(\d+)\.(\d+)\](.*)$`)
