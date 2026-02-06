@@ -28,6 +28,7 @@ type SongRepository interface {
 	Update(ctx context.Context, song *SongInfo) error
 	Delete(ctx context.Context, musicID int) error
 	DeleteAll(ctx context.Context) error
+	DeleteAllByPlatform(ctx context.Context, platform string) error
 	DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error
 	DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error
 	Count(ctx context.Context) (int64, error)

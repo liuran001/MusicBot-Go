@@ -95,6 +95,17 @@ func (r *stubSongRepository) DeleteAll(ctx context.Context) error {
 	return nil
 }
 
+func (r *stubSongRepository) DeleteAllByPlatform(ctx context.Context, platform string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, song := range r.platformSongs {
+		if song != nil && song.Platform == platform {
+			delete(r.platformSongs, key)
+		}
+	}
+	return nil
+}
+
 func (r *stubSongRepository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -106,8 +117,10 @@ func (r *stubSongRepository) DeleteByPlatformTrackID(ctx context.Context, platfo
 func (r *stubSongRepository) DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for key := range r.platformSongs {
-		delete(r.platformSongs, key)
+	for key, song := range r.platformSongs {
+		if song != nil && song.Platform == platform && song.TrackID == trackID {
+			delete(r.platformSongs, key)
+		}
 	}
 	return nil
 }

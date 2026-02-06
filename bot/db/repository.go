@@ -215,6 +215,7 @@ func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
 				{Name: "quality"},
 			},
 			DoUpdates: clause.AssignmentColumns([]string{
+				"deleted_at",
 				"updated_at",
 				"music_id",
 				"song_name",
@@ -273,6 +274,16 @@ func (r *Repository) DeleteAll(ctx context.Context) error {
 	}
 	return r.db.WithContext(ctx).
 		Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Delete(&SongInfoModel{}).Error
+}
+
+// DeleteAllByPlatform clears cached songs for a specific platform.
+func (r *Repository) DeleteAllByPlatform(ctx context.Context, platform string) error {
+	if r == nil || r.db == nil {
+		return errors.New("repository not configured")
+	}
+	return r.db.WithContext(ctx).
+		Where("platform = ?", platform).
 		Delete(&SongInfoModel{}).Error
 }
 
