@@ -23,6 +23,25 @@ import (
 	"github.com/mymmrac/telego"
 )
 
+type musicDispatchContextKey string
+
+const forceNonSilentKey musicDispatchContextKey = "force_non_silent"
+
+func withForceNonSilent(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, forceNonSilentKey, true)
+}
+
+func isForceNonSilent(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, ok := ctx.Value(forceNonSilentKey).(bool)
+	return ok && value
+}
+
 // MusicHandler handles /music and related commands.
 type MusicHandler struct {
 	Repo             botpkg.SongRepository
@@ -247,6 +266,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 	replyParams := buildReplyParams(message)
 	silent := h.shouldSilentAutoFetch(message)
+	if isForceNonSilent(ctx) {
+		silent = false
+	}
 
 	var songInfo botpkg.SongInfo
 	var msgResult *telego.Message

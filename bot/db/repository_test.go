@@ -92,6 +92,9 @@ func TestRepositoryCRUD(t *testing.T) {
 	if userSettings.DefaultQuality != "hires" {
 		t.Fatalf("unexpected default user quality: %s", userSettings.DefaultQuality)
 	}
+	if userSettings.AutoDeleteList {
+		t.Fatalf("unexpected default user auto delete: %v", userSettings.AutoDeleteList)
+	}
 
 	groupSettings, err := repo.GetGroupSettings(ctx, -1001)
 	if err != nil {
@@ -99,6 +102,9 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 	if groupSettings.DefaultQuality != "hires" {
 		t.Fatalf("unexpected default group quality: %s", groupSettings.DefaultQuality)
+	}
+	if !groupSettings.AutoDeleteList {
+		t.Fatalf("unexpected default group auto delete: %v", groupSettings.AutoDeleteList)
 	}
 
 	if err := repo.Delete(ctx, 1); err != nil {

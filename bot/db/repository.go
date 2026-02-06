@@ -400,6 +400,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 			UserID:          userID,
 			DefaultPlatform: r.defaultPlatform,
 			DefaultQuality:  r.defaultQuality,
+			AutoDeleteList:  false,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
 			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
@@ -423,6 +424,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 			UserID:          settings.UserID,
 			DefaultPlatform: settings.DefaultPlatform,
 			DefaultQuality:  settings.DefaultQuality,
+			AutoDeleteList:  settings.AutoDeleteList,
 		}, nil
 	}
 	if err != nil {
@@ -440,6 +442,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 		UserID:          settings.UserID,
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
+		AutoDeleteList:  settings.AutoDeleteList,
 	}, nil
 }
 
@@ -452,6 +455,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 			ChatID:          chatID,
 			DefaultPlatform: r.defaultPlatform,
 			DefaultQuality:  r.defaultQuality,
+			AutoDeleteList:  true,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
 			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
@@ -475,6 +479,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 			ChatID:          settings.ChatID,
 			DefaultPlatform: settings.DefaultPlatform,
 			DefaultQuality:  settings.DefaultQuality,
+			AutoDeleteList:  settings.AutoDeleteList,
 		}, nil
 	}
 	if err != nil {
@@ -492,6 +497,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 		ChatID:          settings.ChatID,
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
+		AutoDeleteList:  settings.AutoDeleteList,
 	}, nil
 }
 
@@ -506,6 +512,7 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 		UserID:          settings.UserID,
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
+		AutoDeleteList:  settings.AutoDeleteList,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
@@ -524,6 +531,7 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 		ChatID:          settings.ChatID,
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
+		AutoDeleteList:  settings.AutoDeleteList,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
