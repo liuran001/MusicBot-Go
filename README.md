@@ -104,11 +104,16 @@ RecognizePort = 3737
 - `https://music.163.com/song?id=12345`
 - `https://music.163.com/#/song?id=12345`
 - `https://y.music.163.com/m/song?id=12345` (移动端)
+- `https://music.163.com/#/album?id=3411281`
+- `https://music.163.com/#/playlist?id=19723756`
 
 **QQ音乐**:
 - `https://y.qq.com/n/ryqq_v2/songDetail/003IGhQO0JdnuC`
 - `https://y.qq.com/n/ryqq_v2/playlist/114514`
 - `https://y.qq.com/n/ryqq_v2/albumDetail/003MNOTS3FmvaO`
+- `https://c6.y.qq.com/base/fcgi-bin/u?__=xxxxxx` (短链, 自动解析)
+
+> 专辑/歌单链接会进入分页列表模式；简介默认以 Telegram 可折叠引用样式展示。
 
 ### 分页配置
 
