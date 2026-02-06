@@ -268,10 +268,10 @@ func convertAnySearchSongs(songs []qqSearchSongAny) []qqSearchSong {
 		}
 		name := song.SongName
 		if strings.TrimSpace(name) == "" {
-			name = song.Name
+			name = song.Title
 		}
 		if strings.TrimSpace(name) == "" {
-			name = song.Title
+			name = song.Name
 		}
 		albumName := song.AlbumName
 		albumMid := song.AlbumMID

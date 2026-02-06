@@ -515,10 +515,10 @@ func convertPlaylistSong(song qqPlaylistSong) platform.Track {
 	}
 	title := strings.TrimSpace(song.SongName)
 	if title == "" {
-		title = strings.TrimSpace(song.Name)
+		title = strings.TrimSpace(song.Title)
 	}
 	if title == "" {
-		title = strings.TrimSpace(song.Title)
+		title = strings.TrimSpace(song.Name)
 	}
 	albumName := strings.TrimSpace(song.AlbumName)
 	albumMID := strings.TrimSpace(song.AlbumMID)
@@ -583,9 +583,9 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 			URL:      buildAlbumURL(detail.Album.Mid),
 		}
 	}
-	title := strings.TrimSpace(detail.Name)
+	title := strings.TrimSpace(detail.Title)
 	if title == "" {
-		title = detail.Title
+		title = strings.TrimSpace(detail.Name)
 	}
 	duration := time.Duration(detail.Interval) * time.Second
 	return platform.Track{
