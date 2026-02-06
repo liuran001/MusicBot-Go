@@ -200,6 +200,12 @@ func (q *QQMusicPlatform) GetAlbum(ctx context.Context, albumID string) (*platfo
 }
 
 func (q *QQMusicPlatform) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
+	isAlbum, rawID := parseCollectionID(playlistID)
+	if isAlbum {
+		return q.getAlbumAsPlaylist(ctx, rawID)
+	}
+	playlistID = rawID
+
 	if q.client == nil {
 		return nil, platform.NewUnavailableError("qqmusic", "playlist", playlistID)
 	}
@@ -238,6 +244,81 @@ func (q *QQMusicPlatform) GetPlaylist(ctx context.Context, playlistID string) (*
 		TrackCount:  trackCount,
 		Tracks:      tracks,
 		URL:         buildPlaylistURL(id),
+	}, nil
+}
+
+func (q *QQMusicPlatform) getAlbumAsPlaylist(ctx context.Context, albumID string) (*platform.Playlist, error) {
+	if q.client == nil {
+		return nil, platform.NewUnavailableError("qqmusic", "album", albumID)
+	}
+	data, err := q.client.GetAlbum(ctx, albumID)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, platform.NewNotFoundError("qqmusic", "album", albumID)
+	}
+
+	tracks := make([]platform.Track, 0, len(data.Songlist))
+	for _, song := range data.Songlist {
+		tracks = append(tracks, convertPlaylistSong(song))
+	}
+	if len(tracks) == 0 {
+		return nil, platform.NewNotFoundError("qqmusic", "album", albumID)
+	}
+
+	id := strings.TrimSpace(data.ID)
+	if id == "" {
+		id = strings.TrimSpace(albumID)
+	}
+	albumMid := strings.TrimSpace(data.Mid)
+	if albumMid == "" && tracks[0].Album != nil {
+		albumMid = strings.TrimSpace(tracks[0].Album.ID)
+	}
+	title := strings.TrimSpace(data.Name)
+	if title == "" && tracks[0].Album != nil {
+		title = strings.TrimSpace(tracks[0].Album.Title)
+	}
+	coverURL := strings.TrimSpace(data.CoverURL)
+	if coverURL == "" {
+		if tracks[0].Album != nil {
+			coverURL = strings.TrimSpace(tracks[0].Album.CoverURL)
+		}
+		if coverURL == "" {
+			coverURL = strings.TrimSpace(tracks[0].CoverURL)
+		}
+	}
+	creator := strings.TrimSpace(data.Creator)
+	if creator == "" {
+		artistNames := make([]string, 0, len(data.Artists))
+		for _, artist := range data.Artists {
+			name := strings.TrimSpace(artist.Name)
+			if name == "" {
+				continue
+			}
+			artistNames = append(artistNames, name)
+		}
+		creator = strings.Join(artistNames, "/")
+	}
+	trackCount := data.Total
+	if trackCount <= 0 {
+		trackCount = len(tracks)
+	}
+	urlID := albumMid
+	if urlID == "" {
+		urlID = id
+	}
+
+	return &platform.Playlist{
+		ID:          id,
+		Platform:    "qqmusic",
+		Title:       title,
+		Description: strings.TrimSpace(data.Desc),
+		CoverURL:    coverURL,
+		Creator:     creator,
+		TrackCount:  trackCount,
+		Tracks:      tracks,
+		URL:         buildAlbumURL(urlID),
 	}, nil
 }
 

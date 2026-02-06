@@ -2,11 +2,15 @@ package netease
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/XiaoMengXinX/Music163Api-Go/api"
+	"github.com/XiaoMengXinX/Music163Api-Go/types"
 	"github.com/XiaoMengXinX/Music163Api-Go/utils"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/liuran001/MusicBot-Go/bot"
@@ -22,6 +26,30 @@ type Client struct {
 	minBackoff time.Duration
 	maxBackoff time.Duration
 	logger     bot.Logger
+}
+
+type neteaseAlbumDetail struct {
+	Code          int                    `json:"code"`
+	ResourceState bool                   `json:"resourceState"`
+	Album         neteaseAlbumMetadata   `json:"album"`
+	Songs         []types.SongDetailData `json:"songs"`
+}
+
+type neteaseAlbumMetadata struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	PicURL      string `json:"picUrl"`
+	Description string `json:"description"`
+	BriefDesc   string `json:"briefDesc"`
+	Size        int    `json:"size"`
+	Artist      struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"artist"`
+	Artists []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"artists"`
 }
 
 // New creates a NetEase client with retry and circuit breaker.
@@ -133,6 +161,42 @@ func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*bot.Pl
 			return err
 		}
 		result = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetAlbumDetail retrieves album detail data.
+func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*neteaseAlbumDetail, error) {
+	if c.logger != nil {
+		c.logger.Debug("fetching album detail", "album_id", albumID)
+	}
+
+	var result neteaseAlbumDetail
+	err := c.execute(ctx, func() error {
+		data, err := api.GetAlbumDetail(c.data, albumID)
+		if err != nil {
+			if c.logger != nil {
+				c.logger.Error("api.GetAlbumDetail failed", "album_id", albumID, "error", err)
+			}
+			return err
+		}
+
+		raw := strings.TrimSpace(data.RawJson)
+		if raw == "" {
+			rawBytes, marshalErr := json.Marshal(data)
+			if marshalErr != nil {
+				return fmt.Errorf("netease: marshal album detail: %w", marshalErr)
+			}
+			raw = string(rawBytes)
+		}
+
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			return fmt.Errorf("netease: decode album detail: %w", err)
+		}
 		return nil
 	})
 	if err != nil {

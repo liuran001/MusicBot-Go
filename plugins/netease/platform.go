@@ -216,6 +216,12 @@ func (n *NeteasePlatform) GetAlbum(ctx context.Context, albumID string) (*platfo
 
 // GetPlaylist retrieves detailed information about a playlist by its ID.
 func (n *NeteasePlatform) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
+	isAlbum, rawID := parseCollectionID(playlistID)
+	if isAlbum {
+		return n.getAlbumAsPlaylist(ctx, rawID)
+	}
+	playlistID = rawID
+
 	if n.client == nil {
 		return nil, platform.NewUnavailableError("netease", "playlist", playlistID)
 	}
@@ -347,6 +353,78 @@ func (n *NeteasePlatform) GetPlaylist(ctx context.Context, playlistID string) (*
 		TrackCount:  trackCount,
 		Tracks:      tracks,
 		URL:         fmt.Sprintf("https://music.163.com/playlist?id=%d", detail.Playlist.Id),
+	}, nil
+}
+
+func (n *NeteasePlatform) getAlbumAsPlaylist(ctx context.Context, albumID string) (*platform.Playlist, error) {
+	if n.client == nil {
+		return nil, platform.NewUnavailableError("netease", "album", albumID)
+	}
+	aid, err := strconv.Atoi(albumID)
+	if err != nil {
+		return nil, platform.NewNotFoundError("netease", "album", albumID)
+	}
+	detail, err := n.client.GetAlbumDetail(ctx, aid)
+	if err != nil {
+		return nil, fmt.Errorf("netease: failed to get album detail: %w", err)
+	}
+	if detail == nil || detail.Album.ID == 0 {
+		return nil, platform.NewNotFoundError("netease", "album", albumID)
+	}
+
+	songs := detail.Songs
+	offset := platform.PlaylistOffsetFromContext(ctx)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > 0 {
+		if offset >= len(songs) {
+			songs = nil
+		} else {
+			songs = songs[offset:]
+		}
+	}
+	limit := platform.PlaylistLimitFromContext(ctx)
+	if limit > 0 && len(songs) > limit {
+		songs = songs[:limit]
+	}
+
+	tracks := make([]platform.Track, 0, len(songs))
+	for _, song := range songs {
+		tracks = append(tracks, n.convertSongDetailDataToTrack(song))
+	}
+
+	creator := strings.TrimSpace(detail.Album.Artist.Name)
+	if creator == "" {
+		names := make([]string, 0, len(detail.Album.Artists))
+		for _, artist := range detail.Album.Artists {
+			name := strings.TrimSpace(artist.Name)
+			if name == "" {
+				continue
+			}
+			names = append(names, name)
+		}
+		creator = strings.Join(names, "/")
+	}
+	description := strings.TrimSpace(detail.Album.Description)
+	if description == "" {
+		description = strings.TrimSpace(detail.Album.BriefDesc)
+	}
+	trackCount := detail.Album.Size
+	if trackCount <= 0 {
+		trackCount = len(detail.Songs)
+	}
+
+	return &platform.Playlist{
+		ID:          strconv.Itoa(detail.Album.ID),
+		Platform:    "netease",
+		Title:       strings.TrimSpace(detail.Album.Name),
+		Description: description,
+		CoverURL:    strings.TrimSpace(detail.Album.PicURL),
+		Creator:     creator,
+		TrackCount:  trackCount,
+		Tracks:      tracks,
+		URL:         fmt.Sprintf("https://music.163.com/album?id=%d", detail.Album.ID),
 	}, nil
 }
 
