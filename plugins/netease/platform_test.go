@@ -93,14 +93,15 @@ func TestParseLyricLines(t *testing.T) {
 	lrc := `[00:00.00]Line 1
 [00:05.50]Line 2
 [01:23.99]Line 3
+[00:01:10]Line 4
 [invalid]Should be skipped
 [00:10.00]`
 
 	lines := p.parseLyricLines(lrc)
 
-	// Should parse valid lines only (4 lines total, but 1 is empty, 1 is invalid)
-	if len(lines) != 3 {
-		t.Errorf("expected 3 parsed lines, got %d", len(lines))
+	// Should parse valid lines only (6 lines total, but 1 is empty, 1 is invalid)
+	if len(lines) != 4 {
+		t.Errorf("expected 4 parsed lines, got %d", len(lines))
 	}
 
 	// Verify first line
@@ -113,6 +114,14 @@ func TestParseLyricLines(t *testing.T) {
 	if lines[1].Time.Milliseconds() != expectedDuration {
 		t.Errorf("expected second line time %dms, got %dms",
 			expectedDuration, lines[1].Time.Milliseconds())
+	}
+
+	// Verify malformed [mm:ss:xx] timestamp is auto-normalized as centiseconds.
+	if lines[3].Text != "Line 4" {
+		t.Errorf("expected fourth line text 'Line 4', got '%s'", lines[3].Text)
+	}
+	if lines[3].Time.Milliseconds() != 1100 {
+		t.Errorf("expected fourth line time 1100ms, got %dms", lines[3].Time.Milliseconds())
 	}
 }
 

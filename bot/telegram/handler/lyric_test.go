@@ -146,37 +146,42 @@ func TestFormatDuration(t *testing.T) {
 		{
 			name:     "zero",
 			duration: 0,
-			want:     "00:00",
+			want:     "00:00.00",
 		},
 		{
 			name:     "30 seconds",
 			duration: 30 * time.Second,
-			want:     "00:30",
+			want:     "00:30.00",
 		},
 		{
 			name:     "1 minute",
 			duration: 1 * time.Minute,
-			want:     "01:00",
+			want:     "01:00.00",
 		},
 		{
 			name:     "3 minutes 45 seconds",
 			duration: 3*time.Minute + 45*time.Second,
-			want:     "03:45",
+			want:     "03:45.00",
 		},
 		{
 			name:     "10 minutes 5 seconds",
 			duration: 10*time.Minute + 5*time.Second,
-			want:     "10:05",
+			want:     "10:05.00",
 		},
 		{
 			name:     "59 minutes 59 seconds",
 			duration: 59*time.Minute + 59*time.Second,
-			want:     "59:59",
+			want:     "59:59.00",
 		},
 		{
 			name:     "over 1 hour",
 			duration: 75 * time.Minute,
-			want:     "75:00",
+			want:     "75:00.00",
+		},
+		{
+			name:     "with centiseconds",
+			duration: 2*time.Minute + 3*time.Second + 450*time.Millisecond,
+			want:     "02:03.45",
 		},
 	}
 

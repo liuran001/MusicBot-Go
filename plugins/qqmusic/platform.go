@@ -659,7 +659,7 @@ func buildTrackCoverURL(albumMid string) string {
 	return buildAlbumCoverURL(albumMid)
 }
 
-var lyricLineRe = regexp.MustCompile(`^\[(\d+):(\d+)\.(\d+)\](.*)$`)
+var lyricLineRe = regexp.MustCompile(`^\[(\d+):(\d+)[.:](\d+)\](.*)$`)
 
 func parseLyricLines(lrc string) []platform.LyricLine {
 	lines := strings.Split(lrc, "\n")

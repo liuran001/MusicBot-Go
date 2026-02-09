@@ -160,7 +160,7 @@ func (h *LyricHandler) sendLyrics(ctx context.Context, b *telego.Bot, msgResult 
 		}
 		text = strings.Join(lines, "\n")
 	} else if lyrics.Plain != "" {
-		text = lyrics.Plain
+		text = platform.NormalizeLRCTimestamps(lyrics.Plain)
 	} else {
 		text = "暂无歌词信息"
 	}
@@ -189,7 +189,8 @@ func (h *LyricHandler) sendLyrics(ctx context.Context, b *telego.Bot, msgResult 
 }
 
 func formatDuration(d time.Duration) string {
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	return fmt.Sprintf("%02d:%02d", minutes, seconds)
+	minutes := int(d / time.Minute)
+	seconds := int((d % time.Minute) / time.Second)
+	centis := int((d % time.Second) / (10 * time.Millisecond))
+	return fmt.Sprintf("%02d:%02d.%02d", minutes, seconds, centis)
 }

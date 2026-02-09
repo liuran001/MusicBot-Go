@@ -15,6 +15,7 @@ import (
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
 type ID3Service struct {
@@ -86,15 +87,16 @@ func (s *ID3Service) writeMp3BasicTags(meta *id3v2.Tag, tagData *TagData) {
 }
 
 func (s *ID3Service) writeMp3Lyrics(meta *id3v2.Tag, tagData *TagData, logMsg string) {
-	if tagData.Lyrics != "" {
+	lyrics := platform.NormalizeLRCTimestamps(tagData.Lyrics)
+	if lyrics != "" {
 		meta.AddUnsynchronisedLyricsFrame(id3v2.UnsynchronisedLyricsFrame{
 			Encoding:          id3v2.EncodingUTF8,
 			Language:          "und",
 			ContentDescriptor: "LRC",
-			Lyrics:            tagData.Lyrics,
+			Lyrics:            lyrics,
 		})
 		if s.logger != nil {
-			s.logger.Info(logMsg, "lyrics_length", len(tagData.Lyrics))
+			s.logger.Info(logMsg, "lyrics_length", len(lyrics))
 		}
 	} else if s.logger != nil {
 		s.logger.Warn("mp3 lyrics field is empty, skipping lyrics embedding")
@@ -184,10 +186,11 @@ func (s *ID3Service) writeFlacBasicTags(vorbis *flacvorbis.MetaDataBlockVorbisCo
 }
 
 func (s *ID3Service) writeFlacLyrics(vorbis *flacvorbis.MetaDataBlockVorbisComment, tagData *TagData, logMsg string) {
-	if tagData.Lyrics != "" {
-		_ = vorbis.Add("LYRICS", tagData.Lyrics)
+	lyrics := platform.NormalizeLRCTimestamps(tagData.Lyrics)
+	if lyrics != "" {
+		_ = vorbis.Add("LYRICS", lyrics)
 		if s.logger != nil {
-			s.logger.Info(logMsg, "lyrics_length", len(tagData.Lyrics))
+			s.logger.Info(logMsg, "lyrics_length", len(lyrics))
 		}
 	} else if s.logger != nil {
 		s.logger.Warn("flac lyrics field is empty, skipping lyrics embedding")

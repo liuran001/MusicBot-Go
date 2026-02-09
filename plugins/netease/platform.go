@@ -656,8 +656,8 @@ func (n *NeteasePlatform) parseLyricLines(lrc string) []platform.LyricLine {
 	lines := strings.Split(lrc, "\n")
 	result := make([]platform.LyricLine, 0, len(lines))
 
-	// LRC format: [mm:ss.xx]lyric text
-	re := regexp.MustCompile(`^\[(\d+):(\d+)\.(\d+)\](.*)$`)
+	// LRC format: [mm:ss.xx]lyric text (some sources may use [mm:ss:xx])
+	re := regexp.MustCompile(`^\[(\d+):(\d+)[.:](\d+)\](.*)$`)
 
 	for _, line := range lines {
 		matches := re.FindStringSubmatch(line)
