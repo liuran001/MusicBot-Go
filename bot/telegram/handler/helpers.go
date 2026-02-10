@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -47,6 +49,14 @@ func extractPlatformTrack(ctx context.Context, message *telego.Message, manager 
 		}
 		if plat, id, matched := manager.MatchURL(resolvedText); matched {
 			return plat, id, true
+		}
+		if extractedURL := extractFirstURL(resolvedText); extractedURL != "" && extractedURL != resolvedText {
+			if plat, id, matched := manager.MatchURL(extractedURL); matched {
+				return plat, id, true
+			}
+			if plat, id, matched := manager.MatchText(extractedURL); matched {
+				return plat, id, true
+			}
 		}
 	}
 
@@ -125,15 +135,42 @@ func parseTrailingOptions(text string, manager platform.Manager) (baseText, plat
 	return baseText, platformName, quality
 }
 
-var urlMatcher = regexp.MustCompile(`https?://[^\s]+`)
+var urlMatcher = regexp.MustCompile(`https?://[^\s\x{00A0}\x{2000}-\x{200D}\x{202F}\x{205F}\x{3000}<>"'()（）\[\]{}【】《》「」『』]+`)
 
 func extractFirstURL(text string) string {
 	if strings.TrimSpace(text) == "" {
 		return ""
 	}
 	match := urlMatcher.FindString(text)
-	match = strings.TrimRight(match, ".,!?)]}>")
-	return strings.TrimSpace(match)
+	return trimURLCandidate(match)
+}
+
+func trimURLCandidate(candidate string) string {
+	candidate = strings.TrimSpace(candidate)
+	for candidate != "" {
+		r, size := utf8.DecodeLastRuneInString(candidate)
+		if r == utf8.RuneError && size == 1 {
+			break
+		}
+		if !isURLTrailingRune(r) {
+			break
+		}
+		candidate = candidate[:len(candidate)-size]
+	}
+	return strings.TrimSpace(candidate)
+}
+
+func isURLTrailingRune(r rune) bool {
+	if unicode.IsSpace(r) {
+		return true
+	}
+	switch r {
+	case '.', ',', '!', '?', ';', ':', ')', ']', '}', '>', '"', '\'',
+		'，', '。', '！', '？', '；', '：', '）', '】', '》', '」', '』', '、':
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveShortLinkText(ctx context.Context, manager platform.Manager, text string) string {
