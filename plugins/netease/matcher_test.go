@@ -295,6 +295,12 @@ func TestURLMatcherMatchPlaylistURL(t *testing.T) {
 			wantMatch: true,
 		},
 		{
+			name:      "album path url with trailing slash and random query",
+			url:       "http://music.163.com/album/241083511/?userid=rand987654321",
+			wantID:    "album:241083511",
+			wantMatch: true,
+		},
+		{
 			name:      "song url should not match playlist",
 			url:       "https://music.163.com/song?id=1463165983",
 			wantID:    "",
