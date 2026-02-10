@@ -58,6 +58,7 @@ type MusicHandler struct {
 	AdminIDs          map[int64]struct{}
 	AdminCommands     []admincmd.Command
 	Playlist          *PlaylistHandler
+	RecognizeEnabled  bool
 	Limiter           chan struct{}
 	UploadLimiter     chan struct{}
 	UploadQueue       chan uploadTask
@@ -161,7 +162,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 		params := &telego.SendMessageParams{
 			ChatID:             telego.ChatID{ID: message.Chat.ID},
-			Text:               buildHelpText(h.PlatformManager, isAdmin, adminHelp),
+			Text:               buildHelpText(h.PlatformManager, isAdmin, adminHelp, h.RecognizeEnabled),
 			ParseMode:          telego.ModeMarkdownV2,
 			LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 			ReplyParameters:    &telego.ReplyParameters{MessageID: message.MessageID},

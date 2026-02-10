@@ -22,8 +22,8 @@
 ## 依赖
 
 - Go 1.25.6+
-- ffmpeg（/recognize 语音识别需要）
-- Node.js + npm（识曲服务需要）
+- ffmpeg（/recognize 语音识别需要，可通过 `EnableRecognize = false` 关闭）
+- Node.js + npm（识曲服务需要，可通过 `EnableRecognize = false` 关闭）
 
 ## 配置
 
@@ -57,6 +57,22 @@ cookie = YOUR_QQMUSIC_COOKIE
 ### 动态脚本插件（推荐）
 - 脚本目录：`plugins/scripts/<name>`，目录名需与 `[plugins.<name>]` 一致
 - 修改脚本或配置后，管理员可使用 `/reload` 重载（需配置 `BotAdmin`），或直接重启程序
+
+### 白名单配置（可选）
+
+用于限制可使用 Bot 的聊天（chat）。开启后，非白名单群会被自动退出，私聊会被静默忽略；`BotAdmin` 始终可绕过白名单。
+
+```ini
+EnableWhitelist = false
+WhitelistChatIDs =
+```
+
+`WhitelistChatIDs` 支持逗号/分号/空格分隔多个 chatID。
+
+管理员可使用 `/wl` 动态维护白名单（会回写 `config.ini`）：
+- `/wl add <chatID>`
+- `/wl del <chatID>`
+- `/wl list`
 
 ## 运行
 
@@ -97,6 +113,7 @@ RecognizePort = 3737
 - `/about` - 关于本 Bot
 - `/rmcache <platform> <trackID>|<URL>|all` - 清理缓存（管理员）
 - `/reload` - 重新加载动态脚本插件（管理员）
+- `/wl <add|del|list> [chatID]` - 白名单管理（管理员）
 
 ### 支持的 URL 格式
 

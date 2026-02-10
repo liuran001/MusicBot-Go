@@ -54,7 +54,7 @@ var (
 	callbackDenied = "仅发起人或管理员可操作"
 )
 
-func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command) string {
+func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command, recognizeEnabled bool) string {
 	aliasText := buildAliasHint(manager)
 	platformText := buildPlatformList(manager)
 	if aliasText == "" {
@@ -69,9 +69,11 @@ func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admin
 		"使用方法:\n" +
 		"`/music` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\<\\(可选\\)音质\\> \\- 下载歌曲\n" +
 		"`/search` \\<关键词\\> \\<\\(可选\\)搜索平台\\> \\<\\(可选\\)音质\\> \\- 搜索歌曲\n" +
-		"`/lyric` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\- 获取歌词\n" +
-		"`/recognize` \\- 听歌识曲 \\(回复一条语音消息\\)\n" +
-		"`/settings` \\- 默认音质/搜索平台设置\n\n" +
+		"`/lyric` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\- 获取歌词\n"
+	if recognizeEnabled {
+		text += "`/recognize` \\- 听歌识曲 \\(回复一条语音消息\\)\n"
+	}
+	text += "`/settings` \\- 默认音质/搜索平台设置\n\n" +
 		"搜索平台支持参数: " + aliasText + "\n" +
 		"音质参数支持: `low` / `high` / `lossless` / `hires`\n\n" +
 		"支持平台: " + platformText + "\n" +
