@@ -2,10 +2,12 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,8 @@ type MultipartDownloader struct {
 	minSize     int64
 	partSize    int64
 }
+
+var errRangeNotSupported = errors.New("range request not supported by server")
 
 // partDownload represents a single chunk download task
 type partDownload struct {
@@ -141,15 +145,18 @@ func (md *MultipartDownloader) SupportsRange(ctx context.Context, rawURL string,
 	contentLength := resp.ContentLength
 
 	// Server must explicitly support ranges and provide content length
-	supportsRange := acceptRanges == "bytes" && contentLength > 0
+	supportsRange := strings.EqualFold(acceptRanges, "bytes") && contentLength > 0
 
 	return supportsRange, contentLength, nil
 }
 
 func (md *MultipartDownloader) Download(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, progress ProgressFunc) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	supportsRange, contentLength, err := md.SupportsRange(ctx, rawURL, info)
 	if err != nil {
-		return 0, fmt.Errorf("range check failed: %w", err)
+		return md.downloadSingle(ctx, rawURL, info, destPath, info.Size, progress)
 	}
 
 	totalSize := contentLength
@@ -158,16 +165,84 @@ func (md *MultipartDownloader) Download(ctx context.Context, rawURL string, info
 	}
 
 	if !supportsRange {
-		return 0, fmt.Errorf("server does not support Range requests, falling back to single-thread")
+		return md.downloadSingle(ctx, rawURL, info, destPath, totalSize, progress)
 	}
 	if totalSize <= 0 {
-		return 0, fmt.Errorf("unknown file size, falling back to single-thread")
+		return md.downloadSingle(ctx, rawURL, info, destPath, totalSize, progress)
 	}
 	if totalSize < md.minSize {
-		return 0, fmt.Errorf("file too small (%d bytes < %d bytes), using single-thread", totalSize, md.minSize)
+		return md.downloadSingle(ctx, rawURL, info, destPath, totalSize, progress)
+	}
+	written, err := md.downloadMultipart(ctx, rawURL, info, destPath, totalSize, progress)
+	if err != nil && errors.Is(err, errRangeNotSupported) {
+		return md.downloadSingle(ctx, rawURL, info, destPath, totalSize, progress)
+	}
+	return written, err
+}
+
+func (md *MultipartDownloader) downloadSingle(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, expectedTotal int64, progress ProgressFunc) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	for k, v := range info.Headers {
+		if strings.EqualFold(k, "Range") {
+			continue
+		}
+		req.Header.Set(k, v)
 	}
 
-	return md.downloadMultipart(ctx, rawURL, info, destPath, totalSize, progress)
+	resp, err := md.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	file, err := os.Create(destPath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	buf := make([]byte, 32*1024)
+	var written int64
+	for {
+		nr, readErr := resp.Body.Read(buf)
+		if nr > 0 {
+			nw, writeErr := file.Write(buf[:nr])
+			if nw > 0 {
+				written += int64(nw)
+				if progress != nil {
+					progress(written, expectedTotal)
+				}
+			}
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if nw != nr {
+				return written, io.ErrShortWrite
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return written, readErr
+		}
+	}
+
+	if expectedTotal <= 0 {
+		expectedTotal = written
+	}
+	if progress != nil {
+		progress(written, expectedTotal)
+	}
+
+	return written, nil
 }
 
 // downloadMultipart performs concurrent chunk downloads
@@ -295,6 +370,9 @@ func (md *MultipartDownloader) downloadPart(ctx context.Context, rawURL string, 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("unexpected status %d for range request", resp.StatusCode)
 	}
+	if resp.StatusCode == http.StatusOK {
+		return errRangeNotSupported
+	}
 
 	// Create part file
 	file, err := os.Create(part.path)
@@ -313,13 +391,21 @@ func (md *MultipartDownloader) downloadPart(ctx context.Context, rawURL string, 
 	expectedSize := part.end - part.start + 1
 
 	for {
+		if written >= expectedSize {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		nr, err := resp.Body.Read(buf)
+		remaining := expectedSize - written
+		readBuf := buf
+		if remaining < int64(len(buf)) {
+			readBuf = readBuf[:remaining]
+		}
+		nr, err := resp.Body.Read(readBuf)
 		if nr > 0 {
 			nw, ew := file.Write(buf[0:nr])
 			if nw > 0 {

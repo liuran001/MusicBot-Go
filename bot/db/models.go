@@ -12,7 +12,7 @@ type SongInfoModel struct {
 	gorm.Model
 	Platform        string `gorm:"not null;default:'netease';index:idx_platform_track_quality,unique"`
 	TrackID         string `gorm:"not null;default:'';index:idx_platform_track_quality,unique"`
-	Quality         string `gorm:"not null;default:'high';index:idx_platform_track_quality,unique"`
+	Quality         string `gorm:"not null;default:'hires';index:idx_platform_track_quality,unique"`
 	MusicID         int    // Deprecated: Legacy NetEase music ID (kept for backward compatibility)
 	SongName        string
 	SongArtists     string

@@ -83,8 +83,16 @@ func (p *Pool) Submit(task func()) error {
 
 // SubmitWait enqueues a task and waits for it to complete.
 func (p *Pool) SubmitWait(task func() error) error {
+	return p.SubmitWaitContext(context.Background(), task)
+}
+
+// SubmitWaitContext enqueues a task and waits for completion or context cancellation.
+func (p *Pool) SubmitWaitContext(ctx context.Context, task func() error) error {
 	if task == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	result := make(chan error, 1)
@@ -100,7 +108,12 @@ func (p *Pool) SubmitWait(task func() error) error {
 		return err
 	}
 
-	return <-result
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err = <-result:
+		return err
+	}
 }
 
 // Shutdown waits for in-flight tasks until context is done.

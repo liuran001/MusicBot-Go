@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/liuran001/MusicBot-Go/bot"
@@ -70,6 +71,9 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 	if loaded.SongName != "Song" {
 		t.Fatalf("unexpected song name: %s", loaded.SongName)
+	}
+	if loaded.Quality != "hires" {
+		t.Fatalf("unexpected default song quality: %s", loaded.Quality)
 	}
 
 	loaded.SongName = "Song Updated"
@@ -234,5 +238,67 @@ func TestRepositoryDeleteAllByPlatform(t *testing.T) {
 	}
 	if _, err := repo.FindByPlatformTrackID(ctx, "netease", "1", "high"); err != nil {
 		t.Fatalf("expected netease record kept: %v", err)
+	}
+}
+
+func TestRepositoryGetUserSettingsConcurrentCreate(t *testing.T) {
+	file, err := os.CreateTemp("", "music163bot-*.db")
+	if err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+	path := file.Name()
+	_ = file.Close()
+	defer os.Remove(path)
+
+	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
+
+	repo, err := NewSQLiteRepository(path, gormLogger)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	const workers = 12
+	results := make(chan *bot.UserSettings, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			settings, getErr := repo.GetUserSettings(ctx, 777)
+			if getErr != nil {
+				errs <- getErr
+				return
+			}
+			results <- settings
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for getErr := range errs {
+		t.Fatalf("unexpected get user settings error: %v", getErr)
+	}
+
+	var baseID uint
+	count := 0
+	for settings := range results {
+		count++
+		if settings == nil {
+			t.Fatal("nil settings")
+		}
+		if baseID == 0 {
+			baseID = settings.ID
+			continue
+		}
+		if settings.ID != baseID {
+			t.Fatalf("expected same settings row id, got %d and %d", baseID, settings.ID)
+		}
+	}
+	if count != workers {
+		t.Fatalf("expected %d results, got %d", workers, count)
 	}
 }

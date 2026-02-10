@@ -44,29 +44,32 @@ func isForceNonSilent(ctx context.Context) bool {
 
 // MusicHandler handles /music and related commands.
 type MusicHandler struct {
-	Repo             botpkg.SongRepository
-	PlatformManager  platform.Manager // NEW: Platform-agnostic music platform manager
-	DownloadService  *download.DownloadService
-	ID3Service       *id3.ID3Service
-	TagProviders     map[string]id3.ID3TagProvider
-	Pool             botpkg.WorkerPool
-	Logger           botpkg.Logger
-	CacheDir         string
-	BotName          string
-	DefaultPlatform  string
-	FallbackPlatform string
-	AdminIDs         map[int64]struct{}
-	AdminCommands    []admincmd.Command
-	Playlist         *PlaylistHandler
-	Limiter          chan struct{}
-	UploadLimiter    chan struct{}
-	UploadQueue      chan uploadTask
-	UploadQueueSize  int
-	UploadBot        *telego.Bot
-	RateLimiter      *telegram.RateLimiter
-	queueMu          sync.Mutex
-	queuedStatus     []queuedStatus
-	statusDirty      bool
+	Repo              botpkg.SongRepository
+	PlatformManager   platform.Manager // NEW: Platform-agnostic music platform manager
+	DownloadService   *download.DownloadService
+	ID3Service        *id3.ID3Service
+	TagProviders      map[string]id3.ID3TagProvider
+	Pool              botpkg.WorkerPool
+	Logger            botpkg.Logger
+	CacheDir          string
+	BotName           string
+	DefaultPlatform   string
+	FallbackPlatform  string
+	AdminIDs          map[int64]struct{}
+	AdminCommands     []admincmd.Command
+	Playlist          *PlaylistHandler
+	Limiter           chan struct{}
+	UploadLimiter     chan struct{}
+	UploadQueue       chan uploadTask
+	UploadQueueSize   int
+	UploadBot         *telego.Bot
+	RateLimiter       *telegram.RateLimiter
+	queueMu           sync.Mutex
+	queuedStatus      []queuedStatus
+	statusDirty       bool
+	fetchMu           sync.Mutex
+	trackFetch        map[string]*trackFetchCall
+	downloadInfoFetch map[string]*downloadInfoFetchCall
 }
 
 type uploadTask struct {
@@ -93,6 +96,18 @@ type queuedStatus struct {
 type uploadResult struct {
 	message *telego.Message
 	err     error
+}
+
+type trackFetchCall struct {
+	done  chan struct{}
+	track *platform.Track
+	err   error
+}
+
+type downloadInfoFetchCall struct {
+	done chan struct{}
+	info *platform.DownloadInfo
+	err  error
 }
 
 // StartWorker initializes and starts the upload worker.
@@ -405,7 +420,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		}
 
 		var err error
-		track, err = plat.GetTrack(ctx, trackID)
+		track, err = h.getTrackSingleflight(ctx, platformName, trackID)
 		if err == nil {
 			break
 		}
@@ -429,7 +444,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	fillSongInfoFromTrack(&songInfo, track, platformName, trackID, message)
-	info, err := plat.GetDownloadInfo(ctx, trackID, quality)
+	info, err := h.getDownloadInfoSingleflight(ctx, platformName, trackID, quality)
 	if err != nil {
 		if h.Logger != nil {
 			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
@@ -508,6 +523,103 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	return nil
+}
+
+func (h *MusicHandler) getTrackSingleflight(ctx context.Context, platformName, trackID string) (*platform.Track, error) {
+	if h == nil || h.PlatformManager == nil {
+		return nil, errors.New("platform manager not configured")
+	}
+	key := fmt.Sprintf("track:%s:%s", platformName, trackID)
+
+	h.fetchMu.Lock()
+	if h.trackFetch == nil {
+		h.trackFetch = make(map[string]*trackFetchCall)
+	}
+	if call, ok := h.trackFetch[key]; ok {
+		h.fetchMu.Unlock()
+		<-call.done
+		return call.track, call.err
+	}
+	call := &trackFetchCall{done: make(chan struct{})}
+	h.trackFetch[key] = call
+	h.fetchMu.Unlock()
+
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil {
+		call.err = fmt.Errorf("platform not found: %s", platformName)
+	} else {
+		call.track, call.err = plat.GetTrack(ctx, trackID)
+	}
+
+	h.fetchMu.Lock()
+	delete(h.trackFetch, key)
+	h.fetchMu.Unlock()
+	close(call.done)
+
+	if call.track == nil && call.err == nil {
+		return nil, errors.New("invalid track result")
+	}
+	return call.track, call.err
+}
+
+func (h *MusicHandler) getDownloadInfoSingleflight(ctx context.Context, platformName, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
+	if h == nil || h.PlatformManager == nil {
+		return nil, errors.New("platform manager not configured")
+	}
+	key := fmt.Sprintf("download_info:%s:%s:%s", platformName, trackID, quality.String())
+
+	h.fetchMu.Lock()
+	if h.downloadInfoFetch == nil {
+		h.downloadInfoFetch = make(map[string]*downloadInfoFetchCall)
+	}
+	if call, ok := h.downloadInfoFetch[key]; ok {
+		h.fetchMu.Unlock()
+		<-call.done
+		if call.err != nil {
+			return nil, call.err
+		}
+		if call.info == nil {
+			return nil, errors.New("invalid download info result")
+		}
+		return cloneDownloadInfo(call.info), nil
+	}
+	call := &downloadInfoFetchCall{done: make(chan struct{})}
+	h.downloadInfoFetch[key] = call
+	h.fetchMu.Unlock()
+
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil {
+		call.err = fmt.Errorf("platform not found: %s", platformName)
+	} else {
+		call.info, call.err = plat.GetDownloadInfo(ctx, trackID, quality)
+	}
+
+	h.fetchMu.Lock()
+	delete(h.downloadInfoFetch, key)
+	h.fetchMu.Unlock()
+	close(call.done)
+
+	if call.err != nil {
+		return nil, call.err
+	}
+	if call.info == nil {
+		return nil, errors.New("invalid download info result")
+	}
+	return cloneDownloadInfo(call.info), nil
+}
+
+func cloneDownloadInfo(info *platform.DownloadInfo) *platform.DownloadInfo {
+	if info == nil {
+		return nil
+	}
+	copy := *info
+	if len(info.Headers) > 0 {
+		copy.Headers = make(map[string]string, len(info.Headers))
+		for k, v := range info.Headers {
+			copy.Headers[k] = v
+		}
+	}
+	return &copy
 }
 
 func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *telego.Message, args string) (string, string, bool) {
@@ -1185,6 +1297,12 @@ func (h *MusicHandler) updateQueuedStatusText(messageID int, text string) {
 func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, message *telego.Message, songInfo *botpkg.SongInfo, musicPath, picPath string) (*telego.Message, error) {
 	if songInfo == nil {
 		return nil, errors.New("song info required")
+	}
+	if message == nil {
+		return nil, errors.New("message required")
+	}
+	if message.Chat.ID == 0 {
+		return nil, errors.New("message chat required")
 	}
 	uploadCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

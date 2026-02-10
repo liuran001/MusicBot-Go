@@ -1,6 +1,7 @@
 package download
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -133,29 +134,20 @@ func TestMultipartDownload_NoRangeSupport(t *testing.T) {
 	tempFile := "test_single_download.bin"
 	defer os.Remove(tempFile)
 
-	_, err := downloader.Download(ctx, server.URL, info, tempFile, nil)
-	if err == nil {
-		t.Fatal("Expected error for no Range support, got nil")
+	written, err := downloader.Download(ctx, server.URL, info, tempFile, nil)
+	if err != nil {
+		t.Fatalf("Download failed: %v", err)
 	}
-
-	if !contains(err.Error(), "does not support Range") {
-		t.Errorf("Expected 'does not support Range' error, got: %v", err)
+	if written != int64(len(testData)) {
+		t.Fatalf("expected written=%d, got %d", len(testData), written)
 	}
-
-	t.Log("No Range support correctly detected!")
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	downloaded, err := os.ReadFile(tempFile)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded file: %v", err)
 	}
-	return false
+	if !bytes.Equal(downloaded, testData) {
+		t.Fatal("downloaded data mismatch")
+	}
 }
 
 func TestMultipartDownload_SmallFile(t *testing.T) {
@@ -187,14 +179,62 @@ func TestMultipartDownload_SmallFile(t *testing.T) {
 	tempFile := "test_small_file.bin"
 	defer os.Remove(tempFile)
 
-	_, err := downloader.Download(ctx, server.URL, info, tempFile, nil)
-	if err == nil {
-		t.Fatal("Expected error for small file, got nil")
+	written, err := downloader.Download(ctx, server.URL, info, tempFile, nil)
+	if err != nil {
+		t.Fatalf("Download failed: %v", err)
+	}
+	if written != int64(len(testData)) {
+		t.Fatalf("expected written=%d, got %d", len(testData), written)
+	}
+	downloaded, err := os.ReadFile(tempFile)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded file: %v", err)
+	}
+	if !bytes.Equal(downloaded, testData) {
+		t.Fatal("downloaded data mismatch")
+	}
+}
+
+func TestMultipartDownload_RangeProbeBut200ResponseFallback(t *testing.T) {
+	testData := make([]byte, 2*1024*1024)
+	for i := range testData {
+		testData[i] = byte((i * 7) % 251)
 	}
 
-	if !contains(err.Error(), "file too small") {
-		t.Errorf("Expected 'file too small' error, got: %v", err)
-	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(testData)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(testData)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(testData)
+	}))
+	defer server.Close()
 
-	t.Log("Small file correctly skipped for multipart!")
+	client := &http.Client{Timeout: 30 * time.Second}
+	downloader := NewMultipartDownloader(client, 30*time.Second, MultipartDownloadOptions{
+		Concurrency: 4,
+		MinSize:     1,
+	})
+
+	tempFile := "test_range_200_fallback.bin"
+	defer os.Remove(tempFile)
+
+	written, err := downloader.Download(context.Background(), server.URL, &platform.DownloadInfo{URL: server.URL, Size: int64(len(testData))}, tempFile, nil)
+	if err != nil {
+		t.Fatalf("Download failed: %v", err)
+	}
+	if written != int64(len(testData)) {
+		t.Fatalf("expected written=%d, got %d", len(testData), written)
+	}
+	downloaded, err := os.ReadFile(tempFile)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded file: %v", err)
+	}
+	if !bytes.Equal(downloaded, testData) {
+		t.Fatal("downloaded data mismatch")
+	}
 }

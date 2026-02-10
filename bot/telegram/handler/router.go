@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"regexp"
 	"strings"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -339,27 +338,6 @@ func hasSearchPlatformSuffix(text string, manager platform.Manager) bool {
 		return false
 	}
 	return true
-}
-
-var urlPattern = regexp.MustCompile(`https?://[^\s]+`)
-
-func extractURLs(text string) []string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	matches := urlPattern.FindAllString(text, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	urls := make([]string, 0, len(matches))
-	for _, match := range matches {
-		cleaned := strings.TrimRight(match, ".,!?)]}>")
-		if cleaned != "" {
-			urls = append(urls, cleaned)
-		}
-	}
-	return urls
 }
 
 func isAllowedGroupURLPlatform(platformName string, manager platform.Manager) bool {
