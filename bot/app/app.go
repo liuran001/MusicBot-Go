@@ -275,7 +275,9 @@ func (a *App) Start(ctx context.Context) error {
 
 	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
 	adminCommands = append(adminCommands, handler.BuildCheckCookieCommand(a.PlatformManager))
-	adminCommands = append(adminCommands, BuildWhitelistCommand(whitelist))
+	if whitelist.Enabled() {
+		adminCommands = append(adminCommands, BuildWhitelistCommand(whitelist))
+	}
 	adminCommands = append(adminCommands, a.AdminCommands...)
 	adminCommandNames := make([]string, 0, len(adminCommands))
 	for _, cmd := range adminCommands {
