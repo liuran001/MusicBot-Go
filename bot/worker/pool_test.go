@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,5 +49,23 @@ func TestPoolSubmitAfterShutdown(t *testing.T) {
 	_ = pool.Shutdown(context.Background())
 	if err := pool.Submit(func() {}); err == nil {
 		t.Fatal("expected error after shutdown")
+	}
+}
+
+func TestPoolSubmitWaitContextTimeout(t *testing.T) {
+	pool := New(1)
+	defer func() {
+		_ = pool.Shutdown(context.Background())
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := pool.SubmitWaitContext(ctx, func() error {
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
 	}
 }

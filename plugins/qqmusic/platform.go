@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -659,25 +657,6 @@ func buildTrackCoverURL(albumMid string) string {
 	return buildAlbumCoverURL(albumMid)
 }
 
-var lyricLineRe = regexp.MustCompile(`^\[(\d+):(\d+)[.:](\d+)\](.*)$`)
-
 func parseLyricLines(lrc string) []platform.LyricLine {
-	lines := strings.Split(lrc, "\n")
-	result := make([]platform.LyricLine, 0, len(lines))
-	for _, line := range lines {
-		matches := lyricLineRe.FindStringSubmatch(line)
-		if len(matches) != 5 {
-			continue
-		}
-		minutes, _ := strconv.Atoi(matches[1])
-		seconds, _ := strconv.Atoi(matches[2])
-		centis, _ := strconv.Atoi(matches[3])
-		text := strings.TrimSpace(matches[4])
-		if text == "" {
-			continue
-		}
-		duration := time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second + time.Duration(centis)*10*time.Millisecond
-		result = append(result, platform.LyricLine{Time: duration, Text: text})
-	}
-	return result
+	return platform.ParseLRCTimestampedLines(lrc)
 }

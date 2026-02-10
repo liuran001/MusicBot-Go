@@ -159,7 +159,7 @@ func migrateToQualityBasedCache(db *gorm.DB) error {
 		return nil
 	}
 
-	if err := db.Exec("ALTER TABLE song_infos ADD COLUMN quality TEXT NOT NULL DEFAULT 'high'").Error; err != nil {
+	if err := db.Exec("ALTER TABLE song_infos ADD COLUMN quality TEXT NOT NULL DEFAULT 'hires'").Error; err != nil {
 		return fmt.Errorf("add quality column: %w", err)
 	}
 
@@ -429,47 +429,7 @@ func applySQLitePragmas(db *gorm.DB) error {
 	return nil
 }
 
-// GetUserSettings retrieves settings for a user, creating default if not exists.
-func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.UserSettings, error) {
-	var settings UserSettingsModel
-	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
-	if err == gorm.ErrRecordNotFound {
-		settings = UserSettingsModel{
-			UserID:          userID,
-			DefaultPlatform: r.defaultPlatform,
-			DefaultQuality:  r.defaultQuality,
-			AutoDeleteList:  false,
-			AutoLinkDetect:  true,
-		}
-		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
-			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
-				reloadErr := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
-				if reloadErr != nil {
-					return nil, reloadErr
-				}
-			} else {
-				return nil, createErr
-			}
-		}
-		var deletedAt *time.Time
-		if settings.DeletedAt.Valid {
-			deletedAt = &settings.DeletedAt.Time
-		}
-		return &bot.UserSettings{
-			ID:              settings.ID,
-			CreatedAt:       settings.CreatedAt,
-			UpdatedAt:       settings.UpdatedAt,
-			DeletedAt:       deletedAt,
-			UserID:          settings.UserID,
-			DefaultPlatform: settings.DefaultPlatform,
-			DefaultQuality:  settings.DefaultQuality,
-			AutoDeleteList:  settings.AutoDeleteList,
-			AutoLinkDetect:  settings.AutoLinkDetect,
-		}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
+func userSettingsToInternal(settings UserSettingsModel) *bot.UserSettings {
 	var deletedAt *time.Time
 	if settings.DeletedAt.Valid {
 		deletedAt = &settings.DeletedAt.Time
@@ -484,50 +444,10 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 		DefaultQuality:  settings.DefaultQuality,
 		AutoDeleteList:  settings.AutoDeleteList,
 		AutoLinkDetect:  settings.AutoLinkDetect,
-	}, nil
+	}
 }
 
-// GetGroupSettings retrieves settings for a group, creating default if not exists.
-func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.GroupSettings, error) {
-	var settings GroupSettingsModel
-	err := r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
-	if err == gorm.ErrRecordNotFound {
-		settings = GroupSettingsModel{
-			ChatID:          chatID,
-			DefaultPlatform: r.defaultPlatform,
-			DefaultQuality:  r.defaultQuality,
-			AutoDeleteList:  true,
-			AutoLinkDetect:  true,
-		}
-		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
-			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
-				reloadErr := r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
-				if reloadErr != nil {
-					return nil, reloadErr
-				}
-			} else {
-				return nil, createErr
-			}
-		}
-		var deletedAt *time.Time
-		if settings.DeletedAt.Valid {
-			deletedAt = &settings.DeletedAt.Time
-		}
-		return &bot.GroupSettings{
-			ID:              settings.ID,
-			CreatedAt:       settings.CreatedAt,
-			UpdatedAt:       settings.UpdatedAt,
-			DeletedAt:       deletedAt,
-			ChatID:          settings.ChatID,
-			DefaultPlatform: settings.DefaultPlatform,
-			DefaultQuality:  settings.DefaultQuality,
-			AutoDeleteList:  settings.AutoDeleteList,
-			AutoLinkDetect:  settings.AutoLinkDetect,
-		}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
+func groupSettingsToInternal(settings GroupSettingsModel) *bot.GroupSettings {
 	var deletedAt *time.Time
 	if settings.DeletedAt.Valid {
 		deletedAt = &settings.DeletedAt.Time
@@ -542,7 +462,59 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 		DefaultQuality:  settings.DefaultQuality,
 		AutoDeleteList:  settings.AutoDeleteList,
 		AutoLinkDetect:  settings.AutoLinkDetect,
-	}, nil
+	}
+}
+
+// GetUserSettings retrieves settings for a user, creating default if not exists.
+func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.UserSettings, error) {
+	var settings UserSettingsModel
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		defaults := UserSettingsModel{
+			UserID:          userID,
+			DefaultPlatform: r.defaultPlatform,
+			DefaultQuality:  r.defaultQuality,
+			AutoDeleteList:  false,
+			AutoLinkDetect:  true,
+		}
+		if createErr := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}},
+			DoNothing: true,
+		}).Create(&defaults).Error; createErr != nil {
+			return nil, createErr
+		}
+		err = r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
+	}
+	if err != nil {
+		return nil, err
+	}
+	return userSettingsToInternal(settings), nil
+}
+
+// GetGroupSettings retrieves settings for a group, creating default if not exists.
+func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.GroupSettings, error) {
+	var settings GroupSettingsModel
+	err := r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		defaults := GroupSettingsModel{
+			ChatID:          chatID,
+			DefaultPlatform: r.defaultPlatform,
+			DefaultQuality:  r.defaultQuality,
+			AutoDeleteList:  true,
+			AutoLinkDetect:  true,
+		}
+		if createErr := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "chat_id"}},
+			DoNothing: true,
+		}).Create(&defaults).Error; createErr != nil {
+			return nil, createErr
+		}
+		err = r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
+	}
+	if err != nil {
+		return nil, err
+	}
+	return groupSettingsToInternal(settings), nil
 }
 
 // UpdateUserSettings updates user settings.

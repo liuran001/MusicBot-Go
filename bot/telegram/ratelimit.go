@@ -2,7 +2,9 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -79,6 +81,8 @@ type APIError struct {
 	RetryAfter int
 }
 
+var retryAfterPattern = regexp.MustCompile(`(?i)retry\s+after[:\s]+(\d+)`)
+
 func (e *APIError) Error() string {
 	return e.Message
 }
@@ -88,9 +92,19 @@ func parseRetryAfter(err error) (int, bool) {
 		return 0, false
 	}
 
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.RetryAfter > 0 {
+		return apiErr.RetryAfter, true
+	}
+
 	errMsg := err.Error()
 	if len(errMsg) == 0 {
 		return 0, false
+	}
+	if matches := retryAfterPattern.FindStringSubmatch(errMsg); len(matches) == 2 {
+		if parsed, parseErr := strconv.Atoi(matches[1]); parseErr == nil {
+			return parsed, parsed > 0
+		}
 	}
 
 	var retryAfter int
@@ -111,6 +125,12 @@ func isMessageNotModified(err error) bool {
 }
 
 func WithRetry(ctx context.Context, rl *RateLimiter, chatID int64, fn func() error) error {
+	if fn == nil {
+		return nil
+	}
+	if rl == nil {
+		return fn()
+	}
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if err := rl.Wait(ctx, chatID); err != nil {

@@ -145,6 +145,24 @@ func extractFirstURL(text string) string {
 	return trimURLCandidate(match)
 }
 
+func extractURLs(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	matches := urlMatcher.FindAllString(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	urls := make([]string, 0, len(matches))
+	for _, match := range matches {
+		cleaned := trimURLCandidate(match)
+		if cleaned != "" {
+			urls = append(urls, cleaned)
+		}
+	}
+	return urls
+}
+
 func trimURLCandidate(candidate string) string {
 	candidate = strings.TrimSpace(candidate)
 	for candidate != "" {
@@ -394,7 +412,11 @@ func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
 }
 
 func buildMusicInfoTextf(songName, songAlbum, fileInfo, suffixFmt string, args ...interface{}) string {
-	return fmt.Sprintf(buildMusicInfoText(songName, songAlbum, fileInfo, suffixFmt), args...)
+	suffix := suffixFmt
+	if len(args) > 0 {
+		suffix = fmt.Sprintf(suffixFmt, args...)
+	}
+	return buildMusicInfoText(songName, songAlbum, fileInfo, suffix)
 }
 
 func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -653,32 +652,5 @@ func (n *NeteasePlatform) convertLyrics(lyricData *bot.Lyric) *platform.Lyrics {
 
 // parseLyricLines parses LRC format lyrics into timestamped lines.
 func (n *NeteasePlatform) parseLyricLines(lrc string) []platform.LyricLine {
-	lines := strings.Split(lrc, "\n")
-	result := make([]platform.LyricLine, 0, len(lines))
-
-	// LRC format: [mm:ss.xx]lyric text (some sources may use [mm:ss:xx])
-	re := regexp.MustCompile(`^\[(\d+):(\d+)[.:](\d+)\](.*)$`)
-
-	for _, line := range lines {
-		matches := re.FindStringSubmatch(line)
-		if len(matches) == 5 {
-			minutes, _ := strconv.Atoi(matches[1])
-			seconds, _ := strconv.Atoi(matches[2])
-			centis, _ := strconv.Atoi(matches[3])
-			text := strings.TrimSpace(matches[4])
-
-			if text != "" {
-				duration := time.Duration(minutes)*time.Minute +
-					time.Duration(seconds)*time.Second +
-					time.Duration(centis)*10*time.Millisecond
-
-				result = append(result, platform.LyricLine{
-					Time: duration,
-					Text: text,
-				})
-			}
-		}
-	}
-
-	return result
+	return platform.ParseLRCTimestampedLines(lrc)
 }
