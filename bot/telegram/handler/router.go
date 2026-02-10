@@ -272,16 +272,6 @@ func (r *Router) wrapCallback(handler CallbackHandler) th.Handler {
 		if handler == nil {
 			return nil
 		}
-		if r.Whitelist != nil && update.CallbackQuery != nil {
-			var chatID int64
-			if update.CallbackQuery.Message != nil {
-				chatID = update.CallbackQuery.Message.GetChat().ID
-			}
-			userID := update.CallbackQuery.From.ID
-			if !r.Whitelist.IsAllowed(chatID, userID) {
-				return nil
-			}
-		}
 		handler.Handle(ctx, ctx.Bot(), &update)
 		return nil
 	}
