@@ -81,13 +81,8 @@ func (m *URLMatcher) MatchURL(rawURL string) (trackID string, matched bool) {
 
 	// As a fallback, try to extract ID from the path
 	// Handle URLs like https://music.163.com/song/1234567 (without query parameter)
-	pathSegments := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
-	if len(pathSegments) >= 2 {
-		// Last segment might be the ID
-		lastSegment := pathSegments[len(pathSegments)-1]
-		if lastSegment != "" && allDigits(lastSegment) && len(lastSegment) >= 5 {
-			return lastSegment, true
-		}
+	if pathID := extractPathID(parsed.Path, "song"); pathID != "" {
+		return pathID, true
 	}
 
 	return "", false
@@ -155,18 +150,15 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 		}
 	}
 
-	pathSegments := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
-	if len(pathSegments) >= 2 {
-		lastSegment := pathSegments[len(pathSegments)-1]
-		if lastSegment != "" && allDigits(lastSegment) && len(lastSegment) >= 5 {
-			if kind == "album" {
-				if encoded := encodeAlbumCollectionID(lastSegment); encoded != "" {
-					return encoded, true
-				}
-				return "", false
+	pathID := extractPathID(parsed.Path, kind)
+	if pathID != "" {
+		if kind == "album" {
+			if encoded := encodeAlbumCollectionID(pathID); encoded != "" {
+				return encoded, true
 			}
-			return lastSegment, true
+			return "", false
 		}
+		return pathID, true
 	}
 
 	return "", false
@@ -224,6 +216,32 @@ func hasAlbumMarker(path, fragment string) bool {
 		return true
 	}
 	return false
+}
+
+func extractPathID(path, marker string) string {
+	if marker == "" {
+		return ""
+	}
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	if len(segments) == 0 {
+		return ""
+	}
+	for i := 0; i < len(segments)-1; i++ {
+		if segments[i] != marker {
+			continue
+		}
+		id := strings.TrimSpace(segments[i+1])
+		if allDigits(id) && len(id) >= 5 {
+			return id
+		}
+	}
+	for i := len(segments) - 1; i >= 0; i-- {
+		seg := strings.TrimSpace(segments[i])
+		if allDigits(seg) && len(seg) >= 5 {
+			return seg
+		}
+	}
+	return ""
 }
 
 // allDigits checks if a string contains only digits.
