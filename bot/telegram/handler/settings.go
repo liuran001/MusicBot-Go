@@ -109,7 +109,13 @@ func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.Us
 	if autoDeleteEnabled {
 		autoDeleteText = "开启"
 	}
-	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删除列表消息: %s\n\n", autoDeleteText))
+	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
+	autoLinkDetectText := "关闭"
+	if autoLinkDetectEnabled {
+		autoLinkDetectText = "开启"
+	}
+	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删除列表消息: %s\n", autoDeleteText))
+	sb.WriteString(fmt.Sprintf("🔗 会话内链接自动识别: %s\n\n", autoLinkDetectText))
 
 	if len(platforms) > 1 {
 		sb.WriteString("💡 可用平台: ")
@@ -203,6 +209,13 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 			CallbackData: fmt.Sprintf("settings autodelete %s", h.toggleValue(autoDeleteEnabled)),
 		},
 	})
+	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
+	rows = append(rows, []telego.InlineKeyboardButton{
+		{
+			Text:         h.formatToggleButton("自动识别链接", autoLinkDetectEnabled),
+			CallbackData: fmt.Sprintf("settings autolink %s", h.toggleValue(autoLinkDetectEnabled)),
+		},
+	})
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -219,6 +232,19 @@ func (h *SettingsHandler) resolveAutoDeleteList(chatType string, settings *botpk
 		return settings.AutoDeleteList
 	}
 	return false
+}
+
+func (h *SettingsHandler) resolveAutoLinkDetect(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) bool {
+	if chatType != "private" {
+		if groupSettings != nil {
+			return groupSettings.AutoLinkDetect
+		}
+		return true
+	}
+	if settings != nil {
+		return settings.AutoLinkDetect
+	}
+	return true
 }
 
 func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string {
@@ -420,6 +446,30 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				responseText = "✅ 已开启自动删除列表"
 			} else {
 				responseText = "✅ 已关闭自动删除列表"
+			}
+		}
+	case "autolink":
+		if settingValue != "on" && settingValue != "off" {
+			break
+		}
+		enabled := settingValue == "on"
+		if msg != nil && msg.Chat.Type != "private" {
+			if groupSettings != nil && groupSettings.AutoLinkDetect != enabled {
+				groupSettings.AutoLinkDetect = enabled
+				changed = true
+				if enabled {
+					responseText = "✅ 已开启会话内链接自动识别"
+				} else {
+					responseText = "✅ 已关闭会话内链接自动识别"
+				}
+			}
+		} else if settings != nil && settings.AutoLinkDetect != enabled {
+			settings.AutoLinkDetect = enabled
+			changed = true
+			if enabled {
+				responseText = "✅ 已开启会话内链接自动识别"
+			} else {
+				responseText = "✅ 已关闭会话内链接自动识别"
 			}
 		}
 	}

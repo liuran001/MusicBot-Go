@@ -63,6 +63,9 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	if err := db.AutoMigrate(&GroupSettingsModel{}); err != nil {
 		return nil, err
 	}
+	if err := migrateSettingsAutoLinkDetect(db); err != nil {
+		return nil, err
+	}
 
 	if err := migrateToMultiPlatform(db); err != nil {
 		return nil, err
@@ -166,6 +169,30 @@ func migrateToQualityBasedCache(db *gorm.DB) error {
 
 	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_track_quality ON song_infos(platform, track_id, quality)").Error; err != nil {
 		return fmt.Errorf("create new unique index: %w", err)
+	}
+
+	return nil
+}
+
+func migrateSettingsAutoLinkDetect(db *gorm.DB) error {
+	var userColumnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('user_settings') WHERE name='auto_link_detect'").Scan(&userColumnExists).Error; err != nil {
+		return fmt.Errorf("check user_settings.auto_link_detect column: %w", err)
+	}
+	if !userColumnExists {
+		if err := db.Exec("ALTER TABLE user_settings ADD COLUMN auto_link_detect NUMERIC NOT NULL DEFAULT 1").Error; err != nil {
+			return fmt.Errorf("add user_settings.auto_link_detect column: %w", err)
+		}
+	}
+
+	var groupColumnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('group_settings') WHERE name='auto_link_detect'").Scan(&groupColumnExists).Error; err != nil {
+		return fmt.Errorf("check group_settings.auto_link_detect column: %w", err)
+	}
+	if !groupColumnExists {
+		if err := db.Exec("ALTER TABLE group_settings ADD COLUMN auto_link_detect NUMERIC NOT NULL DEFAULT 1").Error; err != nil {
+			return fmt.Errorf("add group_settings.auto_link_detect column: %w", err)
+		}
 	}
 
 	return nil
@@ -412,6 +439,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 			DefaultPlatform: r.defaultPlatform,
 			DefaultQuality:  r.defaultQuality,
 			AutoDeleteList:  false,
+			AutoLinkDetect:  true,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
 			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
@@ -436,6 +464,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 			DefaultPlatform: settings.DefaultPlatform,
 			DefaultQuality:  settings.DefaultQuality,
 			AutoDeleteList:  settings.AutoDeleteList,
+			AutoLinkDetect:  settings.AutoLinkDetect,
 		}, nil
 	}
 	if err != nil {
@@ -454,6 +483,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
 		AutoDeleteList:  settings.AutoDeleteList,
+		AutoLinkDetect:  settings.AutoLinkDetect,
 	}, nil
 }
 
@@ -467,6 +497,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 			DefaultPlatform: r.defaultPlatform,
 			DefaultQuality:  r.defaultQuality,
 			AutoDeleteList:  true,
+			AutoLinkDetect:  true,
 		}
 		if createErr := r.db.WithContext(ctx).Create(&settings).Error; createErr != nil {
 			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
@@ -491,6 +522,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 			DefaultPlatform: settings.DefaultPlatform,
 			DefaultQuality:  settings.DefaultQuality,
 			AutoDeleteList:  settings.AutoDeleteList,
+			AutoLinkDetect:  settings.AutoLinkDetect,
 		}, nil
 	}
 	if err != nil {
@@ -509,6 +541,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
 		AutoDeleteList:  settings.AutoDeleteList,
+		AutoLinkDetect:  settings.AutoLinkDetect,
 	}, nil
 }
 
@@ -524,6 +557,7 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
 		AutoDeleteList:  settings.AutoDeleteList,
+		AutoLinkDetect:  settings.AutoLinkDetect,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
@@ -543,6 +577,7 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 		DefaultPlatform: settings.DefaultPlatform,
 		DefaultQuality:  settings.DefaultQuality,
 		AutoDeleteList:  settings.AutoDeleteList,
+		AutoLinkDetect:  settings.AutoLinkDetect,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}

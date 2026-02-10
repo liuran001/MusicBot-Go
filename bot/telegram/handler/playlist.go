@@ -64,6 +64,8 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		text = args
 	} else if strings.HasPrefix(strings.TrimSpace(text), "/") {
 		return false
+	} else if !isAutoLinkDetectEnabled(ctx, h.Repo, message) {
+		return false
 	}
 	baseText, _, qualityOverride := parseTrailingOptions(text, h.PlatformManager)
 	baseText = strings.TrimSpace(baseText)

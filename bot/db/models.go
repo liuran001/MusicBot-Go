@@ -146,6 +146,7 @@ type UserSettingsModel struct {
 	DefaultPlatform string `gorm:"not null;default:'netease'"`
 	DefaultQuality  string `gorm:"not null;default:'hires'"`
 	AutoDeleteList  bool   `gorm:"not null;default:false"`
+	AutoLinkDetect  bool   `gorm:"not null;default:true"`
 }
 
 func (UserSettingsModel) TableName() string {
@@ -159,6 +160,7 @@ type GroupSettingsModel struct {
 	DefaultPlatform string `gorm:"not null;default:'netease'"`
 	DefaultQuality  string `gorm:"not null;default:'hires'"`
 	AutoDeleteList  bool   `gorm:"not null;default:true"`
+	AutoLinkDetect  bool   `gorm:"not null;default:true"`
 }
 
 func (GroupSettingsModel) TableName() string {

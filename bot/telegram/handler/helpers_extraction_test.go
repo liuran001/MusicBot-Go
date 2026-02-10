@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/mymmrac/telego"
 )
@@ -372,5 +373,44 @@ func TestParseQuality_Integration(t *testing.T) {
 				t.Errorf("ParseQuality(%q) should return error", q)
 			}
 		})
+	}
+}
+
+func TestIsAutoLinkDetectEnabled(t *testing.T) {
+	repo := newStubRepo()
+
+	privateMsg := &telego.Message{
+		Text:     "/music https://music.163.com/song?id=12345",
+		Chat:     telego.Chat{ID: 1001, Type: "private"},
+		From:     &telego.User{ID: 42},
+		Entities: []telego.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+	}
+	if !isAutoLinkDetectEnabled(context.Background(), repo, privateMsg) {
+		t.Fatalf("command message should always allow recognition")
+	}
+
+	autoMsg := &telego.Message{
+		Text: "https://music.163.com/song?id=12345",
+		Chat: telego.Chat{ID: 1001, Type: "private"},
+		From: &telego.User{ID: 42},
+	}
+	repo.userSettings[42] = &botpkg.UserSettings{UserID: 42, AutoLinkDetect: false}
+	if isAutoLinkDetectEnabled(context.Background(), repo, autoMsg) {
+		t.Fatalf("expected private auto link detect to be disabled")
+	}
+
+	groupMsg := &telego.Message{
+		Text: "https://music.163.com/song?id=12345",
+		Chat: telego.Chat{ID: -2001, Type: "group"},
+		From: &telego.User{ID: 99},
+	}
+	repo.groupSettings[-2001] = &botpkg.GroupSettings{ChatID: -2001, AutoLinkDetect: false}
+	if isAutoLinkDetectEnabled(context.Background(), repo, groupMsg) {
+		t.Fatalf("expected group auto link detect to be disabled")
+	}
+
+	delete(repo.groupSettings, -2001)
+	if !isAutoLinkDetectEnabled(context.Background(), repo, groupMsg) {
+		t.Fatalf("expected missing settings to default enabled")
 	}
 }

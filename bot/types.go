@@ -64,6 +64,7 @@ type UserSettings struct {
 	DefaultPlatform string
 	DefaultQuality  string
 	AutoDeleteList  bool
+	AutoLinkDetect  bool
 }
 
 // GroupSettings represents group-level preferences for the bot.
@@ -76,4 +77,5 @@ type GroupSettings struct {
 	DefaultPlatform string
 	DefaultQuality  string
 	AutoDeleteList  bool
+	AutoLinkDetect  bool
 }

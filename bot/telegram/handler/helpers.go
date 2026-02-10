@@ -496,6 +496,33 @@ func buildInlineMusicCommand(platformName, trackID, qualityValue string) string 
 	return strings.Join(parts, " ")
 }
 
+func isAutoLinkDetectEnabled(ctx context.Context, repo botpkg.SongRepository, message *telego.Message) bool {
+	if message == nil {
+		return true
+	}
+	if isCommandMessage(message) {
+		return true
+	}
+	if repo == nil {
+		return true
+	}
+	if message.Chat.Type != "private" {
+		settings, err := repo.GetGroupSettings(ctx, message.Chat.ID)
+		if err != nil || settings == nil {
+			return true
+		}
+		return settings.AutoLinkDetect
+	}
+	if message.From == nil {
+		return true
+	}
+	settings, err := repo.GetUserSettings(ctx, message.From.ID)
+	if err != nil || settings == nil {
+		return true
+	}
+	return settings.AutoLinkDetect
+}
+
 func buildInlineStartParameter(platformName, trackID, qualityValue string) string {
 	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) {
 		return ""

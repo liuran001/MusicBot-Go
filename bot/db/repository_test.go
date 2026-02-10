@@ -95,6 +95,9 @@ func TestRepositoryCRUD(t *testing.T) {
 	if userSettings.AutoDeleteList {
 		t.Fatalf("unexpected default user auto delete: %v", userSettings.AutoDeleteList)
 	}
+	if !userSettings.AutoLinkDetect {
+		t.Fatalf("unexpected default user auto link detect: %v", userSettings.AutoLinkDetect)
+	}
 
 	groupSettings, err := repo.GetGroupSettings(ctx, -1001)
 	if err != nil {
@@ -105,6 +108,9 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 	if !groupSettings.AutoDeleteList {
 		t.Fatalf("unexpected default group auto delete: %v", groupSettings.AutoDeleteList)
+	}
+	if !groupSettings.AutoLinkDetect {
+		t.Fatalf("unexpected default group auto link detect: %v", groupSettings.AutoLinkDetect)
 	}
 
 	if err := repo.Delete(ctx, 1); err != nil {

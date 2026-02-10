@@ -227,6 +227,9 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	if !found {
 		return
 	}
+	if !isAutoLinkDetectEnabled(ctx, h.Repo, message) {
+		return
+	}
 	qualityOverride := extractQualityOverride(message, h.PlatformManager)
 
 	h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
