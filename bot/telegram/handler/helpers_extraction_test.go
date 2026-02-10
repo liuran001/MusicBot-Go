@@ -203,6 +203,56 @@ func TestExtractPlatformTrack_MatchURL(t *testing.T) {
 	}
 }
 
+func TestExtractPlatformTrack_MatchURLInShareText(t *testing.T) {
+	mgr := newStubManager()
+	mgr.AddURLRule("https://music.163.com/song?id=12345", "netease", "12345")
+
+	msg := &telego.Message{Text: "分享歌曲：https://music.163.com/song?id=12345（来自@网易云音乐）"}
+	gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), msg, mgr)
+	if gotPlatform != "netease" || gotTrackID != "12345" || !gotFound {
+		t.Errorf("extractPlatformTrack(share text) = (%q, %q, %v), want (%q, %q, %v)",
+			gotPlatform, gotTrackID, gotFound, "netease", "12345", true)
+	}
+}
+
+func TestExtractFirstURL(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "plain URL",
+			text: "https://music.163.com/song?id=12345",
+			want: "https://music.163.com/song?id=12345",
+		},
+		{
+			name: "URL with trailing punctuation",
+			text: "看这个 https://music.163.com/song?id=12345).",
+			want: "https://music.163.com/song?id=12345",
+		},
+		{
+			name: "URL with nbsp and suffix",
+			text: "分享三无 Marblue 的单曲《寻味於心》: https://163cn.tv/1fxOH7O\u00A0(来自 @网易云音乐)",
+			want: "https://163cn.tv/1fxOH7O",
+		},
+		{
+			name: "empty text",
+			text: "",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractFirstURL(tt.text)
+			if got != tt.want {
+				t.Errorf("extractFirstURL(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractPlatformTrack_NilMessage(t *testing.T) {
 	mgr := newStubManager()
 	gotPlatform, gotTrackID, gotFound := extractPlatformTrack(context.Background(), nil, mgr)
