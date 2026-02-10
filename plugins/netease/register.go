@@ -25,12 +25,16 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	client := New(musicU, logger)
 	platform := NewPlatform(client)
 	id3Provider := NewID3Provider(client)
-	recognizeService := NewRecognizeService(cfg.GetInt("RecognizePort"))
-	recognizer := NewRecognizer(recognizeService)
 
-	return &platformplugins.Contribution{
-		Platform:   platform,
-		ID3:        id3Provider,
-		Recognizer: recognizer,
-	}, nil
+	contrib := &platformplugins.Contribution{
+		Platform: platform,
+		ID3:      id3Provider,
+	}
+
+	if cfg.GetBool("EnableRecognize") {
+		recognizeService := NewRecognizeService(cfg.GetInt("RecognizePort"))
+		contrib.Recognizer = NewRecognizer(recognizeService)
+	}
+
+	return contrib, nil
 }

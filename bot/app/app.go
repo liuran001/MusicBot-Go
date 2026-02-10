@@ -270,9 +270,12 @@ func (a *App) Start(ctx context.Context) error {
 	if searchFallback == "" {
 		searchFallback = "netease"
 	}
+	whitelistIDs := parseWhitelistIDs(a.Config.GetString("WhitelistChatIDs"))
+	whitelist := handler.NewWhitelist(a.Config.GetBool("EnableWhitelist"), whitelistIDs, a.AdminIDs, a.ConfigPath)
 
-	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+1)
+	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
 	adminCommands = append(adminCommands, handler.BuildCheckCookieCommand(a.PlatformManager))
+	adminCommands = append(adminCommands, BuildWhitelistCommand(whitelist))
 	adminCommands = append(adminCommands, a.AdminCommands...)
 	adminCommandNames := make([]string, 0, len(adminCommands))
 	for _, cmd := range adminCommands {
@@ -313,6 +316,7 @@ func (a *App) Start(ctx context.Context) error {
 		UploadBot:        a.Telegram.UploadClient(),
 		RateLimiter:      rateLimiter,
 		Playlist:         playlistHandler,
+		RecognizeEnabled: a.Config.GetBool("EnableRecognize"),
 	}
 	musicHandler.StartWorker(ctx)
 
@@ -333,12 +337,19 @@ func (a *App) Start(ctx context.Context) error {
 	searchCallback := &handler.SearchCallbackHandler{Search: searchHandler, RateLimiter: rateLimiter}
 	reloadHandler := &handler.ReloadHandler{Reload: a.ReloadDynamicPlugins, RateLimiter: rateLimiter, Logger: a.Logger, AdminIDs: a.AdminIDs}
 
+	enableRecognize := a.Config.GetBool("EnableRecognize")
+
+	var recognizeHandler handler.MessageHandler
+	if enableRecognize {
+		recognizeHandler = &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()}
+	}
+
 	router := &handler.Router{
 		Music:            musicHandler,
 		Playlist:         playlistHandler,
 		Search:           searchHandler,
 		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
-		Recognize:        &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()},
+		Recognize:        recognizeHandler,
 		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:           &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Settings:         settingsHandler,
@@ -352,6 +363,8 @@ func (a *App) Start(ctx context.Context) error {
 		Inline:           &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback},
 		PlatformManager:  a.PlatformManager,
 		AdminCommands:    adminCommandNames,
+		Whitelist:        whitelist,
+		Logger:           a.Logger,
 	}
 
 	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, nil)
@@ -372,10 +385,14 @@ func (a *App) Start(ctx context.Context) error {
 		{Command: "search", Description: "搜索音乐"},
 		{Command: "settings", Description: "设置默认平台和音质"},
 		{Command: "lyric", Description: "获取歌词"},
-		{Command: "recognize", Description: "识别语音中的歌曲"},
-		{Command: "status", Description: "查看统计信息"},
-		{Command: "about", Description: "关于本 Bot"},
 	}
+	if enableRecognize {
+		commands = append(commands, telego.BotCommand{Command: "recognize", Description: "识别语音中的歌曲"})
+	}
+	commands = append(commands,
+		telego.BotCommand{Command: "status", Description: "查看统计信息"},
+		telego.BotCommand{Command: "about", Description: "关于本 Bot"},
+	)
 	_ = a.Telegram.Client().SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: commands,
 	})
@@ -384,6 +401,68 @@ func (a *App) Start(ctx context.Context) error {
 		_ = botHandler.Start()
 	}()
 	return nil
+}
+
+func BuildWhitelistCommand(wl *handler.Whitelist) admincmd.Command {
+	return admincmd.Command{
+		Name:        "wl",
+		Description: "白名单管理 (add/del/list)",
+		Handler: func(ctx context.Context, args string) (string, error) {
+			_ = ctx
+			fields := strings.Fields(strings.TrimSpace(args))
+			if len(fields) == 0 {
+				return "用法:\n/wl add <chatID>\n/wl del <chatID>\n/wl list", nil
+			}
+			sub := strings.ToLower(strings.TrimSpace(fields[0]))
+			switch sub {
+			case "add":
+				if len(fields) < 2 {
+					return "用法: /wl add <chatID>", nil
+				}
+				chatID, err := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
+				if err != nil {
+					return "chatID 格式错误", nil
+				}
+				added := wl.Add(chatID)
+				if err := wl.Persist(); err != nil {
+					return "", err
+				}
+				if added {
+					return fmt.Sprintf("已添加白名单: %d", chatID), nil
+				}
+				return fmt.Sprintf("白名单已存在: %d", chatID), nil
+			case "del":
+				if len(fields) < 2 {
+					return "用法: /wl del <chatID>", nil
+				}
+				chatID, err := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
+				if err != nil {
+					return "chatID 格式错误", nil
+				}
+				removed := wl.Remove(chatID)
+				if err := wl.Persist(); err != nil {
+					return "", err
+				}
+				if removed {
+					return fmt.Sprintf("已移除白名单: %d", chatID), nil
+				}
+				return fmt.Sprintf("白名单不存在: %d", chatID), nil
+			case "list":
+				ids := wl.List()
+				if len(ids) == 0 {
+					return "白名单为空", nil
+				}
+				rows := make([]string, 0, len(ids)+1)
+				rows = append(rows, "白名单列表:")
+				for _, id := range ids {
+					rows = append(rows, strconv.FormatInt(id, 10))
+				}
+				return strings.Join(rows, "\n"), nil
+			default:
+				return "用法:\n/wl add <chatID>\n/wl del <chatID>\n/wl list", nil
+			}
+		},
+	}
 }
 
 // ReloadDynamicPlugins reloads script-based plugins from disk.
@@ -404,6 +483,16 @@ func (a *App) ReloadDynamicPlugins(ctx context.Context) error {
 }
 
 func parseAdminIDs(raw string) map[int64]struct{} {
+	ids := make(map[int64]struct{})
+	for _, value := range splitAdminIDs(raw) {
+		if id, err := strconv.ParseInt(value, 10, 64); err == nil {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
+func parseWhitelistIDs(raw string) map[int64]struct{} {
 	ids := make(map[int64]struct{})
 	for _, value := range splitAdminIDs(raw) {
 		if id, err := strconv.ParseInt(value, 10, 64); err == nil {

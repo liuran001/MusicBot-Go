@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -29,6 +30,8 @@ type Router struct {
 	Inline           InlineHandler
 	PlatformManager  platform.Manager
 	AdminCommands    []string
+	Whitelist        *Whitelist
+	Logger           botpkg.Logger
 }
 
 // Register registers all handlers to the bot handler.
@@ -44,7 +47,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "program"))
 	bh.Handle(r.wrapMessage(r.Search), matchCommandFunc(botName, "search"))
 	bh.Handle(r.wrapMessage(r.Lyric), matchCommandFunc(botName, "lyric"))
-	bh.Handle(r.wrapMessage(r.Recognize), matchCommandFunc(botName, "recognize"))
+	if r.Recognize != nil {
+		bh.Handle(r.wrapMessage(r.Recognize), matchCommandFunc(botName, "recognize"))
+	}
 	bh.Handle(r.wrapMessage(r.About), matchCommandFunc(botName, "about"))
 	bh.Handle(r.wrapMessage(r.Status), matchCommandFunc(botName, "status"))
 	bh.Handle(r.wrapMessage(r.Settings), matchCommandFunc(botName, "settings"))
@@ -93,12 +98,14 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		return false
 	})
 
-	bh.Handle(r.wrapMessage(r.Recognize), func(ctx context.Context, update telego.Update) bool {
-		if update.Message == nil || update.Message.Voice == nil {
-			return false
-		}
-		return update.Message.Chat.Type == "private"
-	})
+	if r.Recognize != nil {
+		bh.Handle(r.wrapMessage(r.Recognize), func(ctx context.Context, update telego.Update) bool {
+			if update.Message == nil || update.Message.Voice == nil {
+				return false
+			}
+			return update.Message.Chat.Type == "private"
+		})
+	}
 
 	bh.Handle(r.wrapMessage(r.Playlist), func(ctx context.Context, update telego.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {
@@ -219,6 +226,26 @@ func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
 		if handler == nil {
 			return nil
 		}
+		if r.Whitelist != nil && update.Message != nil {
+			chatID := update.Message.Chat.ID
+			var userID int64
+			if update.Message.From != nil {
+				userID = update.Message.From.ID
+			}
+			if !r.Whitelist.IsAllowed(chatID, userID) {
+				if update.Message.Chat.Type == "group" || update.Message.Chat.Type == "supergroup" {
+					if r.Logger != nil {
+						r.Logger.Info("leave non-whitelisted chat", "chat_id", chatID, "chat_type", update.Message.Chat.Type)
+					}
+					if err := ctx.Bot().LeaveChat(ctx, &telego.LeaveChatParams{ChatID: telego.ChatID{ID: chatID}}); err != nil {
+						if r.Logger != nil {
+							r.Logger.Warn("leave chat failed", "chat_id", chatID, "error", err)
+						}
+					}
+				}
+				return nil
+			}
+		}
 		handler.Handle(ctx, ctx.Bot(), &update)
 		return nil
 	}
@@ -229,6 +256,12 @@ func (r *Router) wrapInline(handler InlineHandler) th.Handler {
 		if handler == nil {
 			return nil
 		}
+		if r.Whitelist != nil && update.InlineQuery != nil {
+			userID := update.InlineQuery.From.ID
+			if !r.Whitelist.IsAllowed(userID, userID) {
+				return nil
+			}
+		}
 		handler.Handle(ctx, ctx.Bot(), &update)
 		return nil
 	}
@@ -238,6 +271,16 @@ func (r *Router) wrapCallback(handler CallbackHandler) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		if handler == nil {
 			return nil
+		}
+		if r.Whitelist != nil && update.CallbackQuery != nil {
+			var chatID int64
+			if update.CallbackQuery.Message != nil {
+				chatID = update.CallbackQuery.Message.GetChat().ID
+			}
+			userID := update.CallbackQuery.From.ID
+			if !r.Whitelist.IsAllowed(chatID, userID) {
+				return nil
+			}
 		}
 		handler.Handle(ctx, ctx.Bot(), &update)
 		return nil
