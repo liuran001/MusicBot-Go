@@ -21,7 +21,7 @@
 
 ## 依赖
 
-- Go 1.25.6+
+- Go 1.26.0+
 - ffmpeg（/recognize 语音识别需要，可通过 `EnableRecognize = false` 关闭）
 - Node.js + npm（识曲服务需要，可通过 `EnableRecognize = false` 关闭）
 
