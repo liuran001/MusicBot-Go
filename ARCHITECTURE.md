@@ -305,7 +305,7 @@ CREATE TABLE group_settings (
 
 ## 技术栈
 
-- **语言**: Go 1.25.6+
+- **语言**: Go 1.26.0+
 - **Telegram SDK**: github.com/mymmrac/telego
 - **数据库**: SQLite (github.com/glebarez/sqlite + GORM)
 - **配置**: Viper + INI

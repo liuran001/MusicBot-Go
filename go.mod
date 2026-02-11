@@ -1,8 +1,6 @@
 module github.com/liuran001/MusicBot-Go
 
-go 1.25.5
-
-toolchain go1.25.6
+go 1.26.0
 
 require (
 	github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936
