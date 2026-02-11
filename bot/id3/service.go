@@ -96,7 +96,7 @@ func (s *ID3Service) writeMp3Lyrics(meta *id3v2.Tag, tagData *TagData, logMsg st
 			Lyrics:            lyrics,
 		})
 		if s.logger != nil {
-			s.logger.Info(logMsg, "lyrics_length", len(lyrics))
+			s.logger.Debug(logMsg, "lyrics_length", len(lyrics))
 		}
 	} else if s.logger != nil {
 		s.logger.Warn("mp3 lyrics field is empty, skipping lyrics embedding")
@@ -190,7 +190,7 @@ func (s *ID3Service) writeFlacLyrics(vorbis *flacvorbis.MetaDataBlockVorbisComme
 	if lyrics != "" {
 		_ = vorbis.Add("LYRICS", lyrics)
 		if s.logger != nil {
-			s.logger.Info(logMsg, "lyrics_length", len(lyrics))
+			s.logger.Debug(logMsg, "lyrics_length", len(lyrics))
 		}
 	} else if s.logger != nil {
 		s.logger.Warn("flac lyrics field is empty, skipping lyrics embedding")
@@ -256,7 +256,7 @@ func (s *ID3Service) embedFlacTagsWithMarker(audioPath string, tagData *TagData,
 	key163 := marker.Create163KeyStr(markerData)
 	_ = vorbis.Add(flacvorbis.FIELD_DESCRIPTION, key163)
 	if s.logger != nil {
-		s.logger.Info("embedded 163key marker in flac", "key_length", len(key163))
+		s.logger.Debug("embedded 163key marker in flac", "key_length", len(key163))
 	}
 
 	s.setFlacVorbisComment(parsed, vorbis)
@@ -347,7 +347,7 @@ func (s *ID3Service) embedMp3TagsWithMarker(audioPath string, tagData *TagData, 
 	}
 	meta.AddCommentFrame(comment)
 	if s.logger != nil {
-		s.logger.Info("embedded 163key marker in mp3", "key_length", len(key163))
+		s.logger.Debug("embedded 163key marker in mp3", "key_length", len(key163))
 	}
 
 	s.writeMp3Cover(meta, coverPath)
