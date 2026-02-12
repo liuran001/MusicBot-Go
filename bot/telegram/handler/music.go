@@ -76,6 +76,14 @@ type MusicHandler struct {
 	downloadInfoFetch  map[string]*downloadInfoFetchCall
 	inlineMu           sync.Mutex
 	inlineInFlight     map[string]*inlineProcessCall
+	downloadQueueMu    sync.Mutex
+	downloadQueueSeq   int64
+	downloadQueue      []downloadQueueEntry
+}
+
+type downloadQueueEntry struct {
+	id     int64
+	update func(text string)
 }
 
 type uploadTask struct {
@@ -400,8 +408,17 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, waitForDown)
 	}
 
-	h.Limiter <- struct{}{}
-	defer func() { <-h.Limiter }()
+	var queueStatusUpdater func(string)
+	if msgResult != nil {
+		queueStatusUpdater = func(text string) {
+			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
+		}
+	}
+	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, queueStatusUpdater)
+	if err != nil {
+		return err
+	}
+	defer releaseDownloadSlot()
 
 	if h.Repo != nil {
 		cached, err := getCached(platformName, trackID, qualityStr)
@@ -1711,10 +1728,12 @@ func (h *MusicHandler) prepareInlineSong(
 	songInfo.MusicSize = int(info.Size)
 	songInfo.BitRate = info.Bitrate * 1000
 
-	if h.Limiter != nil {
-		h.Limiter <- struct{}{}
-		defer func() { <-h.Limiter }()
+	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, progress)
+	if err != nil {
+		call.err = err
+		return nil, err
 	}
+	defer releaseDownloadSlot()
 
 	if progress != nil {
 		progress(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
@@ -1811,6 +1830,73 @@ func (h *MusicHandler) prepareInlineSong(
 	copy := songInfo
 	call.song = &copy
 	return &copy, nil
+}
+
+func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, update func(text string)) (func(), error) {
+	if h == nil || h.Limiter == nil {
+		return func() {}, nil
+	}
+	select {
+	case h.Limiter <- struct{}{}:
+		return func() { <-h.Limiter }, nil
+	default:
+	}
+
+	entryID := h.enqueueDownloadQueue(update)
+	select {
+	case h.Limiter <- struct{}{}:
+		h.dequeueDownloadQueue(entryID)
+		return func() { <-h.Limiter }, nil
+	case <-ctx.Done():
+		h.dequeueDownloadQueue(entryID)
+		return nil, ctx.Err()
+	}
+}
+
+func (h *MusicHandler) enqueueDownloadQueue(update func(text string)) int64 {
+	if h == nil {
+		return 0
+	}
+	h.downloadQueueMu.Lock()
+	h.downloadQueueSeq++
+	entryID := h.downloadQueueSeq
+	h.downloadQueue = append(h.downloadQueue, downloadQueueEntry{id: entryID, update: update})
+	snapshot := append([]downloadQueueEntry(nil), h.downloadQueue...)
+	h.downloadQueueMu.Unlock()
+	h.refreshDownloadQueue(snapshot)
+	return entryID
+}
+
+func (h *MusicHandler) dequeueDownloadQueue(entryID int64) {
+	if h == nil || entryID == 0 {
+		return
+	}
+	h.downloadQueueMu.Lock()
+	filtered := h.downloadQueue[:0]
+	for _, entry := range h.downloadQueue {
+		if entry.id == entryID {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	h.downloadQueue = filtered
+	snapshot := append([]downloadQueueEntry(nil), h.downloadQueue...)
+	h.downloadQueueMu.Unlock()
+	h.refreshDownloadQueue(snapshot)
+}
+
+func (h *MusicHandler) refreshDownloadQueue(snapshot []downloadQueueEntry) {
+	for idx, entry := range snapshot {
+		if entry.update == nil {
+			continue
+		}
+		ahead := idx
+		text := waitForDown
+		if ahead > 0 {
+			text = fmt.Sprintf("%s\n当前正在下载队列中，前面还有 %d 个任务", waitForDown, ahead)
+		}
+		entry.update(text)
+	}
 }
 
 func isInlineStartToken(value string) bool {

@@ -33,7 +33,6 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 		return
 	}
 	if !isBotAdmin(h.AdminIDs, message.From.ID) {
-		h.sendText(ctx, b, message.Chat.ID, message.MessageID, "仅 BotAdmin 可用")
 		return
 	}
 	if command.Handler == nil {
