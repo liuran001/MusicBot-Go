@@ -65,7 +65,6 @@ func (h *ChosenInlineMusicHandler) Handle(ctx context.Context, b *telego.Bot, up
 		return err
 	}
 
-	setInlineText(waitForDown)
 	progress := func(text string) {
 		setInlineText(text)
 	}
