@@ -519,7 +519,7 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 
 	newAudio := &telego.InlineQueryResultCachedDocument{
 		Type:           telego.ResultTypeDocument,
-		ID:             buildInlinePendingResultID(platformName, trackID, qualityValue),
+		ID:             buildInlineCachedResultID(platformName, trackID, qualityValue),
 		DocumentFileID: info.FileID,
 		Title:          fmt.Sprintf("%s - %s", songInfo.SongArtists, songInfo.SongName),
 		Caption:        buildMusicCaption(h.PlatformManager, &songInfo, h.BotName),
