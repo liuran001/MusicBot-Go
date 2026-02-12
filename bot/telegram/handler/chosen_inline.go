@@ -37,6 +37,9 @@ func (h *ChosenInlineMusicHandler) Handle(ctx context.Context, b *telego.Bot, up
 			_, _ = b.EditMessageText(ctx, params)
 		}
 	}
+	clearInlineReplyMarkup := func() {
+		_, _ = b.EditMessageReplyMarkup(ctx, &telego.EditMessageReplyMarkupParams{InlineMessageID: chosen.InlineMessageID})
+	}
 	editInlineMedia := func(songInfo *botpkg.SongInfo) error {
 		if songInfo == nil || strings.TrimSpace(songInfo.FileID) == "" {
 			return fmt.Errorf("inline media requires file_id")
@@ -68,6 +71,8 @@ func (h *ChosenInlineMusicHandler) Handle(ctx context.Context, b *telego.Bot, up
 	progress := func(text string) {
 		setInlineText(text)
 	}
+	clearInlineReplyMarkup()
+	setInlineText(waitForDown)
 	songInfo, err := h.Music.prepareInlineSong(ctx, b, chosen.From.ID, platformName, trackID, qualityValue, progress)
 	if err != nil {
 		if h.Music.Logger != nil {
