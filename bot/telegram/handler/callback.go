@@ -201,7 +201,6 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 		return err
 	}
 
-	setInlineText(waitForDown)
 	progress := func(text string) {
 		setInlineText(text)
 	}
