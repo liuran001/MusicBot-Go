@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,10 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	query := update.CallbackQuery
 	args := strings.Split(query.Data, " ")
 	if len(args) < 2 {
+		return
+	}
+	if len(args) >= 3 && args[1] == "i" {
+		h.handleInlineCallback(ctx, b, query, args)
 		return
 	}
 
@@ -122,6 +127,91 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		} else {
 			_ = b.DeleteMessage(ctx, deleteParams)
 		}
+	}
+}
+
+func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {
+	if query == nil || h == nil || h.Music == nil || b == nil {
+		return
+	}
+	if query.InlineMessageID == "" {
+		return
+	}
+	if len(args) < 5 {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+		return
+	}
+	platformName := strings.TrimSpace(args[2])
+	trackID := strings.TrimSpace(args[3])
+	requesterID, _ := strconv.ParseInt(args[len(args)-1], 10, 64)
+	qualityOverride := ""
+	if len(args) >= 6 {
+		qualityOverride = strings.TrimSpace(args[4])
+	}
+	if platformName == "" || trackID == "" {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+		return
+	}
+	if requesterID != 0 && requesterID != query.From.ID {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		return
+	}
+	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+
+	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, platformName, trackID, qualityOverride)
+}
+
+func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *telego.Bot, inlineMessageID string, userID int64, platformName, trackID, qualityOverride string) {
+	if h == nil || h.Music == nil || b == nil || inlineMessageID == "" {
+		return
+	}
+	setInlineText := func(text string) {
+		params := &telego.EditMessageTextParams{InlineMessageID: inlineMessageID, Text: text}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
+	}
+	editInlineMedia := func(songInfo *botpkg.SongInfo) error {
+		if songInfo == nil || strings.TrimSpace(songInfo.FileID) == "" {
+			return fmt.Errorf("inline media requires file_id")
+		}
+		media := &telego.InputMediaAudio{
+			Type:      telego.MediaTypeAudio,
+			Media:     telego.InputFile{FileID: songInfo.FileID},
+			Caption:   buildMusicCaption(h.Music.PlatformManager, songInfo, h.Music.BotName),
+			ParseMode: telego.ModeHTML,
+			Title:     songInfo.SongName,
+			Performer: songInfo.SongArtists,
+			Duration:  songInfo.Duration,
+		}
+		if strings.TrimSpace(songInfo.ThumbFileID) != "" {
+			media.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
+		}
+		replyMarkup := buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+		_, err := b.EditMessageMedia(ctx, &telego.EditMessageMediaParams{
+			InlineMessageID: inlineMessageID,
+			Media:           media,
+			ReplyMarkup:     replyMarkup,
+		})
+		return err
+	}
+
+	setInlineText(waitForDown)
+	progress := func(text string) {
+		setInlineText(text)
+	}
+	songInfo, err := h.Music.prepareInlineSong(ctx, b, userID, platformName, trackID, qualityOverride, progress)
+	if err != nil {
+		errText := strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN")
+		setInlineText(buildMusicInfoTextf("", "", "", uploadFailed, errText))
+		return
+	}
+	if err := editInlineMedia(songInfo); err != nil {
+		errText := strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN")
+		setInlineText(buildMusicInfoTextf(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploadFailed, errText))
+		return
 	}
 }
 

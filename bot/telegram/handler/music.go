@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -44,33 +45,37 @@ func isForceNonSilent(ctx context.Context) bool {
 
 // MusicHandler handles /music and related commands.
 type MusicHandler struct {
-	Repo              botpkg.SongRepository
-	PlatformManager   platform.Manager // NEW: Platform-agnostic music platform manager
-	DownloadService   *download.DownloadService
-	ID3Service        *id3.ID3Service
-	TagProviders      map[string]id3.ID3TagProvider
-	Pool              botpkg.WorkerPool
-	Logger            botpkg.Logger
-	CacheDir          string
-	BotName           string
-	DefaultPlatform   string
-	FallbackPlatform  string
-	AdminIDs          map[int64]struct{}
-	AdminCommands     []admincmd.Command
-	Playlist          *PlaylistHandler
-	RecognizeEnabled  bool
-	Limiter           chan struct{}
-	UploadLimiter     chan struct{}
-	UploadQueue       chan uploadTask
-	UploadQueueSize   int
-	UploadBot         *telego.Bot
-	RateLimiter       *telegram.RateLimiter
-	queueMu           sync.Mutex
-	queuedStatus      []queuedStatus
-	statusDirty       bool
-	fetchMu           sync.Mutex
-	trackFetch        map[string]*trackFetchCall
-	downloadInfoFetch map[string]*downloadInfoFetchCall
+	Repo               botpkg.SongRepository
+	PlatformManager    platform.Manager // NEW: Platform-agnostic music platform manager
+	DownloadService    *download.DownloadService
+	ID3Service         *id3.ID3Service
+	TagProviders       map[string]id3.ID3TagProvider
+	Pool               botpkg.WorkerPool
+	Logger             botpkg.Logger
+	CacheDir           string
+	BotName            string
+	DefaultQuality     string
+	InlineUploadChatID int64
+	DefaultPlatform    string
+	FallbackPlatform   string
+	AdminIDs           map[int64]struct{}
+	AdminCommands      []admincmd.Command
+	Playlist           *PlaylistHandler
+	RecognizeEnabled   bool
+	Limiter            chan struct{}
+	UploadLimiter      chan struct{}
+	UploadQueue        chan uploadTask
+	UploadQueueSize    int
+	UploadBot          *telego.Bot
+	RateLimiter        *telegram.RateLimiter
+	queueMu            sync.Mutex
+	queuedStatus       []queuedStatus
+	statusDirty        bool
+	fetchMu            sync.Mutex
+	trackFetch         map[string]*trackFetchCall
+	downloadInfoFetch  map[string]*downloadInfoFetchCall
+	inlineMu           sync.Mutex
+	inlineInFlight     map[string]*inlineProcessCall
 }
 
 type uploadTask struct {
@@ -111,6 +116,12 @@ type downloadInfoFetchCall struct {
 	err  error
 }
 
+type inlineProcessCall struct {
+	done chan struct{}
+	song *botpkg.SongInfo
+	err  error
+}
+
 // StartWorker initializes and starts the upload worker.
 // Must be called once during app startup with a long-lived context.
 func (h *MusicHandler) StartWorker(ctx context.Context) {
@@ -143,9 +154,27 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	cmd := commandName(message.Text, h.BotName)
 	if cmd == "start" {
 		args := commandArguments(message.Text)
+		if strings.TrimSpace(args) == "settings" {
+			settingsHandler := &SettingsHandler{
+				Repo:            h.Repo,
+				PlatformManager: h.PlatformManager,
+				RateLimiter:     h.RateLimiter,
+				DefaultPlatform: h.DefaultPlatform,
+				DefaultQuality:  h.DefaultQuality,
+			}
+			settingsHandler.Handle(ctx, b, update)
+			return
+		}
 		if platformName, trackID, qualityOverride, ok := parseInlineStartParameter(args); ok {
 			h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
 			return
+		}
+		if inlineQuery, ok := parseInlineSearchStartParameter(args); ok {
+			if platformName, trackID, found := h.resolveTrackFromQuery(ctx, message, inlineQuery); found {
+				_, _, qualityOverride := parseTrailingOptions(inlineQuery, h.PlatformManager)
+				h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
+				return
+			}
 		}
 	}
 	if cmd == "start" || cmd == "help" {
@@ -502,7 +531,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
 	}
 
-	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo)
+	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, msgResult, b, message, &songInfo, nil)
 	if err != nil {
 		if h.Logger != nil {
 			h.Logger.Error("failed to download and prepare", "platform", platformName, "trackID", trackID, "error", err)
@@ -827,7 +856,7 @@ func (h *MusicHandler) shouldSilentAutoFetch(message *telego.Message) bool {
 	return !strings.HasPrefix(strings.TrimSpace(message.Text), "/")
 }
 
-func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, info *platform.DownloadInfo, msg *telego.Message, b *telego.Bot, message *telego.Message, songInfo *botpkg.SongInfo) (string, string, []string, error) {
+func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, info *platform.DownloadInfo, msg *telego.Message, b *telego.Bot, message *telego.Message, songInfo *botpkg.SongInfo, externalProgress func(written, total int64)) (string, string, []string, error) {
 	cleanupList := make([]string, 0, 4)
 	if h.DownloadService == nil {
 		return "", "", cleanupList, errors.New("download service not configured")
@@ -855,6 +884,9 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	lastProgressAt := time.Time{}
 	minInterval := 1 * time.Second
 	progress := func(written, total int64) {
+		if externalProgress != nil {
+			externalProgress(written, total)
+		}
 		if msg == nil {
 			return
 		}
@@ -1535,6 +1567,254 @@ func parseInlineStartParameter(value string) (platformName, trackID, qualityOver
 		}
 	}
 	return platformName, trackID, qualityOverride, true
+}
+
+func parseInlineSearchStartParameter(value string) (query string, ok bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || !strings.HasPrefix(value, "search_") {
+		return "", false
+	}
+	encoded := strings.TrimPrefix(value, "search_")
+	if encoded == "" {
+		return "", false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", false
+	}
+	query = strings.TrimSpace(string(decoded))
+	if query == "" {
+		return "", false
+	}
+	return query, true
+}
+
+func (h *MusicHandler) prepareInlineSong(
+	ctx context.Context,
+	b *telego.Bot,
+	userID int64,
+	platformName, trackID, qualityOverride string,
+	progress func(text string),
+) (*botpkg.SongInfo, error) {
+	if h == nil {
+		return nil, errors.New("music handler not configured")
+	}
+	qualityValue := strings.TrimSpace(qualityOverride)
+	if qualityValue == "" {
+		qualityValue = strings.TrimSpace(h.DefaultQuality)
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if h.Repo != nil && userID != 0 && strings.TrimSpace(qualityOverride) == "" {
+		if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil && strings.TrimSpace(settings.DefaultQuality) != "" {
+			qualityValue = strings.TrimSpace(settings.DefaultQuality)
+		}
+	}
+
+	findCached := func() (*botpkg.SongInfo, error) {
+		if h.Repo == nil {
+			return nil, nil
+		}
+		cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityValue)
+		if err != nil || cached == nil || strings.TrimSpace(cached.FileID) == "" {
+			return nil, err
+		}
+		return cached, nil
+	}
+
+	if cached, _ := findCached(); cached != nil {
+		copy := *cached
+		return &copy, nil
+	}
+
+	key := fmt.Sprintf("inline:%s:%s:%s", strings.TrimSpace(platformName), strings.TrimSpace(trackID), strings.TrimSpace(qualityValue))
+	h.inlineMu.Lock()
+	if h.inlineInFlight == nil {
+		h.inlineInFlight = make(map[string]*inlineProcessCall)
+	}
+	if call, ok := h.inlineInFlight[key]; ok {
+		h.inlineMu.Unlock()
+		<-call.done
+		if call.song == nil {
+			return nil, call.err
+		}
+		copy := *call.song
+		return &copy, call.err
+	}
+	call := &inlineProcessCall{done: make(chan struct{})}
+	h.inlineInFlight[key] = call
+	h.inlineMu.Unlock()
+
+	defer func() {
+		h.inlineMu.Lock()
+		delete(h.inlineInFlight, key)
+		h.inlineMu.Unlock()
+		close(call.done)
+	}()
+
+	if cached, _ := findCached(); cached != nil {
+		copy := *cached
+		call.song = &copy
+		return &copy, nil
+	}
+
+	if h.PlatformManager == nil {
+		call.err = errors.New("platform manager not configured")
+		return nil, call.err
+	}
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil {
+		call.err = fmt.Errorf("platform not found: %s", platformName)
+		return nil, call.err
+	}
+
+	quality := platform.QualityHigh
+	if parsed, err := platform.ParseQuality(qualityValue); err == nil {
+		quality = parsed
+	}
+	track, err := h.getTrackSingleflight(ctx, platformName, trackID)
+	if err != nil {
+		call.err = err
+		return nil, err
+	}
+	info, err := h.getDownloadInfoSingleflight(ctx, platformName, trackID, quality)
+	if err != nil {
+		call.err = err
+		return nil, err
+	}
+	if info == nil || strings.TrimSpace(info.URL) == "" {
+		call.err = errors.New("download info unavailable")
+		return nil, call.err
+	}
+	if info.Format == "" {
+		info.Format = "mp3"
+	}
+	actualQuality := info.Quality.String()
+	if actualQuality == "" || actualQuality == "unknown" {
+		actualQuality = quality.String()
+	}
+	if strings.TrimSpace(actualQuality) == "" {
+		actualQuality = qualityValue
+	}
+	if strings.TrimSpace(actualQuality) == "" {
+		actualQuality = "hires"
+	}
+	qualityValue = actualQuality
+
+	if cached, _ := findCached(); cached != nil {
+		copy := *cached
+		call.song = &copy
+		return &copy, nil
+	}
+
+	var songInfo botpkg.SongInfo
+	fillSongInfoFromTrack(&songInfo, track, platformName, trackID, &telego.Message{})
+	songInfo.Quality = actualQuality
+	songInfo.FileExt = info.Format
+	songInfo.MusicSize = int(info.Size)
+	songInfo.BitRate = info.Bitrate * 1000
+
+	if h.Limiter != nil {
+		h.Limiter <- struct{}{}
+		defer func() { <-h.Limiter }()
+	}
+
+	if progress != nil {
+		progress(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
+	}
+
+	lastProgressAt := time.Time{}
+	lastProgressText := ""
+	dlProgress := func(written, total int64) {
+		if progress == nil {
+			return
+		}
+		now := time.Now()
+		if !lastProgressAt.IsZero() && now.Sub(lastProgressAt) < time.Second {
+			return
+		}
+		writtenMB := float64(written) / 1024 / 1024
+		suffix := ""
+		if total <= 0 {
+			suffix = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB", track.Title, writtenMB)
+		} else {
+			totalMB := float64(total) / 1024 / 1024
+			progressPct := float64(written) * 100 / float64(total)
+			suffix = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
+		}
+		text := buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), suffix)
+		if text == lastProgressText {
+			return
+		}
+		lastProgressAt = now
+		lastProgressText = text
+		progress(text)
+	}
+	musicPath, picPath, cleanupList, err := h.downloadAndPrepareFromPlatform(ctx, plat, track, trackID, info, nil, b, &telego.Message{}, &songInfo, dlProgress)
+	if err != nil {
+		call.err = err
+		return nil, err
+	}
+	defer cleanupFiles(cleanupList...)
+
+	uploadChatID := h.InlineUploadChatID
+	if uploadChatID == 0 {
+		call.err = errors.New("InlineUploadChatID not configured")
+		return nil, call.err
+	}
+
+	if progress != nil {
+		progress(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploading))
+	}
+
+	uploadBot := b
+	if h.UploadBot != nil {
+		uploadBot = h.UploadBot
+	}
+	file, err := os.Open(musicPath)
+	if err != nil {
+		call.err = err
+		return nil, err
+	}
+	defer file.Close()
+	caption := buildMusicCaption(h.PlatformManager, &songInfo, h.BotName)
+	params := &telego.SendAudioParams{
+		ChatID:    telego.ChatID{ID: uploadChatID},
+		Audio:     telego.InputFile{File: file},
+		Caption:   caption,
+		ParseMode: telego.ModeHTML,
+		Title:     songInfo.SongName,
+		Performer: songInfo.SongArtists,
+		Duration:  songInfo.Duration,
+	}
+	if strings.TrimSpace(picPath) != "" {
+		if thumbStat, thumbErr := os.Stat(picPath); thumbErr == nil && thumbStat.Size() > 0 {
+			if thumbFile, thumbOpenErr := os.Open(picPath); thumbOpenErr == nil {
+				defer thumbFile.Close()
+				params.Thumbnail = &telego.InputFile{File: thumbFile}
+			}
+		}
+	}
+	uploaded, err := uploadBot.SendAudio(ctx, params)
+	if err != nil || uploaded == nil || uploaded.Audio == nil || strings.TrimSpace(uploaded.Audio.FileID) == "" {
+		if err == nil {
+			err = errors.New("upload failed")
+		}
+		call.err = err
+		return nil, err
+	}
+	songInfo.FileID = uploaded.Audio.FileID
+	if uploaded.Audio.Thumbnail != nil {
+		songInfo.ThumbFileID = uploaded.Audio.Thumbnail.FileID
+	}
+
+	if h.Repo != nil {
+		_ = h.Repo.Create(ctx, &songInfo)
+	}
+	copy := songInfo
+	call.song = &copy
+	return &copy, nil
 }
 
 func isInlineStartToken(value string) bool {

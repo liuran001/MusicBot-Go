@@ -218,6 +218,62 @@ func (r *Repository) FindByPlatformTrackID(ctx context.Context, platform, trackI
 	return toInternal(model), nil
 }
 
+// SearchCachedSongs searches cached songs by keyword with optional platform/quality filters.
+func (r *Repository) SearchCachedSongs(ctx context.Context, keyword, platformName, quality string, limit int) ([]*bot.SongInfo, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("repository not configured")
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 3
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	lowerKeyword := strings.ToLower(keyword)
+	likeValue := "%" + lowerKeyword + "%"
+
+	query := r.db.WithContext(ctx).Model(&SongInfoModel{}).
+		Where("file_id <> ''").
+		Where("song_name <> ''").
+		Where("(LOWER(song_name) LIKE ? OR LOWER(song_artists) LIKE ? OR LOWER(song_album) LIKE ?)", likeValue, likeValue, likeValue)
+
+	if strings.TrimSpace(platformName) != "" {
+		query = query.Where("platform = ?", strings.TrimSpace(platformName))
+	}
+	if strings.TrimSpace(quality) != "" {
+		query = query.Where("quality = ?", strings.TrimSpace(quality))
+	}
+
+	// Basic relevance: song_name exact > song_name contains > artists contains > album contains.
+	query = query.Order(clause.Expr{
+		SQL: "CASE " +
+			"WHEN LOWER(song_name) = ? THEN 0 " +
+			"WHEN LOWER(song_name) LIKE ? THEN 1 " +
+			"WHEN LOWER(song_artists) LIKE ? THEN 2 " +
+			"WHEN LOWER(song_album) LIKE ? THEN 3 " +
+			"ELSE 4 END",
+		Vars: []any{lowerKeyword, likeValue, likeValue, likeValue},
+	}).Order("updated_at DESC").Limit(limit)
+
+	var models []SongInfoModel
+	if err := query.Find(&models).Error; err != nil {
+		return nil, err
+	}
+	if len(models) == 0 {
+		return nil, nil
+	}
+	results := make([]*bot.SongInfo, 0, len(models))
+	for _, model := range models {
+		results = append(results, toInternal(model))
+	}
+	return results, nil
+}
+
 // FindByFileID returns a cached song by FileID.
 func (r *Repository) FindByFileID(ctx context.Context, fileID string) (*bot.SongInfo, error) {
 	var model SongInfoModel

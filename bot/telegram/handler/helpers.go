@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -501,6 +502,37 @@ func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.Inline
 	}}
 }
 
+func buildInlineSendKeyboard(platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
+	callbackData := buildInlineSendCallbackData(platformName, trackID, qualityValue, requesterID)
+	if callbackData == "" {
+		return nil
+	}
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
+		{Text: inlineTapToSend, CallbackData: callbackData},
+	}}}
+}
+
+func buildInlineSendCallbackData(platformName, trackID, qualityValue string, requesterID int64) string {
+	platformName = strings.TrimSpace(platformName)
+	trackID = strings.TrimSpace(trackID)
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if requesterID == 0 || !isInlineStartToken(platformName) || !isInlineStartToken(trackID) || !isInlineStartToken(qualityValue) {
+		return ""
+	}
+	data := fmt.Sprintf("music i %s %s %s %d", platformName, trackID, qualityValue, requesterID)
+	if len(data) <= 64 {
+		return data
+	}
+	data = fmt.Sprintf("music i %s %s %d", platformName, trackID, requesterID)
+	if len(data) <= 64 {
+		return data
+	}
+	return ""
+}
+
 func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {
 	trackID = strings.TrimSpace(trackID)
 	platformName = strings.TrimSpace(platformName)
@@ -561,6 +593,75 @@ func buildInlineStartParameter(platformName, trackID, qualityValue string) strin
 		return ""
 	}
 	return param
+}
+
+func buildInlineKeywordStartParameter(keyword string) string {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return ""
+	}
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(keyword))
+	if encoded == "" {
+		return ""
+	}
+	param := "search_" + encoded
+	if len(param) > 64 {
+		return ""
+	}
+	return param
+}
+
+func buildInlinePendingResultID(platformName, trackID, qualityValue string) string {
+	platformName = strings.TrimSpace(platformName)
+	trackID = strings.TrimSpace(trackID)
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) || !isInlineStartToken(qualityValue) {
+		return fmt.Sprintf("r_%d", time.Now().UnixMicro())
+	}
+	payload := platformName + "|" + trackID + "|" + qualityValue
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
+	if encoded == "" {
+		return fmt.Sprintf("r_%d", time.Now().UnixMicro())
+	}
+	id := "p_" + encoded
+	if len(id) > 64 {
+		return fmt.Sprintf("r_%d", time.Now().UnixMicro())
+	}
+	return id
+}
+
+func parseInlinePendingResultID(resultID string) (platformName, trackID, qualityValue string, ok bool) {
+	resultID = strings.TrimSpace(resultID)
+	if !strings.HasPrefix(resultID, "p_") {
+		return "", "", "", false
+	}
+	encoded := strings.TrimPrefix(resultID, "p_")
+	if encoded == "" {
+		return "", "", "", false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", "", "", false
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) < 2 {
+		return "", "", "", false
+	}
+	platformName = strings.TrimSpace(parts[0])
+	trackID = strings.TrimSpace(parts[1])
+	if len(parts) >= 3 {
+		qualityValue = strings.TrimSpace(parts[2])
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) || !isInlineStartToken(qualityValue) {
+		return "", "", "", false
+	}
+	return platformName, trackID, qualityValue, true
 }
 
 func formatInfoTags(manager platform.Manager, platformName, fileExt string) []string {

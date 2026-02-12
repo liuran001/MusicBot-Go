@@ -28,6 +28,7 @@ type Router struct {
 	SearchCallback   CallbackHandler
 	PlaylistCallback CallbackHandler
 	Inline           InlineHandler
+	ChosenInline     ChosenInlineHandler
 	PlatformManager  platform.Manager
 	AdminCommands    []string
 	Whitelist        *Whitelist
@@ -217,6 +218,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapInline(r.Inline), func(ctx context.Context, update telego.Update) bool {
 		return update.InlineQuery != nil
 	})
+	bh.Handle(r.wrapChosenInline(r.ChosenInline), func(ctx context.Context, update telego.Update) bool {
+		return update.ChosenInlineResult != nil
+	})
 
 	_ = botName
 }
@@ -271,6 +275,22 @@ func (r *Router) wrapCallback(handler CallbackHandler) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		if handler == nil {
 			return nil
+		}
+		handler.Handle(ctx, ctx.Bot(), &update)
+		return nil
+	}
+}
+
+func (r *Router) wrapChosenInline(handler ChosenInlineHandler) th.Handler {
+	return func(ctx *th.Context, update telego.Update) error {
+		if handler == nil {
+			return nil
+		}
+		if r.Whitelist != nil && update.ChosenInlineResult != nil {
+			userID := update.ChosenInlineResult.From.ID
+			if !r.Whitelist.IsAllowed(userID, userID) {
+				return nil
+			}
 		}
 		handler.Handle(ctx, ctx.Bot(), &update)
 		return nil
