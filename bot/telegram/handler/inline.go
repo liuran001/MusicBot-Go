@@ -2,7 +2,11 @@ package handler
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -199,7 +203,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(h, platformName, qualityValue))
 	for i := 0; i < len(tracks) && i < limit; i++ {
 		track := tracks[i]
-		inlineMsg := buildInlineTrackArticle(h, platformName, track, qualityValue, query.From.ID)
+		inlineMsg := buildInlineTrackArticle(ctx, h, platformName, track, qualityValue, query.From.ID)
 		inlineMsgs = append(inlineMsgs, inlineMsg)
 	}
 	params.Results = inlineMsgs
@@ -221,17 +225,23 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 	title := trackID
 	artists := ""
 	album := ""
+	thumbnailSource := ""
 	if h.PlatformManager != nil {
 		if plat := h.PlatformManager.Get(platformName); plat != nil {
 			if track, err := plat.GetTrack(ctx, trackID); err == nil && track != nil {
 				title = strings.TrimSpace(track.Title)
 				artists = inlineArtistsLabel(track.Artists)
+				thumbnailSource = strings.TrimSpace(track.CoverURL)
 				if track.Album != nil {
 					album = strings.TrimSpace(track.Album.Title)
+					if thumbnailSource == "" {
+						thumbnailSource = strings.TrimSpace(track.Album.CoverURL)
+					}
 				}
 			}
 		}
 	}
+	thumbnailURL := buildInlineThumbnailURL(platformName, thumbnailSource, 150)
 	inlineMsg := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  buildInlinePendingResultID(platformName, trackID, qualityValue),
@@ -239,6 +249,9 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 		Description:         inlineSubtitle(album, artists),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
 		ReplyMarkup:         buildInlineSendKeyboard(platformName, trackID, qualityValue, query.From.ID),
+		ThumbnailURL:        thumbnailURL,
+		ThumbnailWidth:      150,
+		ThumbnailHeight:     150,
 	}
 	inlineMsgs = append(inlineMsgs, inlineMsg)
 	params := &telego.AnswerInlineQueryParams{
@@ -276,7 +289,26 @@ func buildInlineSearchHeader(h *InlineSearchHandler, platformName, qualityValue 
 	}
 }
 
-func buildInlineTrackArticle(h *InlineSearchHandler, platformName string, track platform.Track, qualityValue string, requesterID int64) telego.InlineQueryResult {
+func buildInlineTrackArticle(ctx context.Context, h *InlineSearchHandler, platformName string, track platform.Track, qualityValue string, requesterID int64) telego.InlineQueryResult {
+	thumbnailSource := strings.TrimSpace(track.CoverURL)
+	if thumbnailSource == "" && track.Album != nil {
+		thumbnailSource = strings.TrimSpace(track.Album.CoverURL)
+	}
+	if thumbnailSource == "" && h != nil && h.PlatformManager != nil {
+		plat := strings.ToLower(strings.TrimSpace(platformName))
+		if strings.Contains(plat, "qq") || strings.Contains(plat, "tencent") {
+			if p := h.PlatformManager.Get(platformName); p != nil && strings.TrimSpace(track.ID) != "" {
+				if detail, err := p.GetTrack(ctx, track.ID); err == nil && detail != nil {
+					if strings.TrimSpace(detail.CoverURL) != "" {
+						thumbnailSource = strings.TrimSpace(detail.CoverURL)
+					} else if detail.Album != nil {
+						thumbnailSource = strings.TrimSpace(detail.Album.CoverURL)
+					}
+				}
+			}
+		}
+	}
+	thumbnailURL := buildInlineThumbnailURL(platformName, thumbnailSource, 150)
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  buildInlinePendingResultID(platformName, track.ID, qualityValue),
@@ -284,15 +316,113 @@ func buildInlineTrackArticle(h *InlineSearchHandler, platformName string, track 
 		Description:         inlineSubtitle(trackAlbumLabel(track.Album), inlineArtistsLabel(track.Artists)),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
 		ReplyMarkup:         buildInlineSendKeyboard(platformName, track.ID, qualityValue, requesterID),
+		ThumbnailURL:        thumbnailURL,
+		ThumbnailWidth:      150,
+		ThumbnailHeight:     150,
 	}
 }
 
-func inlineSubtitle(album, artists string) string {
-	if strings.TrimSpace(album) == "" {
-		album = "未知专辑"
+func buildInlineThumbnailURL(platformName, rawURL string, size int) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
 	}
-	if strings.TrimSpace(artists) == "" {
+	if size <= 0 {
+		size = 150
+	}
+	plat := strings.ToLower(strings.TrimSpace(platformName))
+
+	// 网易云: 增加/覆盖 ?param=150y150
+	if plat == "netease" {
+		if coverID := extractNeteaseCoverID(rawURL); coverID != "" {
+			encrypted := neteaseEncryptID(coverID)
+			if encrypted != "" {
+				return fmt.Sprintf("https://p3.music.126.net/%s/%s.jpg?param=%dy%d", encrypted, coverID, size, size)
+			}
+		}
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			return rawURL
+		}
+		query := parsed.Query()
+		query.Set("param", fmt.Sprintf("%dy%d", size, size))
+		parsed.RawQuery = query.Encode()
+		return parsed.String()
+	}
+
+	// QQ音乐: T002R{size}x{size}M000
+	if strings.Contains(plat, "qq") || strings.Contains(plat, "tencent") {
+		re := regexp.MustCompile(`T002R\d+x\d+M000`)
+		if re.MatchString(rawURL) {
+			return re.ReplaceAllString(rawURL, fmt.Sprintf("T002R%dx%dM000", size, size))
+		}
+		// QQ 搜索结果常见格式: T002M000{mid}.jpg
+		reMid := regexp.MustCompile(`T002M000([A-Za-z0-9]+)\.jpg`)
+		if matches := reMid.FindStringSubmatch(rawURL); len(matches) == 2 {
+			return strings.Replace(rawURL, matches[0], fmt.Sprintf("T002R%dx%dM000%s.jpg", size, size, matches[1]), 1)
+		}
+		// QQ 单曲封面格式: T062M000{mid}.jpg -> T062R{size}x{size}M000{mid}.jpg
+		reSong := regexp.MustCompile(`T062M000([A-Za-z0-9]+)\.jpg`)
+		if matches := reSong.FindStringSubmatch(rawURL); len(matches) == 2 {
+			return strings.Replace(rawURL, matches[0], fmt.Sprintf("T062R%dx%dM000%s.jpg", size, size, matches[1]), 1)
+		}
+	}
+
+	return rawURL
+}
+
+func extractNeteaseCoverID(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	if !strings.Contains(strings.ToLower(parsed.Host), "music.126.net") {
+		return ""
+	}
+	path := strings.Trim(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	filename := parts[len(parts)-1]
+	if dot := strings.Index(filename, "."); dot > 0 {
+		filename = filename[:dot]
+	}
+	if filename == "" {
+		return ""
+	}
+	for _, ch := range filename {
+		if ch < '0' || ch > '9' {
+			return ""
+		}
+	}
+	return filename
+}
+
+func neteaseEncryptID(id string) string {
+	if strings.TrimSpace(id) == "" {
+		return ""
+	}
+	magic := []byte("3go8&$8*3*3h0k(2)2")
+	songID := []byte(id)
+	for i := range songID {
+		songID[i] = songID[i] ^ magic[i%len(magic)]
+	}
+	digest := md5.Sum(songID)
+	encoded := base64.StdEncoding.EncodeToString(digest[:])
+	encoded = strings.ReplaceAll(encoded, "/", "_")
+	encoded = strings.ReplaceAll(encoded, "+", "-")
+	return encoded
+}
+
+func inlineSubtitle(album, artists string) string {
+	album = strings.TrimSpace(album)
+	artists = strings.TrimSpace(artists)
+	if artists == "" {
 		artists = "未知歌手"
+	}
+	if album == "" {
+		return artists
 	}
 	return album + " · " + artists
 }
