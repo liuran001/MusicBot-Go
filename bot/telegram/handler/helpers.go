@@ -420,6 +420,19 @@ func buildMusicInfoTextf(songName, songAlbum, fileInfo, suffixFmt string, args .
 	return buildMusicInfoText(songName, songAlbum, fileInfo, suffix)
 }
 
+func userVisibleDownloadError(err error) string {
+	if err != nil {
+		errText := fmt.Sprintf("%v", err)
+		if strings.Contains(errText, md5VerFailed) {
+			return md5VerFailed
+		}
+		if strings.Contains(errText, downloadTimeout) {
+			return downloadTimeout
+		}
+	}
+	return "下载/发送失败，请稍后重试"
+}
+
 func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
 	if songInfo == nil {
 		return ""

@@ -339,13 +339,10 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	sendFailed := func(err error) {
-		var errText string
-		if strings.Contains(fmt.Sprintf("%v", err), md5VerFailed) || strings.Contains(fmt.Sprintf("%v", err), downloadTimeout) {
-			errText = "%v"
-		} else {
-			errText = uploadFailed
+		if h.Logger != nil {
+			h.Logger.Error("failed to send music", "platform", platformName, "trackID", trackID, "error", err)
 		}
-		text := buildMusicInfoTextf(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), errText, strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN"))
+		text := buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err))
 		if msgResult != nil {
 			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
 		}
@@ -1097,11 +1094,10 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 				if result.err == nil {
 					_ = statusBot.DeleteMessage(baseCtx, &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: taskMessage.Chat.ID}, MessageID: statusMessage.MessageID})
 				} else {
-					errText := ""
-					if result.err != nil {
-						errText = result.err.Error()
+					if h.Logger != nil {
+						h.Logger.Error("upload worker failed", "platform", platformName, "trackID", trackID, "error", result.err)
 					}
-					statusMessage = editMessageTextOrSend(baseCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, buildMusicInfoTextf(songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), uploadFailed, errText))
+					statusMessage = editMessageTextOrSend(baseCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, buildMusicInfoText(songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), userVisibleDownloadError(result.err)))
 				}
 			}
 			cleanupFiles(cleanupCopy...)

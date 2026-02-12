@@ -204,13 +204,17 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 	}
 	songInfo, err := h.Music.prepareInlineSong(ctx, b, userID, platformName, trackID, qualityOverride, progress)
 	if err != nil {
-		errText := strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN")
-		setInlineText(buildMusicInfoTextf("", "", "", uploadFailed, errText))
+		if h.Music.Logger != nil {
+			h.Music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)
+		}
+		setInlineText(buildMusicInfoText("", "", "", userVisibleDownloadError(err)))
 		return
 	}
 	if err := editInlineMedia(songInfo); err != nil {
-		errText := strings.ReplaceAll(err.Error(), "BOT_TOKEN", "BOT_TOKEN")
-		setInlineText(buildMusicInfoTextf(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploadFailed, errText))
+		if h.Music.Logger != nil {
+			h.Music.Logger.Error("failed to edit inline media", "platform", platformName, "trackID", trackID, "error", err)
+		}
+		setInlineText(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err)))
 		return
 	}
 }
