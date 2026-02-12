@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +49,53 @@ func (r *stubSongRepository) FindByPlatformTrackID(ctx context.Context, platform
 		return song, nil
 	}
 	return nil, nil
+}
+
+func (r *stubSongRepository) SearchCachedSongs(ctx context.Context, keyword, platformName, quality string, limit int) ([]*botpkg.SongInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 3
+	}
+	platformName = strings.TrimSpace(platformName)
+	quality = strings.TrimSpace(quality)
+
+	matched := make([]*botpkg.SongInfo, 0, limit)
+	seen := make(map[*botpkg.SongInfo]struct{})
+	for _, song := range r.platformSongs {
+		if song == nil {
+			continue
+		}
+		if platformName != "" && song.Platform != platformName {
+			continue
+		}
+		if quality != "" && song.Quality != quality {
+			continue
+		}
+		if song.FileID == "" || song.SongName == "" {
+			continue
+		}
+		haystack := strings.ToLower(song.SongName + " " + song.SongArtists + " " + song.SongAlbum)
+		if !strings.Contains(haystack, keyword) {
+			continue
+		}
+		if _, ok := seen[song]; ok {
+			continue
+		}
+		seen[song] = struct{}{}
+		matched = append(matched, song)
+		if len(matched) >= limit {
+			break
+		}
+	}
+	if len(matched) == 0 {
+		return nil, nil
+	}
+	return matched, nil
 }
 
 func (r *stubSongRepository) FindByFileID(ctx context.Context, fileID string) (*botpkg.SongInfo, error) {
