@@ -59,6 +59,9 @@ func (h *ChosenInlineMusicHandler) Handle(ctx context.Context, b *telego.Bot, up
 			Media:           media,
 			ReplyMarkup:     replyMarkup,
 		})
+		if err != nil && telegram.IsMessageNotModified(err) {
+			return nil
+		}
 		return err
 	}
 

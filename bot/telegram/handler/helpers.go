@@ -646,6 +646,17 @@ func buildInlinePendingResultID(platformName, trackID, qualityValue string) stri
 	return id
 }
 
+func buildInlineCachedResultID(platformName, trackID, qualityValue string) string {
+	pendingID := buildInlinePendingResultID(platformName, trackID, qualityValue)
+	if strings.HasPrefix(pendingID, "p_") {
+		return "c_" + strings.TrimPrefix(pendingID, "p_")
+	}
+	if strings.HasPrefix(pendingID, "r_") {
+		return "c_" + strings.TrimPrefix(pendingID, "r_")
+	}
+	return "c_" + pendingID
+}
+
 func parseInlinePendingResultID(resultID string) (platformName, trackID, qualityValue string, ok bool) {
 	resultID = strings.TrimSpace(resultID)
 	if !strings.HasPrefix(resultID, "p_") {

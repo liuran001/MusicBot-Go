@@ -195,6 +195,9 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 			Media:           media,
 			ReplyMarkup:     replyMarkup,
 		})
+		if err != nil && telegram.IsMessageNotModified(err) {
+			return nil
+		}
 		return err
 	}
 

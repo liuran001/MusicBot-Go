@@ -124,6 +124,10 @@ func isMessageNotModified(err error) bool {
 	return strings.Contains(errMsg, "message is not modified")
 }
 
+func IsMessageNotModified(err error) bool {
+	return isMessageNotModified(err)
+}
+
 func WithRetry(ctx context.Context, rl *RateLimiter, chatID int64, fn func() error) error {
 	if fn == nil {
 		return nil
