@@ -173,6 +173,9 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 			_, _ = b.EditMessageText(ctx, params)
 		}
 	}
+	clearInlineReplyMarkup := func() {
+		_, _ = b.EditMessageReplyMarkup(ctx, &telego.EditMessageReplyMarkupParams{InlineMessageID: inlineMessageID})
+	}
 	editInlineMedia := func(songInfo *botpkg.SongInfo) error {
 		if songInfo == nil || strings.TrimSpace(songInfo.FileID) == "" {
 			return fmt.Errorf("inline media requires file_id")
@@ -204,6 +207,8 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 	progress := func(text string) {
 		setInlineText(text)
 	}
+	clearInlineReplyMarkup()
+	setInlineText(waitForDown)
 	songInfo, err := h.Music.prepareInlineSong(ctx, b, userID, platformName, trackID, qualityOverride, progress)
 	if err != nil {
 		if h.Music.Logger != nil {
@@ -219,7 +224,6 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 		setInlineText(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err)))
 		return
 	}
-	_, _ = b.EditMessageReplyMarkup(ctx, &telego.EditMessageReplyMarkupParams{InlineMessageID: inlineMessageID})
 }
 
 func (h *CallbackMusicHandler) shouldAutoDeleteListMessage(ctx context.Context, msg *telego.Message, userID int64, userSettings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) bool {
