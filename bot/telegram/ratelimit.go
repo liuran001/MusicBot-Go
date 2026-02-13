@@ -206,10 +206,14 @@ func SendMessageWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, p
 	})
 
 	if err != nil {
-		if rl != nil {
-			rl.logError("SendMessage failed", "chat_id", chatID, "error", lastErr)
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
 		}
-		return result, lastErr
+		if rl != nil {
+			rl.logError("SendMessage failed", "chat_id", chatID, "error", retErr)
+		}
+		return result, retErr
 	}
 	return result, nil
 }
@@ -230,10 +234,42 @@ func EditMessageTextWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bo
 	})
 
 	if err != nil {
-		if rl != nil && !isMessageNotModified(lastErr) {
-			rl.logError("EditMessageText failed", "chat_id", chatID, "message_id", params.MessageID, "error", lastErr)
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
 		}
-		return result, lastErr
+		if rl != nil && !isMessageNotModified(retErr) {
+			rl.logError("EditMessageText failed", "chat_id", chatID, "message_id", params.MessageID, "error", retErr)
+		}
+		return result, retErr
+	}
+	return result, nil
+}
+
+func EditMessageReplyMarkupWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageReplyMarkupParams) (*telego.Message, error) {
+	var result *telego.Message
+	var lastErr error
+
+	chatID := extractChatID(params.ChatID)
+	err := WithRetry(ctx, rl, chatID, func() error {
+		msg, err := b.EditMessageReplyMarkup(ctx, params)
+		if err != nil {
+			lastErr = err
+			return err
+		}
+		result = msg
+		return nil
+	})
+
+	if err != nil {
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
+		}
+		if rl != nil && !isMessageNotModified(retErr) {
+			rl.logError("EditMessageReplyMarkup failed", "chat_id", chatID, "message_id", params.MessageID, "error", retErr)
+		}
+		return result, retErr
 	}
 	return result, nil
 }
@@ -266,10 +302,42 @@ func SendAudioWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, par
 	})
 
 	if err != nil {
-		if rl != nil {
-			rl.logError("SendAudio failed", "chat_id", chatID, "error", lastErr)
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
 		}
-		return result, lastErr
+		if rl != nil {
+			rl.logError("SendAudio failed", "chat_id", chatID, "error", retErr)
+		}
+		return result, retErr
+	}
+	return result, nil
+}
+
+func EditMessageMediaWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageMediaParams) (*telego.Message, error) {
+	var result *telego.Message
+	var lastErr error
+
+	chatID := extractChatID(params.ChatID)
+	err := WithRetry(ctx, rl, chatID, func() error {
+		msg, err := b.EditMessageMedia(ctx, params)
+		if err != nil {
+			lastErr = err
+			return err
+		}
+		result = msg
+		return nil
+	})
+
+	if err != nil {
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
+		}
+		if rl != nil && !isMessageNotModified(retErr) {
+			rl.logError("EditMessageMedia failed", "chat_id", chatID, "message_id", params.MessageID, "error", retErr)
+		}
+		return result, retErr
 	}
 	return result, nil
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -571,6 +572,49 @@ func buildInlineSendCallbackData(platformName, trackID, qualityValue string, req
 		return data
 	}
 	return ""
+}
+
+type inlineMessageLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+var inlineMessageLockStore = struct {
+	mu    sync.Mutex
+	locks map[string]*inlineMessageLockEntry
+}{locks: make(map[string]*inlineMessageLockEntry)}
+
+func withInlineMessageLock(inlineMessageID string, fn func()) {
+	if fn == nil {
+		return
+	}
+	inlineMessageID = strings.TrimSpace(inlineMessageID)
+	if inlineMessageID == "" {
+		fn()
+		return
+	}
+
+	inlineMessageLockStore.mu.Lock()
+	entry := inlineMessageLockStore.locks[inlineMessageID]
+	if entry == nil {
+		entry = &inlineMessageLockEntry{}
+		inlineMessageLockStore.locks[inlineMessageID] = entry
+	}
+	entry.refs++
+	inlineMessageLockStore.mu.Unlock()
+
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		inlineMessageLockStore.mu.Lock()
+		entry.refs--
+		if entry.refs <= 0 {
+			delete(inlineMessageLockStore.locks, inlineMessageID)
+		}
+		inlineMessageLockStore.mu.Unlock()
+	}()
+
+	fn()
 }
 
 func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {

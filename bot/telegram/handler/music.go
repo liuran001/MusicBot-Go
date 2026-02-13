@@ -28,6 +28,8 @@ type musicDispatchContextKey string
 
 const forceNonSilentKey musicDispatchContextKey = "force_non_silent"
 
+const downloadProgressMinInterval = 2 * time.Second
+
 func withForceNonSilent(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -896,7 +898,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 
 	lastProgressText := ""
 	lastProgressAt := time.Time{}
-	minInterval := 1 * time.Second
+	minInterval := downloadProgressMinInterval
 	progress := func(written, total int64) {
 		if externalProgress != nil {
 			externalProgress(written, total)
@@ -1602,16 +1604,7 @@ func parseInlineSearchStartParameter(value string) (query string, ok bool) {
 	return query, true
 }
 
-func (h *MusicHandler) prepareInlineSong(
-	ctx context.Context,
-	b *telego.Bot,
-	userID int64,
-	platformName, trackID, qualityOverride string,
-	progress func(text string),
-) (*botpkg.SongInfo, error) {
-	if h == nil {
-		return nil, errors.New("music handler not configured")
-	}
+func (h *MusicHandler) resolveInlineQualityValue(ctx context.Context, userID int64, qualityOverride string) string {
 	qualityValue := strings.TrimSpace(qualityOverride)
 	if qualityValue == "" {
 		qualityValue = strings.TrimSpace(h.DefaultQuality)
@@ -1624,6 +1617,36 @@ func (h *MusicHandler) prepareInlineSong(
 			qualityValue = strings.TrimSpace(settings.DefaultQuality)
 		}
 	}
+	return qualityValue
+}
+
+func (h *MusicHandler) findInlineCachedSong(ctx context.Context, userID int64, platformName, trackID, qualityOverride string) (*botpkg.SongInfo, string, error) {
+	if h == nil || h.Repo == nil {
+		return nil, "", nil
+	}
+	qualityValue := h.resolveInlineQualityValue(ctx, userID, qualityOverride)
+	cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityValue)
+	if err != nil {
+		return nil, qualityValue, err
+	}
+	if cached == nil || strings.TrimSpace(cached.FileID) == "" {
+		return nil, qualityValue, nil
+	}
+	copy := *cached
+	return &copy, qualityValue, nil
+}
+
+func (h *MusicHandler) prepareInlineSong(
+	ctx context.Context,
+	b *telego.Bot,
+	userID int64,
+	platformName, trackID, qualityOverride string,
+	progress func(text string),
+) (*botpkg.SongInfo, error) {
+	if h == nil {
+		return nil, errors.New("music handler not configured")
+	}
+	qualityValue := h.resolveInlineQualityValue(ctx, userID, qualityOverride)
 
 	findCached := func() (*botpkg.SongInfo, error) {
 		if h.Repo == nil {
@@ -1735,6 +1758,12 @@ func (h *MusicHandler) prepareInlineSong(
 	}
 	defer releaseDownloadSlot()
 
+	if cached, _ := findCached(); cached != nil {
+		copy := *cached
+		call.song = &copy
+		return &copy, nil
+	}
+
 	if progress != nil {
 		progress(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
 	}
@@ -1746,7 +1775,7 @@ func (h *MusicHandler) prepareInlineSong(
 			return
 		}
 		now := time.Now()
-		if !lastProgressAt.IsZero() && now.Sub(lastProgressAt) < time.Second {
+		if !lastProgressAt.IsZero() && now.Sub(lastProgressAt) < downloadProgressMinInterval {
 			return
 		}
 		writtenMB := float64(written) / 1024 / 1024
@@ -1811,7 +1840,12 @@ func (h *MusicHandler) prepareInlineSong(
 			}
 		}
 	}
-	uploaded, err := uploadBot.SendAudio(ctx, params)
+	var uploaded *telego.Message
+	if h.RateLimiter != nil {
+		uploaded, err = telegram.SendAudioWithRetry(ctx, h.RateLimiter, uploadBot, params)
+	} else {
+		uploaded, err = uploadBot.SendAudio(ctx, params)
+	}
 	if err != nil || uploaded == nil || uploaded.Audio == nil || strings.TrimSpace(uploaded.Audio.FileID) == "" {
 		if err == nil {
 			err = errors.New("upload failed")
