@@ -3,10 +3,107 @@ package handler
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	"github.com/mymmrac/telego"
 )
+
+func TestParseInlineSearchOptions_PageSuffix(t *testing.T) {
+	manager := newStubManager()
+	manager.Register(newStubPlatform("netease"))
+	manager.Register(newStubPlatform("qqmusic"))
+	manager.aliases["qq"] = "qqmusic"
+
+	tests := []struct {
+		name                string
+		input               string
+		wantBase            string
+		wantPlatform        string
+		wantPage            int
+		wantFallbackKeyword string
+	}{
+		{
+			name:                "platform with page suffix",
+			input:               "jj qq 2",
+			wantBase:            "jj",
+			wantPlatform:        "qqmusic",
+			wantPage:            2,
+			wantFallbackKeyword: "",
+		},
+		{
+			name:                "numeric keyword stays keyword",
+			input:               "歌名 1988",
+			wantBase:            "歌名 1988",
+			wantPlatform:        "",
+			wantPage:            1,
+			wantFallbackKeyword: "",
+		},
+		{
+			name:                "large numeric after platform parsed as page then clamped later",
+			input:               "歌名 qq 1988",
+			wantBase:            "歌名",
+			wantPlatform:        "qqmusic",
+			wantPage:            1988,
+			wantFallbackKeyword: "",
+		},
+		{
+			name:                "page one should not pollute keyword",
+			input:               "jj qq 1",
+			wantBase:            "jj",
+			wantPlatform:        "qqmusic",
+			wantPage:            1,
+			wantFallbackKeyword: "",
+		},
+		{
+			name:                "keyword plus numeric prefers paging with fallback keyword",
+			input:               "jj 2",
+			wantBase:            "jj",
+			wantPlatform:        "",
+			wantPage:            2,
+			wantFallbackKeyword: "jj 2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, platformName, _, page, fallbackKeyword := parseInlineSearchOptions(tt.input, manager)
+			if base != tt.wantBase {
+				t.Fatalf("base = %q, want %q", base, tt.wantBase)
+			}
+			if platformName != tt.wantPlatform {
+				t.Fatalf("platform = %q, want %q", platformName, tt.wantPlatform)
+			}
+			if page != tt.wantPage {
+				t.Fatalf("page = %d, want %d", page, tt.wantPage)
+			}
+			if fallbackKeyword != tt.wantFallbackKeyword {
+				t.Fatalf("fallbackKeyword = %q, want %q", fallbackKeyword, tt.wantFallbackKeyword)
+			}
+		})
+	}
+}
+
+func TestBuildInlineSearchPageFooter_HintQuery(t *testing.T) {
+	result := buildInlineSearchPageFooter("jj", "qqmusic", "", 1, 6, 48)
+	article, ok := result.(*telego.InlineQueryResultArticle)
+	if !ok {
+		t.Fatalf("result type = %T, want *telego.InlineQueryResultArticle", result)
+	}
+	if article.Title != "第 1 页 / 共 6 页" {
+		t.Fatalf("title = %q", article.Title)
+	}
+	if !strings.Contains(article.Description, "jj qq 2") {
+		t.Fatalf("description = %q, want contains %q", article.Description, "jj qq 2")
+	}
+	if strings.Contains(article.Description, "qqmusic") {
+		t.Fatalf("description should use alias qq, got %q", article.Description)
+	}
+	if strings.Contains(article.Description, "jj qq 1 2") {
+		t.Fatalf("description contains polluted keyword: %q", article.Description)
+	}
+}
 
 func TestQualityFallbacks(t *testing.T) {
 	tests := []struct {
