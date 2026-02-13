@@ -213,9 +213,19 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 			if text == "" || text == lastInlineText {
 				return
 			}
+			if markup != nil {
+				params := &telego.EditMessageTextParams{InlineMessageID: inlineMessageID, Text: text, ReplyMarkup: markup}
+				if h.RateLimiter != nil {
+					_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+				} else {
+					_, _ = b.EditMessageText(ctx, params)
+				}
+				lastInlineText = text
+				return
+			}
 			params := &telego.EditMessageTextParams{InlineMessageID: inlineMessageID, Text: text, ReplyMarkup: markup}
 			if h.RateLimiter != nil {
-				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+				_, _ = telegram.EditMessageTextBestEffort(ctx, h.RateLimiter, b, params)
 			} else {
 				_, _ = b.EditMessageText(ctx, params)
 			}

@@ -39,6 +39,7 @@ type searchState struct {
 	quality     string
 	requesterID int64
 	limit       int
+	currentPage int
 	updatedAt   time.Time
 }
 
@@ -70,12 +71,19 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		return
 	}
 
-	msgResult, err := b.SendMessage(ctx, &telego.SendMessageParams{
+	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,
 		Text:            searching,
 		ReplyParameters: replyParams,
-	})
+	}
+	var msgResult *telego.Message
+	var err error
+	if h.RateLimiter != nil {
+		msgResult, err = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendParams)
+	} else {
+		msgResult, err = b.SendMessage(ctx, sendParams)
+	}
 	if err != nil {
 		return
 	}
@@ -254,6 +262,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		quality:     qualityValue,
 		requesterID: requesterID,
 		limit:       searchLimit,
+		currentPage: 1,
 		updatedAt:   time.Now(),
 	})
 }
@@ -341,6 +350,10 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	if page < 1 {
 		page = 1
 	}
+	if action != "platform" && state.currentPage == page {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", page)})
+		return
+	}
 	if h.Search.PlatformManager == nil {
 		return
 	}
@@ -389,10 +402,14 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: disablePreview},
 	}
 	if h.RateLimiter != nil {
-		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		_, err = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 	} else {
-		_, _ = b.EditMessageText(ctx, params)
+		_, err = b.EditMessageText(ctx, params)
 	}
+	if err != nil {
+		return
+	}
+	state.currentPage = page
 	h.Search.storeSearchState(messageID, state)
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 }

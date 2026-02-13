@@ -337,7 +337,12 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 
 	if args[1] == "close" {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
-		_ = b.DeleteMessage(ctx, &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID})
+		deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
+		if h.RateLimiter != nil {
+			_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+		} else {
+			_ = b.DeleteMessage(ctx, deleteParams)
+		}
 		return
 	}
 	if len(args) < 3 {
