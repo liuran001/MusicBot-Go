@@ -33,12 +33,12 @@ func TestParseInlineSearchOptions_PageSuffix(t *testing.T) {
 			wantFallbackKeyword: "",
 		},
 		{
-			name:                "numeric keyword stays keyword",
+			name:                "numeric suffix parsed as page",
 			input:               "歌名 1988",
-			wantBase:            "歌名 1988",
+			wantBase:            "歌名",
 			wantPlatform:        "",
-			wantPage:            1,
-			wantFallbackKeyword: "",
+			wantPage:            1988,
+			wantFallbackKeyword: "歌名 1988",
 		},
 		{
 			name:                "large numeric after platform parsed as page then clamped later",
