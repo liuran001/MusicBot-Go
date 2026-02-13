@@ -5,12 +5,14 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -24,19 +26,46 @@ type DownloadService struct {
 	timeout             time.Duration
 	reverseProxy        string
 	checkMD5            bool
+	maxRetries          int
 	multipartEnabled    bool
 	multipartOpts       MultipartDownloadOptions
 	multipartDownloader *MultipartDownloader
+	overrideClientsMu   sync.RWMutex
+	overrideClients     map[string]*http.Client
+	inflightMu          sync.Mutex
+	inflight            map[string]*inflightDownload
+}
+
+type inflightDownload struct {
+	done    chan struct{}
+	temp    string
+	written int64
+	size    int64
+	format  string
+	err     error
+	refs    int
+	closed  bool
 }
 
 type DownloadServiceOptions struct {
 	Timeout              time.Duration
 	ReverseProxy         string
 	CheckMD5             bool
+	MaxRetries           int
 	EnableMultipart      bool
 	MultipartConcurrency int
 	MultipartMinSize     int64
 }
+
+const (
+	defaultDownloadMaxRetries = 3
+	maxDownloadRetryDelay     = 30 * time.Second
+)
+
+var (
+	retryJitterMu  sync.Mutex
+	retryJitterRng = rand.New(rand.NewSource(time.Now().UnixNano()))
+)
 
 func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
 	transport := &http.Transport{
@@ -61,7 +90,13 @@ func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
 		timeout:          opts.Timeout,
 		reverseProxy:     strings.TrimSpace(opts.ReverseProxy),
 		checkMD5:         opts.CheckMD5,
+		maxRetries:       opts.MaxRetries,
 		multipartEnabled: opts.EnableMultipart,
+		overrideClients:  make(map[string]*http.Client),
+		inflight:         make(map[string]*inflightDownload),
+	}
+	if s.maxRetries <= 0 {
+		s.maxRetries = defaultDownloadMaxRetries
 	}
 
 	if opts.EnableMultipart {
@@ -116,6 +151,82 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 		return 0, err
 	}
 
+	key := strings.TrimSpace(rewriteNeteaseHost(info.URL))
+	if key == "" {
+		key = strings.TrimSpace(info.URL)
+	}
+	call, leader := s.acquireInflight(key)
+	defer s.releaseInflight(key, call)
+
+	if leader {
+		tmpFile, err := os.CreateTemp("", "musicbot-download-*")
+		if err != nil {
+			call.err = err
+			s.inflightMu.Lock()
+			call.closed = true
+			s.inflightMu.Unlock()
+			close(call.done)
+			return 0, err
+		}
+		_ = tmpFile.Close()
+		call.temp = tmpFile.Name()
+
+		infoCopy := *info
+		written, err := s.downloadToPath(ctx, &infoCopy, call.temp, progress)
+		call.written = written
+		call.err = err
+		call.size = infoCopy.Size
+		call.format = infoCopy.Format
+		s.inflightMu.Lock()
+		call.closed = true
+		s.inflightMu.Unlock()
+		close(call.done)
+	} else {
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+
+	if call.err != nil {
+		return 0, call.err
+	}
+	if info != nil {
+		if call.size > 0 {
+			info.Size = call.size
+		}
+		if strings.TrimSpace(info.Format) == "" && strings.TrimSpace(call.format) != "" {
+			info.Format = call.format
+		}
+	}
+
+	copyProgress := progress
+	if leader {
+		copyProgress = nil
+	}
+	if call.temp == "" {
+		return 0, errors.New("download temp file missing")
+	}
+	total := call.size
+	if total <= 0 {
+		total = call.written
+	}
+
+	return copyToPath(call.temp, destPath, total, copyProgress)
+}
+
+func (s *DownloadService) downloadToPath(ctx context.Context, info *platform.DownloadInfo, destPath string, progress ProgressFunc) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if info == nil || info.URL == "" {
+		return 0, errors.New("download info missing")
+	}
+	if destPath == "" {
+		return 0, errors.New("dest path missing")
+	}
+
 	baseURL := rewriteNeteaseHost(info.URL)
 	originalHost := hostFromURL(baseURL)
 
@@ -136,7 +247,7 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < s.maxRetries; attempt++ {
 		useProxy := attempt > 0 && s.reverseProxy != ""
 		written, err := s.downloadOnce(ctx, baseURL, originalHost, info, destPath, progress, useProxy)
 		if err == nil {
@@ -157,8 +268,8 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 		}
 		lastErr = err
 		_ = os.Remove(destPath)
-		if attempt < 2 {
-			wait := time.Duration(1<<attempt) * time.Second
+		if attempt < s.maxRetries-1 {
+			wait := retryDelayWithJitter(attempt)
 			select {
 			case <-ctx.Done():
 				return 0, ctx.Err()
@@ -167,6 +278,81 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 		}
 	}
 	return 0, lastErr
+}
+
+func (s *DownloadService) acquireInflight(key string) (*inflightDownload, bool) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if call, ok := s.inflight[key]; ok {
+		call.refs++
+		return call, false
+	}
+	call := &inflightDownload{done: make(chan struct{}), refs: 1}
+	s.inflight[key] = call
+	return call, true
+}
+
+func (s *DownloadService) releaseInflight(key string, call *inflightDownload) {
+	if call == nil {
+		return
+	}
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if call.refs > 0 {
+		call.refs--
+	}
+	if call.refs == 0 && call.closed {
+		delete(s.inflight, key)
+		if strings.TrimSpace(call.temp) != "" {
+			_ = os.Remove(call.temp)
+		}
+	}
+}
+
+func copyToPath(srcPath, destPath string, total int64, progress ProgressFunc) (int64, error) {
+	if srcPath == "" {
+		return 0, errors.New("source path missing")
+	}
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return 0, err
+	}
+	written, copyErr := util.CopyWithProgress(out, in, total, progress)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return written, copyErr
+	}
+	if closeErr != nil {
+		return written, closeErr
+	}
+	return written, nil
+}
+
+func retryDelayWithJitter(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+
+	base := time.Duration(1<<attempt) * time.Second
+	if base > maxDownloadRetryDelay {
+		base = maxDownloadRetryDelay
+	}
+
+	retryJitterMu.Lock()
+	jitter := 0.75 + retryJitterRng.Float64()*0.5
+	retryJitterMu.Unlock()
+
+	wait := time.Duration(float64(base) * jitter)
+	if wait <= 0 {
+		return time.Second
+	}
+	return wait
 }
 
 func (s *DownloadService) tryMultipartDownload(ctx context.Context, baseURL string, info *platform.DownloadInfo, destPath string, progress ProgressFunc) (int64, error) {
@@ -273,6 +459,14 @@ func (s *DownloadService) newClientForOverride(serverName, overrideAddr, rawURL 
 		}
 	}
 
+	cacheKey := serverName + "|" + addr
+	s.overrideClientsMu.RLock()
+	if cached := s.overrideClients[cacheKey]; cached != nil {
+		s.overrideClientsMu.RUnlock()
+		return cached
+	}
+	s.overrideClientsMu.RUnlock()
+
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   minDuration(s.timeout, 10*time.Second),
@@ -293,7 +487,17 @@ func (s *DownloadService) newClientForOverride(serverName, overrideAddr, rawURL 
 		transport.TLSClientConfig = &tls.Config{ServerName: serverName}
 	}
 
-	return &http.Client{Transport: transport}
+	client := &http.Client{Transport: transport}
+
+	s.overrideClientsMu.Lock()
+	if cached := s.overrideClients[cacheKey]; cached != nil {
+		s.overrideClientsMu.Unlock()
+		return cached
+	}
+	s.overrideClients[cacheKey] = client
+	s.overrideClientsMu.Unlock()
+
+	return client
 }
 
 func rewriteNeteaseHost(rawURL string) string {

@@ -8,6 +8,31 @@ import (
 
 type URLMatcher struct{}
 
+var (
+	qqSongPathPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^n/ryqq/songDetail/([^/?#]+)$`),
+		regexp.MustCompile(`^n/ryqq_v2/songDetail/([^/?#]+)$`),
+		regexp.MustCompile(`^n/ryqq/song/([^/?#]+)$`),
+		regexp.MustCompile(`^song/([^/?#]+)$`),
+	}
+	qqAlbumPathPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^n/ryqq/albumDetail/([^/?#]+)$`),
+		regexp.MustCompile(`^n/ryqq_v2/albumDetail/([^/?#]+)$`),
+		regexp.MustCompile(`^n/yqq/album/([^/?#]+)\.html$`),
+		regexp.MustCompile(`^n2/m/share/details/album\.html$`),
+		regexp.MustCompile(`^n3/other/pages/details/album\.html$`),
+		regexp.MustCompile(`^albumDetail/([^/?#]+)$`),
+		regexp.MustCompile(`^album/([^/?#]+)$`),
+	}
+	qqPlaylistPathPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^n/ryqq/playlist/([^/?#]+)$`),
+		regexp.MustCompile(`^n/ryqq_v2/playlist/([^/?#]+)$`),
+		regexp.MustCompile(`^playlist/([^/?#]+)$`),
+		regexp.MustCompile(`^n2/m/share/details/taoge\.html$`),
+		regexp.MustCompile(`^n3/other/pages/details/playlist\.html$`),
+	}
+)
+
 func NewURLMatcher() *URLMatcher {
 	return &URLMatcher{}
 }
@@ -45,14 +70,7 @@ func matchQQMusicURL(parsed *url.URL) (string, bool) {
 		return "", false
 	}
 	pathValue := strings.Trim(parsed.Path, "/")
-	patterns := []string{
-		`^n/ryqq/songDetail/([^/?#]+)$`,
-		`^n/ryqq_v2/songDetail/([^/?#]+)$`,
-		`^n/ryqq/song/([^/?#]+)$`,
-		`^song/([^/?#]+)$`,
-	}
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range qqSongPathPatterns {
 		if match := re.FindStringSubmatch(pathValue); len(match) == 2 {
 			return match[1], true
 		}
@@ -79,32 +97,14 @@ func matchQQMusicPlaylistURL(parsed *url.URL) (string, bool) {
 		return "", false
 	}
 	pathValue := strings.Trim(parsed.Path, "/")
-	albumPatterns := []string{
-		`^n/ryqq/albumDetail/([^/?#]+)$`,
-		`^n/ryqq_v2/albumDetail/([^/?#]+)$`,
-		`^n/yqq/album/([^/?#]+)\.html$`,
-		`^n2/m/share/details/album\.html$`,
-		`^n3/other/pages/details/album\.html$`,
-		`^albumDetail/([^/?#]+)$`,
-		`^album/([^/?#]+)$`,
-	}
-	for _, pattern := range albumPatterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range qqAlbumPathPatterns {
 		if match := re.FindStringSubmatch(pathValue); len(match) == 2 {
 			if albumID := encodeAlbumCollectionID(match[1]); albumID != "" {
 				return albumID, true
 			}
 		}
 	}
-	patterns := []string{
-		`^n/ryqq/playlist/([^/?#]+)$`,
-		`^n/ryqq_v2/playlist/([^/?#]+)$`,
-		`^playlist/([^/?#]+)$`,
-		`^n2/m/share/details/taoge\.html$`,
-		`^n3/other/pages/details/playlist\.html$`,
-	}
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range qqPlaylistPathPatterns {
 		if match := re.FindStringSubmatch(pathValue); len(match) == 2 {
 			return match[1], true
 		}

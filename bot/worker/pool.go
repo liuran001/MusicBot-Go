@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 )
 
@@ -17,6 +18,7 @@ type Pool struct {
 	mu       sync.Mutex
 	closed   bool
 	size     int
+	onPanic  func(recovered any, stack []byte)
 }
 
 // New creates a worker pool with the given size.
@@ -52,6 +54,7 @@ func New(size int) *Pool {
 						func() {
 							defer func() {
 								if r := recover(); r != nil {
+									p.handlePanic(r, debug.Stack())
 								}
 							}()
 							task()
@@ -63,6 +66,23 @@ func New(size int) *Pool {
 	}
 
 	return p
+}
+
+// SetPanicHandler sets an optional callback for recovered panics in worker tasks.
+// The callback receives the recovered value and stack trace bytes.
+func (p *Pool) SetPanicHandler(handler func(recovered any, stack []byte)) {
+	p.mu.Lock()
+	p.onPanic = handler
+	p.mu.Unlock()
+}
+
+func (p *Pool) handlePanic(recovered any, stack []byte) {
+	p.mu.Lock()
+	handler := p.onPanic
+	p.mu.Unlock()
+	if handler != nil {
+		handler(recovered, stack)
+	}
 }
 
 // Submit enqueues a task for execution.
@@ -99,6 +119,7 @@ func (p *Pool) SubmitWaitContext(ctx context.Context, task func() error) error {
 	err := p.Submit(func() {
 		defer func() {
 			if r := recover(); r != nil {
+				p.handlePanic(r, debug.Stack())
 				result <- fmt.Errorf("task panic: %v", r)
 			}
 		}()

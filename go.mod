@@ -17,6 +17,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/traefik/yaegi v0.16.1
+	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
 	gopkg.in/ini.v1 v1.67.1
 	gorm.io/gorm v1.31.1

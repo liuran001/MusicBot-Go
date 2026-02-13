@@ -14,6 +14,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	defaultLimiterEntryTTL      = 30 * time.Minute
+	defaultLimiterCleanupPeriod = 5 * time.Minute
+)
+
 type Logger interface {
 	Error(msg string, args ...any)
 	Warn(msg string, args ...any)
@@ -22,18 +27,40 @@ type Logger interface {
 }
 
 type RateLimiter struct {
-	limiters map[int64]*rate.Limiter
-	mu       sync.RWMutex
-	rate     rate.Limit
-	burst    int
-	logger   Logger
+	limiters        map[int64]*chatLimiter
+	mu              sync.RWMutex
+	rate            rate.Limit
+	burst           int
+	globalLimiter   *rate.Limiter
+	logger          Logger
+	entryTTL        time.Duration
+	cleanupInterval time.Duration
+	lastCleanup     time.Time
+}
+
+type chatLimiter struct {
+	limiter  *rate.Limiter
+	lastUsed time.Time
 }
 
 func NewRateLimiter(msgPerSec float64, burst int) *RateLimiter {
+	return NewRateLimiterWithGlobal(msgPerSec, burst, 0, 0)
+}
+
+func NewRateLimiterWithGlobal(msgPerSec float64, burst int, globalPerSec float64, globalBurst int) *RateLimiter {
+	var globalLimiter *rate.Limiter
+	if globalPerSec > 0 && globalBurst > 0 {
+		globalLimiter = rate.NewLimiter(rate.Limit(globalPerSec), globalBurst)
+	}
+
 	return &RateLimiter{
-		limiters: make(map[int64]*rate.Limiter),
-		rate:     rate.Limit(msgPerSec),
-		burst:    burst,
+		limiters:        make(map[int64]*chatLimiter),
+		rate:            rate.Limit(msgPerSec),
+		burst:           burst,
+		globalLimiter:   globalLimiter,
+		entryTTL:        defaultLimiterEntryTTL,
+		cleanupInterval: defaultLimiterCleanupPeriod,
+		lastCleanup:     time.Now(),
 	}
 }
 
@@ -50,27 +77,75 @@ func (rl *RateLimiter) logError(msg string, args ...any) {
 }
 
 func (rl *RateLimiter) getLimiter(chatID int64) *rate.Limiter {
+	now := time.Now()
+	rl.maybeCleanup(now)
+
 	rl.mu.RLock()
-	limiter, exists := rl.limiters[chatID]
+	_, exists := rl.limiters[chatID]
 	rl.mu.RUnlock()
 
 	if exists {
-		return limiter
+		rl.mu.Lock()
+		if current, ok := rl.limiters[chatID]; ok {
+			current.lastUsed = now
+			limiter := current.limiter
+			rl.mu.Unlock()
+			return limiter
+		}
+		rl.mu.Unlock()
 	}
 
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	if limiter, exists := rl.limiters[chatID]; exists {
-		return limiter
+	if current, exists := rl.limiters[chatID]; exists {
+		current.lastUsed = now
+		return current.limiter
 	}
 
-	limiter = rate.NewLimiter(rl.rate, rl.burst)
-	rl.limiters[chatID] = limiter
+	limiter := rate.NewLimiter(rl.rate, rl.burst)
+	rl.limiters[chatID] = &chatLimiter{
+		limiter:  limiter,
+		lastUsed: now,
+	}
 	return limiter
 }
 
+func (rl *RateLimiter) maybeCleanup(now time.Time) {
+	rl.mu.RLock()
+	cleanupInterval := rl.cleanupInterval
+	entryTTL := rl.entryTTL
+	lastCleanup := rl.lastCleanup
+	rl.mu.RUnlock()
+
+	if cleanupInterval <= 0 || entryTTL <= 0 {
+		return
+	}
+	if now.Sub(lastCleanup) < cleanupInterval {
+		return
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	if now.Sub(rl.lastCleanup) < rl.cleanupInterval {
+		return
+	}
+
+	for chatID, limiter := range rl.limiters {
+		if now.Sub(limiter.lastUsed) > rl.entryTTL {
+			delete(rl.limiters, chatID)
+		}
+	}
+	rl.lastCleanup = now
+}
+
 func (rl *RateLimiter) Wait(ctx context.Context, chatID int64) error {
+	if rl.globalLimiter != nil {
+		if err := rl.globalLimiter.Wait(ctx); err != nil {
+			return err
+		}
+	}
 	limiter := rl.getLimiter(chatID)
 	return limiter.Wait(ctx)
 }
@@ -149,6 +224,9 @@ func WithRetry(ctx context.Context, rl *RateLimiter, chatID int64, fn func() err
 		retryAfter, shouldRetry := parseRetryAfter(err)
 		if !shouldRetry {
 			return err
+		}
+		if rl != nil {
+			rl.logError("telegram request rate limited, will retry", "chat_id", chatID, "attempt", attempt+1, "retry_after_seconds", retryAfter, "error", err)
 		}
 
 		if attempt < maxRetries-1 {

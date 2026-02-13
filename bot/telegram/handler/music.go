@@ -22,6 +22,7 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
 	"github.com/mymmrac/telego"
+	"golang.org/x/sync/singleflight"
 )
 
 type musicDispatchContextKey string
@@ -67,15 +68,15 @@ type MusicHandler struct {
 	Limiter            chan struct{}
 	UploadLimiter      chan struct{}
 	UploadQueue        chan uploadTask
+	UploadWorkerCount  int
 	UploadQueueSize    int
 	UploadBot          *telego.Bot
 	RateLimiter        *telegram.RateLimiter
 	queueMu            sync.Mutex
 	queuedStatus       []queuedStatus
 	statusDirty        bool
-	fetchMu            sync.Mutex
-	trackFetch         map[string]*trackFetchCall
-	downloadInfoFetch  map[string]*downloadInfoFetchCall
+	trackFetchGroup    singleflight.Group
+	downloadInfoGroup  singleflight.Group
 	inlineMu           sync.Mutex
 	inlineInFlight     map[string]*inlineProcessCall
 	downloadQueueMu    sync.Mutex
@@ -89,18 +90,19 @@ type downloadQueueEntry struct {
 }
 
 type uploadTask struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	b         *telego.Bot
-	statusBot *telego.Bot
-	statusMsg *telego.Message
-	message   *telego.Message
-	songInfo  botpkg.SongInfo
-	musicPath string
-	picPath   string
-	cleanup   []string
-	resultCh  chan uploadResult
-	onDone    func(uploadResult)
+	ctx        context.Context
+	cancel     context.CancelFunc
+	enqueuedAt time.Time
+	b          *telego.Bot
+	statusBot  *telego.Bot
+	statusMsg  *telego.Message
+	message    *telego.Message
+	songInfo   botpkg.SongInfo
+	musicPath  string
+	picPath    string
+	cleanup    []string
+	resultCh   chan uploadResult
+	onDone     func(uploadResult)
 }
 
 type queuedStatus struct {
@@ -112,18 +114,6 @@ type queuedStatus struct {
 type uploadResult struct {
 	message *telego.Message
 	err     error
-}
-
-type trackFetchCall struct {
-	done  chan struct{}
-	track *platform.Track
-	err   error
-}
-
-type downloadInfoFetchCall struct {
-	done chan struct{}
-	info *platform.DownloadInfo
-	err  error
 }
 
 type inlineProcessCall struct {
@@ -148,9 +138,14 @@ func (h *MusicHandler) StartWorker(ctx context.Context) {
 	if h.UploadQueueSize <= 0 {
 		h.UploadQueueSize = 20
 	}
+	if h.UploadWorkerCount <= 0 {
+		h.UploadWorkerCount = 1
+	}
 	if h.UploadQueue == nil {
 		h.UploadQueue = make(chan uploadTask, h.UploadQueueSize)
-		go h.runUploadWorker(ctx)
+		for i := 0; i < h.UploadWorkerCount; i++ {
+			go h.runUploadWorker(ctx)
+		}
 	}
 	go h.runStatusRefresher(ctx)
 }
@@ -207,9 +202,13 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 			ReplyParameters:    &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {
-			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			if _, err := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params); err != nil && h.Logger != nil {
+				h.Logger.Warn("failed to send help message", "chatID", message.Chat.ID, "error", err)
+			}
 		} else {
-			_, _ = b.SendMessage(ctx, params)
+			if _, err := b.SendMessage(ctx, params); err != nil && h.Logger != nil {
+				h.Logger.Warn("failed to send help message", "chatID", message.Chat.ID, "error", err)
+			}
 		}
 		return
 	}
@@ -222,9 +221,13 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 				ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 			}
 			if h.RateLimiter != nil {
-				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+				if _, err := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params); err != nil && h.Logger != nil {
+					h.Logger.Warn("failed to send music usage prompt", "chatID", message.Chat.ID, "error", err)
+				}
 			} else {
-				_, _ = b.SendMessage(ctx, params)
+				if _, err := b.SendMessage(ctx, params); err != nil && h.Logger != nil {
+					h.Logger.Warn("failed to send music usage prompt", "chatID", message.Chat.ID, "error", err)
+				}
 			}
 			return
 		}
@@ -244,9 +247,13 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {
-			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+			if _, err := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params); err != nil && h.Logger != nil {
+				h.Logger.Warn("failed to send no-results message", "chatID", message.Chat.ID, "error", err)
+			}
 		} else {
-			_, _ = b.SendMessage(ctx, params)
+			if _, err := b.SendMessage(ctx, params); err != nil && h.Logger != nil {
+				h.Logger.Warn("failed to send no-results message", "chatID", message.Chat.ID, "error", err)
+			}
 		}
 		return
 	}
@@ -260,9 +267,13 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 					ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 				}
 				if h.RateLimiter != nil {
-					_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+					if _, err := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params); err != nil && h.Logger != nil {
+						h.Logger.Warn("failed to send platform command usage prompt", "chatID", message.Chat.ID, "error", err)
+					}
 				} else {
-					_, _ = b.SendMessage(ctx, params)
+					if _, err := b.SendMessage(ctx, params); err != nil && h.Logger != nil {
+						h.Logger.Warn("failed to send platform command usage prompt", "chatID", message.Chat.ID, "error", err)
+					}
 				}
 				return
 			}
@@ -577,35 +588,25 @@ func (h *MusicHandler) getTrackSingleflight(ctx context.Context, platformName, t
 	}
 	key := fmt.Sprintf("track:%s:%s", platformName, trackID)
 
-	h.fetchMu.Lock()
-	if h.trackFetch == nil {
-		h.trackFetch = make(map[string]*trackFetchCall)
+	value, err, _ := h.trackFetchGroup.Do(key, func() (interface{}, error) {
+		plat := h.PlatformManager.Get(platformName)
+		if plat == nil {
+			return nil, fmt.Errorf("platform not found: %s", platformName)
+		}
+		track, fetchErr := plat.GetTrack(ctx, trackID)
+		if track == nil && fetchErr == nil {
+			return nil, errors.New("invalid track result")
+		}
+		return track, fetchErr
+	})
+	if err != nil {
+		return nil, err
 	}
-	if call, ok := h.trackFetch[key]; ok {
-		h.fetchMu.Unlock()
-		<-call.done
-		return call.track, call.err
-	}
-	call := &trackFetchCall{done: make(chan struct{})}
-	h.trackFetch[key] = call
-	h.fetchMu.Unlock()
-
-	plat := h.PlatformManager.Get(platformName)
-	if plat == nil {
-		call.err = fmt.Errorf("platform not found: %s", platformName)
-	} else {
-		call.track, call.err = plat.GetTrack(ctx, trackID)
-	}
-
-	h.fetchMu.Lock()
-	delete(h.trackFetch, key)
-	h.fetchMu.Unlock()
-	close(call.done)
-
-	if call.track == nil && call.err == nil {
+	track, ok := value.(*platform.Track)
+	if !ok || track == nil {
 		return nil, errors.New("invalid track result")
 	}
-	return call.track, call.err
+	return track, nil
 }
 
 func (h *MusicHandler) getDownloadInfoSingleflight(ctx context.Context, platformName, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
@@ -614,44 +615,28 @@ func (h *MusicHandler) getDownloadInfoSingleflight(ctx context.Context, platform
 	}
 	key := fmt.Sprintf("download_info:%s:%s:%s", platformName, trackID, quality.String())
 
-	h.fetchMu.Lock()
-	if h.downloadInfoFetch == nil {
-		h.downloadInfoFetch = make(map[string]*downloadInfoFetchCall)
-	}
-	if call, ok := h.downloadInfoFetch[key]; ok {
-		h.fetchMu.Unlock()
-		<-call.done
-		if call.err != nil {
-			return nil, call.err
+	value, err, _ := h.downloadInfoGroup.Do(key, func() (interface{}, error) {
+		plat := h.PlatformManager.Get(platformName)
+		if plat == nil {
+			return nil, fmt.Errorf("platform not found: %s", platformName)
 		}
-		if call.info == nil {
+		info, fetchErr := plat.GetDownloadInfo(ctx, trackID, quality)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		if info == nil {
 			return nil, errors.New("invalid download info result")
 		}
-		return cloneDownloadInfo(call.info), nil
+		return cloneDownloadInfo(info), nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	call := &downloadInfoFetchCall{done: make(chan struct{})}
-	h.downloadInfoFetch[key] = call
-	h.fetchMu.Unlock()
-
-	plat := h.PlatformManager.Get(platformName)
-	if plat == nil {
-		call.err = fmt.Errorf("platform not found: %s", platformName)
-	} else {
-		call.info, call.err = plat.GetDownloadInfo(ctx, trackID, quality)
-	}
-
-	h.fetchMu.Lock()
-	delete(h.downloadInfoFetch, key)
-	h.fetchMu.Unlock()
-	close(call.done)
-
-	if call.err != nil {
-		return nil, call.err
-	}
-	if call.info == nil {
+	info, ok := value.(*platform.DownloadInfo)
+	if !ok || info == nil {
 		return nil, errors.New("invalid download info result")
 	}
-	return cloneDownloadInfo(call.info), nil
+	return cloneDownloadInfo(info), nil
 }
 
 func cloneDownloadInfo(info *platform.DownloadInfo) *platform.DownloadInfo {
@@ -1079,17 +1064,18 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 	taskMessage := message
 	statusMessage := statusMsg
 	task := uploadTask{
-		ctx:       uploadCtx,
-		cancel:    cancel,
-		b:         uploadBot,
-		statusBot: statusBot,
-		statusMsg: statusMsg,
-		message:   message,
-		songInfo:  songCopy,
-		musicPath: musicPath,
-		picPath:   picPath,
-		cleanup:   cleanupCopy,
-		resultCh:  resultCh,
+		ctx:        uploadCtx,
+		cancel:     cancel,
+		enqueuedAt: time.Now(),
+		b:          uploadBot,
+		statusBot:  statusBot,
+		statusMsg:  statusMsg,
+		message:    message,
+		songInfo:   songCopy,
+		musicPath:  musicPath,
+		picPath:    picPath,
+		cleanup:    cleanupCopy,
+		resultCh:   resultCh,
 		onDone: func(result uploadResult) {
 			if result.message != nil && result.message.Audio != nil {
 				songCopy.FileID = result.message.Audio.FileID
@@ -1111,7 +1097,9 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 			}
 			if statusMessage != nil && taskMessage != nil {
 				if result.err == nil {
-					_ = statusBot.DeleteMessage(baseCtx, &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: taskMessage.Chat.ID}, MessageID: statusMessage.MessageID})
+					if err := statusBot.DeleteMessage(baseCtx, &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: taskMessage.Chat.ID}, MessageID: statusMessage.MessageID}); err != nil && h.Logger != nil {
+						h.Logger.Warn("failed to delete status message", "chatID", taskMessage.Chat.ID, "messageID", statusMessage.MessageID, "error", err)
+					}
 				} else {
 					if h.Logger != nil {
 						h.Logger.Error("upload worker failed", "platform", platformName, "trackID", trackID, "error", result.err)
@@ -1169,6 +1157,13 @@ func (h *MusicHandler) runStatusRefresher(ctx context.Context) {
 }
 
 func (h *MusicHandler) processUploadTask(task uploadTask) {
+	if h != nil && h.Logger != nil && !task.enqueuedAt.IsZero() {
+		wait := time.Since(task.enqueuedAt)
+		if wait > 2*time.Second {
+			h.Logger.Warn("upload task waited in queue", "wait_ms", wait.Milliseconds())
+		}
+	}
+
 	h.dequeueQueuedStatus(task.statusMsg)
 	if task.ctx != nil {
 		select {
@@ -1313,6 +1308,8 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 			newMsg, sendErr := entry.bot.SendMessage(ctx, &telego.SendMessageParams{ChatID: telego.ChatID{ID: entry.message.Chat.ID}, Text: text})
 			if sendErr == nil && newMsg != nil {
 				h.updateQueuedStatusMessage(entry.message.MessageID, newMsg)
+			} else if sendErr != nil && h.Logger != nil {
+				h.Logger.Warn("failed to send replacement queued status message", "chatID", entry.message.Chat.ID, "messageID", entry.message.MessageID, "error", sendErr)
 			}
 		}
 	}

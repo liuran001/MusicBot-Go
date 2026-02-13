@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -279,12 +280,26 @@ func (r *Repository) FindRandomCachedSong(ctx context.Context) (*bot.SongInfo, e
 	if r == nil || r.db == nil {
 		return nil, errors.New("repository not configured")
 	}
+	query := r.db.WithContext(ctx).
+		Model(&SongInfoModel{}).
+		Where("file_id <> ''").
+		Where("song_name <> ''")
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return nil, err
+	}
+	if count <= 0 {
+		return nil, nil
+	}
+	offset := rand.Int63n(count)
+
 	var model SongInfoModel
 	err := r.db.WithContext(ctx).
 		Model(&SongInfoModel{}).
 		Where("file_id <> ''").
 		Where("song_name <> ''").
-		Order("RANDOM()").
+		Offset(int(offset)).
 		Limit(1).
 		Take(&model).Error
 	if err != nil {
