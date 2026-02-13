@@ -600,9 +600,6 @@ func parseInlineSearchOptions(text string, manager platform.Manager) (baseText, 
 	if strings.TrimSpace(parsedPlatform) != "" || strings.TrimSpace(parsedQuality) != "" {
 		return parsedBase, parsedPlatform, parsedQuality, candidate, invalidPageFallbackKeyword
 	}
-	if candidate > 9 {
-		return baseText, platformName, quality, page, invalidPageFallbackKeyword
-	}
 	invalidPageFallbackKeyword = baseText
 	return parsedBase, parsedPlatform, parsedQuality, candidate, invalidPageFallbackKeyword
 }
