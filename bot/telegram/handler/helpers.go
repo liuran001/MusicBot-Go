@@ -525,6 +525,20 @@ func buildInlineSendKeyboard(platformName, trackID, qualityValue string, request
 	}}}
 }
 
+func buildInlineCollectionOpenKeyboard(token string, requesterID int64) *telego.InlineKeyboardMarkup {
+	token = strings.TrimSpace(token)
+	if token == "" || requesterID == 0 || !isInlineStartToken(token) {
+		return nil
+	}
+	callbackData := fmt.Sprintf("ipl %s open %d", token, requesterID)
+	if len(callbackData) > 64 {
+		return nil
+	}
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
+		{Text: "如果没反应点此刷新", CallbackData: callbackData},
+	}}}
+}
+
 func buildInlineSendCallbackData(platformName, trackID, qualityValue string, requesterID int64) string {
 	platformName = strings.TrimSpace(platformName)
 	trackID = strings.TrimSpace(trackID)
@@ -657,6 +671,28 @@ func buildInlineCachedResultID(platformName, trackID, qualityValue string) strin
 	return "c_" + pendingID
 }
 
+func buildInlineCollectionResultID(platformName, collectionID, qualityValue string) string {
+	platformName = strings.TrimSpace(platformName)
+	collectionID = strings.TrimSpace(collectionID)
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if platformName == "" || collectionID == "" {
+		return fmt.Sprintf("l_%d", time.Now().UnixMicro())
+	}
+	payload := platformName + "|" + collectionID + "|" + qualityValue
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
+	if encoded == "" {
+		return fmt.Sprintf("l_%d", time.Now().UnixMicro())
+	}
+	id := "l_" + encoded
+	if len(id) > 64 {
+		return fmt.Sprintf("l_%d", time.Now().UnixMicro())
+	}
+	return id
+}
+
 func parseInlinePendingResultID(resultID string) (platformName, trackID, qualityValue string, ok bool) {
 	resultID = strings.TrimSpace(resultID)
 	if !strings.HasPrefix(resultID, "p_") {
@@ -686,6 +722,37 @@ func parseInlinePendingResultID(resultID string) (platformName, trackID, quality
 		return "", "", "", false
 	}
 	return platformName, trackID, qualityValue, true
+}
+
+func parseInlineCollectionResultID(resultID string) (platformName, collectionID, qualityValue string, ok bool) {
+	resultID = strings.TrimSpace(resultID)
+	if !strings.HasPrefix(resultID, "l_") {
+		return "", "", "", false
+	}
+	encoded := strings.TrimPrefix(resultID, "l_")
+	if encoded == "" {
+		return "", "", "", false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", "", "", false
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) < 2 {
+		return "", "", "", false
+	}
+	platformName = strings.TrimSpace(parts[0])
+	collectionID = strings.TrimSpace(parts[1])
+	if len(parts) >= 3 {
+		qualityValue = strings.TrimSpace(parts[2])
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if platformName == "" || collectionID == "" {
+		return "", "", "", false
+	}
+	return platformName, collectionID, qualityValue, true
 }
 
 func formatInfoTags(manager platform.Manager, platformName, fileExt string) []string {

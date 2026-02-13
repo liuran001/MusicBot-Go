@@ -12,27 +12,28 @@ import (
 
 // Router registers bot handlers and delegates to feature handlers.
 type Router struct {
-	Music            MessageHandler
-	Playlist         MessageHandler
-	Search           MessageHandler
-	Lyric            MessageHandler
-	Recognize        MessageHandler
-	About            MessageHandler
-	Status           MessageHandler
-	RmCache          MessageHandler
-	Settings         MessageHandler
-	Reload           MessageHandler
-	Admin            MessageHandler
-	Callback         CallbackHandler
-	SettingsCallback CallbackHandler
-	SearchCallback   CallbackHandler
-	PlaylistCallback CallbackHandler
-	Inline           InlineHandler
-	ChosenInline     ChosenInlineHandler
-	PlatformManager  platform.Manager
-	AdminCommands    []string
-	Whitelist        *Whitelist
-	Logger           botpkg.Logger
+	Music                    MessageHandler
+	Playlist                 MessageHandler
+	Search                   MessageHandler
+	Lyric                    MessageHandler
+	Recognize                MessageHandler
+	About                    MessageHandler
+	Status                   MessageHandler
+	RmCache                  MessageHandler
+	Settings                 MessageHandler
+	Reload                   MessageHandler
+	Admin                    MessageHandler
+	Callback                 CallbackHandler
+	SettingsCallback         CallbackHandler
+	SearchCallback           CallbackHandler
+	PlaylistCallback         CallbackHandler
+	InlineCollectionCallback CallbackHandler
+	Inline                   InlineHandler
+	ChosenInline             ChosenInlineHandler
+	PlatformManager          platform.Manager
+	AdminCommands            []string
+	Whitelist                *Whitelist
+	Logger                   botpkg.Logger
 }
 
 // Register registers all handlers to the bot handler.
@@ -215,6 +216,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapCallback(r.SettingsCallback), callbackPrefix("settings"))
 	bh.Handle(r.wrapCallback(r.SearchCallback), callbackPrefix("search"))
 	bh.Handle(r.wrapCallback(r.PlaylistCallback), callbackPrefix("playlist"))
+	bh.Handle(r.wrapCallback(r.InlineCollectionCallback), callbackPrefix("ipl"))
 	bh.Handle(r.wrapInline(r.Inline), func(ctx context.Context, update telego.Update) bool {
 		return update.InlineQuery != nil
 	})

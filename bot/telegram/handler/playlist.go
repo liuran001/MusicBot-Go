@@ -650,6 +650,10 @@ func collectionTypeLabel(collectionType string) string {
 	return "歌单"
 }
 
+func collectionTypeLabelFromID(collectionID string) string {
+	return collectionTypeLabel(detectCollectionType(collectionID, ""))
+}
+
 func formatExpandableQuote(content string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
