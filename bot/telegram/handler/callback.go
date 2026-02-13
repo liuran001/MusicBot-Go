@@ -149,7 +149,7 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 			return
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
-		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, platformName, trackID, qualityValue)
+		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityValue)
 		return
 	}
 	if len(args) < 5 {
@@ -173,7 +173,7 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	}
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 
-	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, platformName, trackID, qualityOverride)
+	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
 }
 
 func (h *CallbackMusicHandler) resolveInlineRandomTrack(ctx context.Context) (platformName, trackID, qualityValue string, ok bool) {
@@ -202,7 +202,7 @@ func (h *CallbackMusicHandler) resolveInlineRandomTrack(ctx context.Context) (pl
 	return platformName, trackID, qualityValue, true
 }
 
-func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *telego.Bot, inlineMessageID string, userID int64, platformName, trackID, qualityOverride string) {
+func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *telego.Bot, inlineMessageID string, userID int64, userName, platformName, trackID, qualityOverride string) {
 	if h == nil || h.Music == nil || b == nil || inlineMessageID == "" {
 		return
 	}
@@ -286,7 +286,7 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 		}
 		clearInlineReplyMarkup()
 		setInlineText(waitForDown, nil)
-		songInfo, err := h.Music.prepareInlineSong(ctx, b, userID, platformName, trackID, qualityOverride, progress)
+		songInfo, err := h.Music.prepareInlineSong(ctx, b, userID, userName, platformName, trackID, qualityOverride, progress)
 		if err != nil {
 			if h.Music.Logger != nil {
 				h.Music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)
