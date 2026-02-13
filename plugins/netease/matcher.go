@@ -7,11 +7,35 @@ import (
 
 // URLMatcher implements platform.URLMatcher for NetEase song URLs.
 // It extracts track IDs from NetEase song URLs in various formats.
-type URLMatcher struct{}
+
+var radarPlaylistIDs = map[string]struct{}{
+	"3136952023":  {},
+	"8402996200":  {},
+	"2829896389":  {},
+	"2829883282":  {},
+	"5327906368":  {},
+	"5341776086":  {},
+	"2829816518":  {},
+	"8819359201":  {},
+	"2829920189":  {},
+	"5300458264":  {},
+	"10106461201": {},
+	"5362359247":  {},
+	"5320167908":  {},
+}
+
+type URLMatcher struct {
+	disableRadar bool
+}
 
 // NewURLMatcher creates a new NetEase URL matcher.
 func NewURLMatcher() *URLMatcher {
-	return &URLMatcher{}
+	return &URLMatcher{disableRadar: false}
+}
+
+// NewURLMatcherWithRadarDisabled creates a new NetEase URL matcher with radar playlist filter option.
+func NewURLMatcherWithRadarDisabled(disableRadar bool) *URLMatcher {
+	return &URLMatcher{disableRadar: disableRadar}
 }
 
 // MatchURL implements platform.URLMatcher.
@@ -140,6 +164,9 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 			if len(id) < 5 {
 				return "", false
 			}
+			if kind == "playlist" && m.disableRadar && isRadarPlaylistID(id) {
+				return "", false
+			}
 			if kind == "album" {
 				if encoded := encodeAlbumCollectionID(id); encoded != "" {
 					return encoded, true
@@ -152,6 +179,9 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 
 	pathID := extractPathID(parsed.Path, kind)
 	if pathID != "" {
+		if kind == "playlist" && m.disableRadar && isRadarPlaylistID(pathID) {
+			return "", false
+		}
 		if kind == "album" {
 			if encoded := encodeAlbumCollectionID(pathID); encoded != "" {
 				return encoded, true
@@ -162,6 +192,11 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 	}
 
 	return "", false
+}
+
+func isRadarPlaylistID(id string) bool {
+	_, ok := radarPlaylistIDs[strings.TrimSpace(id)]
+	return ok
 }
 
 func hasSongMarker(path, fragment string) bool {

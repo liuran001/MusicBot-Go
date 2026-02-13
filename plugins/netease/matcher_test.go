@@ -320,3 +320,39 @@ func TestURLMatcherMatchPlaylistURL(t *testing.T) {
 		})
 	}
 }
+
+func TestURLMatcherMatchPlaylistURLDisableRadar(t *testing.T) {
+	radarURLs := []string{
+		"https://music.163.com/#/playlist?id=3136952023",
+		"https://music.163.com/#/playlist?id=8402996200",
+		"https://music.163.com/#/playlist?id=2829896389",
+		"https://music.163.com/#/playlist?id=2829883282",
+		"https://music.163.com/#/playlist?id=5327906368",
+		"https://music.163.com/#/playlist?id=5341776086",
+		"https://music.163.com/#/playlist?id=2829816518",
+		"https://music.163.com/#/playlist?id=8819359201",
+		"https://music.163.com/#/playlist?id=2829920189",
+		"https://music.163.com/#/playlist?id=5300458264",
+		"https://music.163.com/#/playlist?id=10106461201",
+		"https://music.163.com/#/playlist?id=5362359247",
+		"https://music.163.com/#/playlist?id=5320167908",
+	}
+
+	t.Run("radar disabled should block", func(t *testing.T) {
+		matcher := NewURLMatcherWithRadarDisabled(true)
+		for _, rawURL := range radarURLs {
+			if id, ok := matcher.MatchPlaylistURL(rawURL); ok || id != "" {
+				t.Fatalf("expected radar playlist blocked, got id=%q matched=%v", id, ok)
+			}
+		}
+	})
+
+	t.Run("radar enabled should pass", func(t *testing.T) {
+		matcher := NewURLMatcherWithRadarDisabled(false)
+		for _, rawURL := range radarURLs {
+			if id, ok := matcher.MatchPlaylistURL(rawURL); !ok || id == "" {
+				t.Fatalf("expected radar playlist allowed, got id=%q matched=%v", id, ok)
+			}
+		}
+	})
+}

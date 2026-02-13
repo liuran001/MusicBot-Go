@@ -16,13 +16,15 @@ import (
 // NeteasePlatform implements the Platform interface for NetEase Cloud Music.
 // It wraps the existing NetEase client and provides a unified interface.
 type NeteasePlatform struct {
-	client *Client
+	client       *Client
+	disableRadar bool
 }
 
 // NewPlatform creates a new NeteasePlatform instance.
-func NewPlatform(client *Client) *NeteasePlatform {
+func NewPlatform(client *Client, disableRadar bool) *NeteasePlatform {
 	return &NeteasePlatform{
-		client: client,
+		client:       client,
+		disableRadar: disableRadar,
 	}
 }
 
@@ -172,7 +174,7 @@ func (n *NeteasePlatform) MatchURL(url string) (trackID string, matched bool) {
 
 // MatchPlaylistURL implements platform.PlaylistURLMatcher interface.
 func (n *NeteasePlatform) MatchPlaylistURL(url string) (playlistID string, matched bool) {
-	matcher := NewURLMatcher()
+	matcher := NewURLMatcherWithRadarDisabled(n.disableRadar)
 	return matcher.MatchPlaylistURL(url)
 }
 
