@@ -427,8 +427,46 @@ func (h *PlaylistHandler) pageSize() int {
 }
 
 func (h *PlaylistHandler) shouldLazyLoad(platformName string) bool {
+	return shouldLazyLoadCollection(platformName)
+}
+
+func shouldLazyLoadCollection(platformName string) bool {
 	name := strings.TrimSpace(platformName)
 	return name == "qqmusic" || name == "netease"
+}
+
+func collectionChunkForPage(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 1
+	}
+	chunkSize := playlistFetchChunkSize
+	if chunkSize < pageSize {
+		chunkSize = pageSize
+	}
+	offset := (page - 1) * pageSize
+	if offset < 0 {
+		offset = 0
+	}
+	chunkOffset := (offset / chunkSize) * chunkSize
+	chunkLimit := chunkSize
+	if chunkLimit < 0 {
+		chunkLimit = 0
+	}
+	return chunkOffset, chunkLimit
+}
+
+func collectionChunkForOffset(offset, pageSize int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if pageSize <= 0 {
+		pageSize = 1
+	}
+	page := offset/pageSize + 1
+	return collectionChunkForPage(page, pageSize)
 }
 
 func (h *PlaylistHandler) pageCount(total int) int {
@@ -445,40 +483,11 @@ func (h *PlaylistHandler) fetchInitialPlaylist(ctx context.Context, plat platfor
 	}
 	requestCtx := ctx
 	if lazy {
-		chunkOffset, chunkLimit := h.chunkForPage(1)
+		chunkOffset, chunkLimit := collectionChunkForPage(1, h.pageSize())
 		requestCtx = platform.WithPlaylistOffset(requestCtx, chunkOffset)
 		requestCtx = platform.WithPlaylistLimit(requestCtx, chunkLimit)
 	}
 	return plat.GetPlaylist(requestCtx, playlistID)
-}
-
-func (h *PlaylistHandler) chunkForPage(page int) (int, int) {
-	if page < 1 {
-		page = 1
-	}
-	chunkSize := playlistFetchChunkSize
-	pageSize := h.pageSize()
-	if chunkSize < pageSize {
-		chunkSize = pageSize
-	}
-	offset := (page - 1) * h.pageSize()
-	if offset < 0 {
-		offset = 0
-	}
-	chunkOffset := (offset / chunkSize) * chunkSize
-	chunkLimit := chunkSize
-	if chunkLimit < 0 {
-		chunkLimit = 0
-	}
-	return chunkOffset, chunkLimit
-}
-
-func (h *PlaylistHandler) chunkForOffset(offset int) (int, int) {
-	if offset < 0 {
-		offset = 0
-	}
-	page := offset/h.pageSize() + 1
-	return h.chunkForPage(page)
 }
 
 func (h *PlaylistHandler) slicePlaylistPage(tracks []platform.Track, page int) ([]platform.Track, int) {
@@ -582,7 +591,7 @@ func (h *PlaylistHandler) chunkContainsOffset(state *playlistState, offset int) 
 }
 
 func (h *PlaylistHandler) refreshChunkAtOffset(ctx context.Context, plat platform.Platform, state *playlistState, offset int) error {
-	chunkOffset, chunkLimit := h.chunkForOffset(offset)
+	chunkOffset, chunkLimit := collectionChunkForOffset(offset, h.pageSize())
 	if chunkLimit <= 0 {
 		state.playlist.Tracks = nil
 		state.cacheOffset = chunkOffset

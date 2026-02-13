@@ -16,10 +16,11 @@ import (
 
 // ChosenInlineMusicHandler handles chosen inline results (requires inline feedback).
 type ChosenInlineMusicHandler struct {
-	Music       *MusicHandler
-	RateLimiter *telegram.RateLimiter
-	mu          sync.Mutex
-	cache       map[string]*inlineCollectionState
+	Music          *MusicHandler
+	RateLimiter    *telegram.RateLimiter
+	InlinePageSize int
+	mu             sync.Mutex
+	cache          map[string]*inlineCollectionState
 }
 
 const inlineCollectionCacheTTL = 10 * time.Minute
@@ -36,6 +37,8 @@ type inlineCollectionState struct {
 	url             string
 	creator         string
 	description     string
+	lazy            bool
+	cacheOffset     int
 	updatedAt       time.Time
 }
 
@@ -232,7 +235,16 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		}
 	}
 	setInlineText(loadingText)
-	playlist, err := plat.GetPlaylist(ctx, collectionID)
+	pageSize := h.inlineCollectionPageSize()
+	lazy := shouldLazyLoadCollection(platformName)
+	chunkOffset := 0
+	requestCtx := ctx
+	if lazy {
+		chunkOffset, chunkLimit := collectionChunkForPage(1, pageSize)
+		requestCtx = platform.WithPlaylistOffset(requestCtx, chunkOffset)
+		requestCtx = platform.WithPlaylistLimit(requestCtx, chunkLimit)
+	}
+	playlist, err := plat.GetPlaylist(requestCtx, collectionID)
 	if err != nil || playlist == nil || len(playlist.Tracks) == 0 {
 		setInlineText(noResults)
 		return
@@ -249,6 +261,8 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		url:             strings.TrimSpace(playlist.URL),
 		creator:         strings.TrimSpace(playlist.Creator),
 		description:     strings.TrimSpace(playlist.Description),
+		lazy:            lazy,
+		cacheOffset:     chunkOffset,
 		updatedAt:       time.Now(),
 	}
 	if state.totalTracks <= 0 {
@@ -273,16 +287,68 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 	}
 }
 
+func (h *ChosenInlineMusicHandler) ensureInlineCollectionChunk(ctx context.Context, state *inlineCollectionState, page int) error {
+	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || state == nil || !state.lazy {
+		return nil
+	}
+	pageSize := h.inlineCollectionPageSize()
+	if page < 1 {
+		page = 1
+	}
+	chunkOffset := (page - 1) * pageSize
+	if chunkOffset < 0 {
+		chunkOffset = 0
+	}
+	chunkLimit := pageSize
+	if state.cacheOffset == chunkOffset && len(state.tracks) > 0 {
+		return nil
+	}
+	plat := h.Music.PlatformManager.Get(state.platformName)
+	if plat == nil {
+		return fmt.Errorf("platform unavailable")
+	}
+	requestCtx := platform.WithPlaylistOffset(ctx, chunkOffset)
+	requestCtx = platform.WithPlaylistLimit(requestCtx, chunkLimit)
+	playlist, err := plat.GetPlaylist(requestCtx, state.collectionID)
+	if err != nil {
+		return err
+	}
+	if playlist == nil || len(playlist.Tracks) == 0 {
+		return fmt.Errorf("empty playlist chunk")
+	}
+	state.tracks = playlist.Tracks
+	if playlist.TrackCount > 0 {
+		state.totalTracks = playlist.TrackCount
+	} else if state.totalTracks <= 0 {
+		state.totalTracks = len(state.tracks)
+	}
+	if title := strings.TrimSpace(playlist.Title); title != "" {
+		state.title = title
+	}
+	if url := strings.TrimSpace(playlist.URL); url != "" {
+		state.url = url
+	}
+	if creator := strings.TrimSpace(playlist.Creator); creator != "" {
+		state.creator = creator
+	}
+	if desc := strings.TrimSpace(playlist.Description); desc != "" {
+		state.description = desc
+	}
+	if strings.TrimSpace(state.collectionLabel) == "" {
+		state.collectionLabel = collectionTypeLabel(detectCollectionType(state.collectionID, playlist.URL))
+	}
+	state.cacheOffset = chunkOffset
+	state.updatedAt = time.Now()
+	return nil
+}
+
 func (h *ChosenInlineMusicHandler) inlineCollectionPageSize() int {
-	if h == nil || h.Music == nil || h.Music.Playlist == nil {
+	if h == nil {
 		return 8
 	}
-	size := h.Music.Playlist.PageSize
+	size := h.InlinePageSize
 	if size <= 0 {
-		return 8
-	}
-	if size > 12 {
-		return 12
+		size = 8
 	}
 	return size
 }
@@ -306,9 +372,22 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineColle
 	if start < 0 {
 		start = 0
 	}
+	if state.lazy {
+		start = 0
+	}
+	if start >= len(state.tracks) {
+		return noResults, nil
+	}
 	end := start + pageSize
 	if end > len(state.tracks) {
 		end = len(state.tracks)
+	}
+	if end <= start && len(state.tracks) > 0 {
+		start = 0
+		end = pageSize
+		if end > len(state.tracks) {
+			end = len(state.tracks)
+		}
 	}
 	var bld strings.Builder
 	bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(h.Music.PlatformManager, state.platformName), mdV2Replacer.Replace(platformDisplayName(h.Music.PlatformManager, state.platformName)), state.collectionLabel))
@@ -318,8 +397,8 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineColle
 	} else {
 		bld.WriteString("\n")
 	}
-	rows := make([][]telego.InlineKeyboardButton, 0, 3)
-	numberRow := make([]telego.InlineKeyboardButton, 0, end-start)
+	rows := make([][]telego.InlineKeyboardButton, 0, 6)
+	numberButtons := make([]telego.InlineKeyboardButton, 0, end-start)
 	for i := start; i < end; i++ {
 		track := state.tracks[i]
 		displayIndex := i - start + 1
@@ -340,11 +419,18 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineColle
 		bld.WriteString(fmt.Sprintf("%d\\. 「%s」 \\- %s\n", displayIndex, trackLink, strings.Join(artistParts, " / ")))
 		callbackData := buildInlineSendCallbackData(state.platformName, track.ID, state.qualityValue, state.requesterID)
 		if callbackData != "" {
-			numberRow = append(numberRow, telego.InlineKeyboardButton{Text: fmt.Sprintf("%d", displayIndex), CallbackData: callbackData})
+			numberButtons = append(numberButtons, telego.InlineKeyboardButton{Text: fmt.Sprintf("%d", displayIndex), CallbackData: callbackData})
 		}
 	}
-	if len(numberRow) > 0 {
-		rows = append(rows, numberRow)
+	if len(numberButtons) > 0 {
+		const perRow = 8
+		for i := 0; i < len(numberButtons); i += perRow {
+			end := i + perRow
+			if end > len(numberButtons) {
+				end = len(numberButtons)
+			}
+			rows = append(rows, numberButtons[i:end])
+		}
 	}
 	if pageCount > 1 {
 		nav := make([]telego.InlineKeyboardButton, 0, 2)

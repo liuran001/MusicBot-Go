@@ -91,7 +91,23 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 		h.inlineEmpty(ctx, b, query)
 		return
 	}
-	playlist, err := plat.GetPlaylist(ctx, collectionID)
+	pageSize := h.inlinePageSize()
+	if pageSize <= 0 {
+		pageSize = 30
+	}
+	lazy := shouldLazyLoadCollection(platformName)
+	chunkOffset := 0
+	requestCtx := ctx
+	pageStart := (requestedPage - 1) * pageSize
+	if pageStart < 0 {
+		pageStart = 0
+	}
+	if lazy {
+		chunkOffset = pageStart
+		requestCtx = platform.WithPlaylistOffset(requestCtx, chunkOffset)
+		requestCtx = platform.WithPlaylistLimit(requestCtx, pageSize)
+	}
+	playlist, err := plat.GetPlaylist(requestCtx, collectionID)
 	if err != nil || playlist == nil {
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
@@ -140,6 +156,8 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 			url:             strings.TrimSpace(playlist.URL),
 			creator:         strings.TrimSpace(playlist.Creator),
 			description:     strings.TrimSpace(playlist.Description),
+			lazy:            lazy,
+			cacheOffset:     chunkOffset,
 			updatedAt:       time.Now(),
 		}
 		if state.totalTracks <= 0 {
@@ -154,7 +172,6 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 
 	tracks := playlist.Tracks
 	if len(tracks) > 0 {
-		pageSize := h.inlinePageSize()
 		totalTracks := playlist.TrackCount
 		if totalTracks <= 0 {
 			totalTracks = len(tracks)
@@ -166,6 +183,9 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 		}
 		start := (page - 1) * pageSize
 		if start < 0 {
+			start = 0
+		}
+		if lazy {
 			start = 0
 		}
 		end := start + pageSize
@@ -403,10 +423,10 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 
 func (h *InlineSearchHandler) inlinePageSize() int {
 	if h == nil || h.PageSize <= 0 {
-		return 8
+		return 30
 	}
-	if h.PageSize > 48 {
-		return 48
+	if h.PageSize > 30 {
+		return 30
 	}
 	return h.PageSize
 }

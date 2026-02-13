@@ -305,6 +305,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	defaultQuality := a.Config.GetString("DefaultQuality")
 	pageSize := a.Config.GetInt("ListPageSize")
+	inlinePageSize := a.Config.GetInt("InlineListPageSize")
 	playlistHandler := &handler.PlaylistHandler{
 		PlatformManager: a.PlatformManager,
 		Repo:            a.DB,
@@ -365,7 +366,7 @@ func (a *App) Start(ctx context.Context) error {
 	if enableRecognize {
 		recognizeHandler = &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()}
 	}
-	chosenInlineHandler := &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter}
+	chosenInlineHandler := &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter, InlinePageSize: pageSize}
 
 	router := &handler.Router{
 		Music:                    musicHandler,
@@ -384,7 +385,7 @@ func (a *App) Start(ctx context.Context) error {
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
-		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: pageSize},
+		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},
 		ChosenInline:             chosenInlineHandler,
 		PlatformManager:          a.PlatformManager,
 		AdminCommands:            adminCommandNames,
