@@ -539,6 +539,19 @@ func buildInlineCollectionOpenKeyboard(token string, requesterID int64) *telego.
 	}}}
 }
 
+func buildInlineRandomSendKeyboard(requesterID int64) *telego.InlineKeyboardMarkup {
+	if requesterID == 0 {
+		return nil
+	}
+	callbackData := fmt.Sprintf("music i random %d", requesterID)
+	if len(callbackData) > 64 {
+		return nil
+	}
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
+		{Text: inlineTapToSend, CallbackData: callbackData},
+	}}}
+}
+
 func buildInlineSendCallbackData(platformName, trackID, qualityValue string, requesterID int64) string {
 	platformName = strings.TrimSpace(platformName)
 	trackID = strings.TrimSpace(trackID)

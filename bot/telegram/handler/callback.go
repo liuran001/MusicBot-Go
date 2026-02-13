@@ -137,6 +137,21 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	if query.InlineMessageID == "" {
 		return
 	}
+	if len(args) >= 4 && strings.TrimSpace(args[2]) == "random" {
+		requesterID, _ := strconv.ParseInt(strings.TrimSpace(args[len(args)-1]), 10, 64)
+		if requesterID != 0 && requesterID != query.From.ID {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+			return
+		}
+		platformName, trackID, qualityValue, ok := h.resolveInlineRandomTrack(ctx)
+		if !ok {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "暂无可随机歌曲", ShowAlert: true})
+			return
+		}
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, platformName, trackID, qualityValue)
+		return
+	}
 	if len(args) < 5 {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
 		return
@@ -159,6 +174,32 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 
 	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, platformName, trackID, qualityOverride)
+}
+
+func (h *CallbackMusicHandler) resolveInlineRandomTrack(ctx context.Context) (platformName, trackID, qualityValue string, ok bool) {
+	if h == nil || h.Music == nil || h.Music.Repo == nil {
+		return "", "", "", false
+	}
+	info, err := h.Music.Repo.FindRandomCachedSong(ctx)
+	if err != nil || info == nil {
+		return "", "", "", false
+	}
+	platformName = strings.TrimSpace(info.Platform)
+	if platformName == "" {
+		platformName = "netease"
+	}
+	trackID = strings.TrimSpace(info.TrackID)
+	if trackID == "" && info.MusicID > 0 {
+		trackID = strconv.Itoa(info.MusicID)
+	}
+	if trackID == "" {
+		return "", "", "", false
+	}
+	qualityValue = strings.TrimSpace(info.Quality)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	return platformName, trackID, qualityValue, true
 }
 
 func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *telego.Bot, inlineMessageID string, userID int64, platformName, trackID, qualityOverride string) {
