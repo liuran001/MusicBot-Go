@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,9 +77,14 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 		return nil, err
 	}
 
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	if err := ensureSQLiteIndexes(db); err != nil {
+		return nil, err
+	}
+
+	maxOpen, maxIdle, maxLifetime := sqlitePoolDefaultsFromEnv()
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(maxLifetime)
 
 	return &Repository{
 		db:              db,
@@ -512,6 +518,7 @@ func applySQLitePragmas(db *gorm.DB) error {
 		"PRAGMA busy_timeout=5000;",
 		"PRAGMA synchronous=NORMAL;",
 		"PRAGMA cache_size=-64000;",
+		"PRAGMA temp_store=MEMORY;",
 		"PRAGMA foreign_keys=ON;",
 	}
 	for _, stmt := range pragmas {
@@ -520,6 +527,50 @@ func applySQLitePragmas(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func ensureSQLiteIndexes(db *gorm.DB) error {
+	indexStatements := []string{
+		"CREATE INDEX IF NOT EXISTS idx_song_infos_platform_music_id ON song_infos(platform, music_id)",
+		"CREATE INDEX IF NOT EXISTS idx_song_infos_file_id ON song_infos(file_id)",
+		"CREATE INDEX IF NOT EXISTS idx_song_infos_from_user_id ON song_infos(from_user_id)",
+		"CREATE INDEX IF NOT EXISTS idx_song_infos_from_chat_id ON song_infos(from_chat_id)",
+		"CREATE INDEX IF NOT EXISTS idx_song_infos_platform_quality_updated_at ON song_infos(platform, quality, updated_at DESC)",
+	}
+	for _, stmt := range indexStatements {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sqlitePoolDefaultsFromEnv() (maxOpen, maxIdle int, maxLifetime time.Duration) {
+	maxOpen = 4
+	maxIdle = 2
+	maxLifetime = time.Hour
+
+	if value := strings.TrimSpace(os.Getenv("MUSICBOT_DB_SQLITE_MAX_OPEN_CONNS")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			maxOpen = parsed
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("MUSICBOT_DB_SQLITE_MAX_IDLE_CONNS")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 0 {
+			maxIdle = parsed
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("MUSICBOT_DB_SQLITE_CONN_MAX_LIFETIME")); value != "" {
+		if parsed, err := time.ParseDuration(value); err == nil && parsed >= 0 {
+			maxLifetime = parsed
+		}
+	}
+
+	if maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+
+	return maxOpen, maxIdle, maxLifetime
 }
 
 func userSettingsToInternal(settings UserSettingsModel) *bot.UserSettings {

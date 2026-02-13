@@ -149,7 +149,7 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 			return
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
-		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityValue)
+		go h.runInlineDownloadFlow(ctx, b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityValue)
 		return
 	}
 	if len(args) < 5 {
@@ -173,7 +173,7 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	}
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 
-	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
+	go h.runInlineDownloadFlow(ctx, b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
 }
 
 func (h *CallbackMusicHandler) resolveInlineRandomTrack(ctx context.Context) (platformName, trackID, qualityValue string, ok bool) {

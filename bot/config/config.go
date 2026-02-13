@@ -86,6 +86,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("GlobalRateLimitBurst", 0)
 	v.SetDefault("DownloadConcurrency", 4)
 	v.SetDefault("DownloadMaxRetries", 3)
+	v.SetDefault("DownloadQueueWaitLimit", 0)
 	v.SetDefault("UploadConcurrency", 1)
 	v.SetDefault("UploadWorkerCount", 1)
 	v.SetDefault("UploadQueueSize", 20)
