@@ -98,6 +98,30 @@ func (r *stubSongRepository) SearchCachedSongs(ctx context.Context, keyword, pla
 	return matched, nil
 }
 
+func (r *stubSongRepository) FindRandomCachedSong(ctx context.Context) (*botpkg.SongInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, song := range r.platformSongs {
+		if song == nil {
+			continue
+		}
+		if song.FileID == "" || song.SongName == "" {
+			continue
+		}
+		return song, nil
+	}
+	for _, song := range r.songs {
+		if song == nil {
+			continue
+		}
+		if song.FileID == "" || song.SongName == "" {
+			continue
+		}
+		return song, nil
+	}
+	return nil, nil
+}
+
 func (r *stubSongRepository) FindByFileID(ctx context.Context, fileID string) (*botpkg.SongInfo, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

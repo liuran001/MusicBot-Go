@@ -274,6 +274,28 @@ func (r *Repository) SearchCachedSongs(ctx context.Context, keyword, platformNam
 	return results, nil
 }
 
+// FindRandomCachedSong returns a random cached song with valid file payload.
+func (r *Repository) FindRandomCachedSong(ctx context.Context) (*bot.SongInfo, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("repository not configured")
+	}
+	var model SongInfoModel
+	err := r.db.WithContext(ctx).
+		Model(&SongInfoModel{}).
+		Where("file_id <> ''").
+		Where("song_name <> ''").
+		Order("RANDOM()").
+		Limit(1).
+		Take(&model).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return toInternal(model), nil
+}
+
 // FindByFileID returns a cached song by FileID.
 func (r *Repository) FindByFileID(ctx context.Context, fileID string) (*bot.SongInfo, error) {
 	var model SongInfoModel

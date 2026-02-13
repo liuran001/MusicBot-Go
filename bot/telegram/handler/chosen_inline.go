@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +57,40 @@ func (h *ChosenInlineMusicHandler) Handle(ctx context.Context, b *telego.Bot, up
 		h.handleChosenCollection(ctx, b, chosen, collectionPlatform, collectionID, collectionQuality)
 		return
 	}
+	if strings.HasPrefix(strings.TrimSpace(chosen.ResultID), "z_") {
+		platformName, trackID, qualityValue, randomOK := h.resolveChosenInlineRandomTrack(ctx)
+		if !randomOK {
+			return
+		}
+		h.handleChosenTrack(ctx, b, chosen, platformName, trackID, qualityValue)
+		return
+	}
+}
+
+func (h *ChosenInlineMusicHandler) resolveChosenInlineRandomTrack(ctx context.Context) (platformName, trackID, qualityValue string, ok bool) {
+	if h == nil || h.Music == nil || h.Music.Repo == nil {
+		return "", "", "", false
+	}
+	info, err := h.Music.Repo.FindRandomCachedSong(ctx)
+	if err != nil || info == nil {
+		return "", "", "", false
+	}
+	platformName = strings.TrimSpace(info.Platform)
+	if platformName == "" {
+		platformName = "netease"
+	}
+	trackID = strings.TrimSpace(info.TrackID)
+	if trackID == "" && info.MusicID > 0 {
+		trackID = strconv.Itoa(info.MusicID)
+	}
+	if trackID == "" {
+		return "", "", "", false
+	}
+	qualityValue = strings.TrimSpace(info.Quality)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	return platformName, trackID, qualityValue, true
 }
 
 func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *telego.Bot, chosen *telego.ChosenInlineResult, platformName, trackID, qualityValue string) {

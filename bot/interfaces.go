@@ -24,6 +24,7 @@ type SongRepository interface {
 	FindByMusicID(ctx context.Context, musicID int) (*SongInfo, error)
 	FindByPlatformTrackID(ctx context.Context, platform, trackID, quality string) (*SongInfo, error)
 	SearchCachedSongs(ctx context.Context, keyword, platformName, quality string, limit int) ([]*SongInfo, error)
+	FindRandomCachedSong(ctx context.Context) (*SongInfo, error)
 	FindByFileID(ctx context.Context, fileID string) (*SongInfo, error)
 	Create(ctx context.Context, song *SongInfo) error
 	Update(ctx context.Context, song *SongInfo) error
