@@ -20,6 +20,7 @@ import (
 type InlineSearchHandler struct {
 	Repo             botpkg.SongRepository
 	PlatformManager  platform.Manager
+	CollectionChosen *ChosenInlineMusicHandler
 	BotName          string
 	DefaultPlatform  string
 	DefaultQuality   string
@@ -46,15 +47,15 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 			return
 		}
 		resolvedQuery := resolveShortLinkText(ctx, h.PlatformManager, query.Query)
-		if _, _, matched := matchPlaylistURL(ctx, h.PlatformManager, resolvedQuery); matched {
-			h.inlineEmpty(ctx, b, query)
-			return
-		}
 		normalized := normalizeInlineKeywordQuery(resolvedQuery)
 		baseText, platformSuffix, qualityOverride, requestedPage, invalidPageFallbackKeyword := parseInlineSearchOptions(normalized, h.PlatformManager)
 		baseText = strings.TrimSpace(baseText)
 		if baseText == "" {
 			h.inlineEmpty(ctx, b, query)
+			return
+		}
+		if platformName, collectionID, matched := matchPlaylistURL(ctx, h.PlatformManager, baseText); matched {
+			h.inlineCollection(ctx, b, query, platformName, collectionID, qualityOverride, requestedPage)
 			return
 		}
 		if platformName, trackID, matched := h.tryResolveDirectTrack(ctx, baseText, platformSuffix); matched {
@@ -63,6 +64,129 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 		}
 		h.inlineSearch(ctx, b, query, baseText, platformSuffix, qualityOverride, requestedPage, invalidPageFallbackKeyword)
 	}
+}
+
+func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, platformName, collectionID, qualityOverride string, requestedPage int) {
+	if h == nil || b == nil || query == nil || h.PlatformManager == nil {
+		return
+	}
+	platformName = strings.TrimSpace(platformName)
+	collectionID = strings.TrimSpace(collectionID)
+	if platformName == "" || collectionID == "" {
+		h.inlineEmpty(ctx, b, query)
+		return
+	}
+	qualityValue := h.resolveDefaultQuality(ctx, query.From.ID)
+	if strings.TrimSpace(qualityOverride) != "" {
+		qualityValue = strings.TrimSpace(qualityOverride)
+	}
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil {
+		h.inlineEmpty(ctx, b, query)
+		return
+	}
+	playlist, err := plat.GetPlaylist(ctx, collectionID)
+	if err != nil || playlist == nil {
+		inlineMsg := &telego.InlineQueryResultArticle{
+			Type:                telego.ResultTypeArticle,
+			ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()),
+			Title:               noResults,
+			Description:         "未找到专辑/歌单",
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
+		}
+		_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{InlineQueryID: query.ID, IsPersonal: true, CacheTime: 1, Results: []telego.InlineQueryResult{inlineMsg}})
+		return
+	}
+	collectionType := detectCollectionType(collectionID, playlist.URL)
+	collectionLabel := collectionTypeLabel(collectionType)
+	inlineMsgs := make([]telego.InlineQueryResult, 0, h.inlinePageSize()+3)
+	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(h, platformName, qualityValue))
+	title := strings.TrimSpace(playlist.Title)
+	if title == "" {
+		title = collectionLabel
+	}
+	desc := fmt.Sprintf("%s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel)
+	if playlist.TrackCount > 0 {
+		desc = fmt.Sprintf("%s · %s · %d 首", platformDisplayName(h.PlatformManager, platformName), collectionLabel, playlist.TrackCount)
+	} else if len(playlist.Tracks) > 0 {
+		desc = fmt.Sprintf("%s · %s · %d 首", platformDisplayName(h.PlatformManager, platformName), collectionLabel, len(playlist.Tracks))
+	}
+	thumb := buildInlineThumbnailURL(platformName, strings.TrimSpace(playlist.CoverURL), 150)
+	collectionArticle := &telego.InlineQueryResultArticle{
+		Type:                telego.ResultTypeArticle,
+		ID:                  buildInlineCollectionResultID(platformName, collectionID, qualityValue),
+		Title:               fmt.Sprintf("%s：%s", collectionLabel, title),
+		Description:         desc,
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("%s：%s\n点击后自动展开详情", collectionLabel, title)},
+		ThumbnailURL:        thumb,
+		ThumbnailWidth:      150,
+		ThumbnailHeight:     150,
+	}
+	if h.CollectionChosen != nil {
+		state := &inlineCollectionState{
+			platformName:    platformName,
+			collectionID:    collectionID,
+			qualityValue:    qualityValue,
+			requesterID:     query.From.ID,
+			tracks:          playlist.Tracks,
+			totalTracks:     playlist.TrackCount,
+			collectionLabel: collectionLabel,
+			title:           title,
+			url:             strings.TrimSpace(playlist.URL),
+			creator:         strings.TrimSpace(playlist.Creator),
+			description:     strings.TrimSpace(playlist.Description),
+			updatedAt:       time.Now(),
+		}
+		if state.totalTracks <= 0 {
+			state.totalTracks = len(state.tracks)
+		}
+		token := h.CollectionChosen.storeInlineCollectionState(state)
+		if keyboard := buildInlineCollectionOpenKeyboard(token, query.From.ID); keyboard != nil {
+			collectionArticle.ReplyMarkup = keyboard
+		}
+	}
+	inlineMsgs = append(inlineMsgs, collectionArticle)
+
+	tracks := playlist.Tracks
+	if len(tracks) > 0 {
+		pageSize := h.inlinePageSize()
+		totalTracks := playlist.TrackCount
+		if totalTracks <= 0 {
+			totalTracks = len(tracks)
+		}
+		pageCount := (totalTracks-1)/pageSize + 1
+		page := requestedPage
+		if page <= 0 || page > pageCount {
+			page = 1
+		}
+		start := (page - 1) * pageSize
+		if start < 0 {
+			start = 0
+		}
+		end := start + pageSize
+		if end > len(tracks) {
+			end = len(tracks)
+		}
+		for i := start; i < end; i++ {
+			inlineMsgs = append(inlineMsgs, buildInlineTrackArticle(ctx, h, platformName, tracks[i], qualityValue, query.From.ID))
+		}
+		footerText := fmt.Sprintf("第 %d 页 / 共 %d 页", page, pageCount)
+		hint := "在链接末尾加数字翻页，例如：链接 2"
+		inlineMsgs = append(inlineMsgs, &telego.InlineQueryResultArticle{
+			Type:                telego.ResultTypeArticle,
+			ID:                  fmt.Sprintf("collection_page_%d_%d_%d", page, pageCount, time.Now().UnixMicro()),
+			Title:               footerText,
+			Description:         hint,
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: hint},
+		})
+	}
+
+	_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{
+		InlineQueryID: query.ID,
+		IsPersonal:    true,
+		CacheTime:     1,
+		Results:       inlineMsgs,
+	})
 }
 
 func (h *InlineSearchHandler) inlineEmpty(ctx context.Context, b *telego.Bot, query *telego.InlineQuery) {

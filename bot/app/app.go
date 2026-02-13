@@ -347,29 +347,31 @@ func (a *App) Start(ctx context.Context) error {
 	if enableRecognize {
 		recognizeHandler = &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()}
 	}
+	chosenInlineHandler := &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter}
 
 	router := &handler.Router{
-		Music:            musicHandler,
-		Playlist:         playlistHandler,
-		Search:           searchHandler,
-		Lyric:            &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
-		Recognize:        recognizeHandler,
-		About:            &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
-		Status:           &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
-		Settings:         settingsHandler,
-		RmCache:          &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
-		Callback:         &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},
-		SettingsCallback: &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler, RateLimiter: rateLimiter},
-		SearchCallback:   searchCallback,
-		PlaylistCallback: playlistCallback,
-		Reload:           reloadHandler,
-		Admin:            adminHandler,
-		Inline:           &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: pageSize},
-		ChosenInline:     &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter},
-		PlatformManager:  a.PlatformManager,
-		AdminCommands:    adminCommandNames,
-		Whitelist:        whitelist,
-		Logger:           a.Logger,
+		Music:                    musicHandler,
+		Playlist:                 playlistHandler,
+		Search:                   searchHandler,
+		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		Recognize:                recognizeHandler,
+		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
+		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		Settings:                 settingsHandler,
+		RmCache:                  &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
+		Callback:                 &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},
+		SettingsCallback:         &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler, RateLimiter: rateLimiter},
+		SearchCallback:           searchCallback,
+		PlaylistCallback:         playlistCallback,
+		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
+		Reload:                   reloadHandler,
+		Admin:                    adminHandler,
+		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: pageSize},
+		ChosenInline:             chosenInlineHandler,
+		PlatformManager:          a.PlatformManager,
+		AdminCommands:            adminCommandNames,
+		Whitelist:                whitelist,
+		Logger:                   a.Logger,
 	}
 
 	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, nil)
