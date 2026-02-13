@@ -23,7 +23,13 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		musicU = cfg.GetString("MUSIC_U")
 	}
 	client := New(musicU, logger)
-	platform := NewPlatform(client)
+	disableRadar := true
+	if pluginCfg, ok := cfg.GetPluginConfig("netease"); ok {
+		if _, exists := pluginCfg["disable_radar"]; exists {
+			disableRadar = cfg.GetPluginBool("netease", "disable_radar")
+		}
+	}
+	platform := NewPlatform(client, disableRadar)
 	id3Provider := NewID3Provider(client)
 
 	contrib := &platformplugins.Contribution{
