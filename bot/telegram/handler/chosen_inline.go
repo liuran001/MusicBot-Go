@@ -177,7 +177,7 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 		}
 		clearInlineReplyMarkup()
 		setInlineText(waitForDown, nil)
-		songInfo, err := h.Music.prepareInlineSong(ctx, b, chosen.From.ID, platformName, trackID, qualityValue, progress)
+		songInfo, err := h.Music.prepareInlineSong(ctx, b, chosen.From.ID, chosen.From.Username, platformName, trackID, qualityValue, progress)
 		if err != nil {
 			if h.Music.Logger != nil {
 				h.Music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)

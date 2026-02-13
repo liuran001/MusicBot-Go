@@ -1640,6 +1640,7 @@ func (h *MusicHandler) prepareInlineSong(
 	ctx context.Context,
 	b *telego.Bot,
 	userID int64,
+	userName string,
 	platformName, trackID, qualityOverride string,
 	progress func(text string),
 ) (*botpkg.SongInfo, error) {
@@ -1746,6 +1747,12 @@ func (h *MusicHandler) prepareInlineSong(
 
 	var songInfo botpkg.SongInfo
 	fillSongInfoFromTrack(&songInfo, track, platformName, trackID, &telego.Message{})
+	if userID != 0 {
+		songInfo.FromUserID = userID
+	}
+	if strings.TrimSpace(userName) != "" {
+		songInfo.FromUserName = strings.TrimSpace(userName)
+	}
 	songInfo.Quality = actualQuality
 	songInfo.FileExt = info.Format
 	songInfo.MusicSize = int(info.Size)
