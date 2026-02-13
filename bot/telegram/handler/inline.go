@@ -89,7 +89,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 	if err != nil || playlist == nil {
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
-			ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()),
+			ID:                  inlineStableID("collection_empty", platformName+"|"+collectionID+"|"+qualityValue),
 			Title:               noResults,
 			Description:         "未找到专辑/歌单",
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
@@ -174,7 +174,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 			hint := "在链接末尾加数字翻页，例如：链接 2"
 			inlineMsgs = append(inlineMsgs, &telego.InlineQueryResultArticle{
 				Type:                telego.ResultTypeArticle,
-				ID:                  fmt.Sprintf("collection_page_%d_%d_%d", page, pageCount, time.Now().UnixMicro()),
+				ID:                  inlineStableID("collection_page", fmt.Sprintf("%s|%s|%d|%d", platformName, collectionID, page, pageCount)),
 				Title:               footerText,
 				Description:         hint,
 				InputMessageContent: &telego.InputTextMessageContent{MessageText: hint},
@@ -208,23 +208,22 @@ func (h *InlineSearchHandler) inlineEmpty(ctx context.Context, b *telego.Bot, qu
 }
 
 func (h *InlineSearchHandler) inlineHelp(ctx context.Context, b *telego.Bot, query *telego.InlineQuery) {
-	randomID := time.Now().UnixMicro()
 	platformName := h.resolveDefaultPlatform(ctx, query.From.ID)
 	qualityValue := h.resolveDefaultQuality(ctx, query.From.ID)
 	settingTitle := fmt.Sprintf("平台：%s | 音质：%s", platformDisplayName(h.PlatformManager, platformName), qualityDisplayName(qualityValue))
 	settingCard := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
-		ID:                  fmt.Sprintf("%d", randomID),
+		ID:                  inlineStableID("help_settings", fmt.Sprintf("%d|%s|%s", query.From.ID, platformName, qualityValue)),
 		Title:               settingTitle,
 		Description:         "点击修改设置",
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("当前用户设置\n平台：%s\n音质：%s\n\n💡 可在关键词后临时追加参数，例如：稻香 qq high", platformDisplayName(h.PlatformManager, platformName), qualityDisplayName(qualityValue))},
 		ReplyMarkup:         buildInlineSettingsKeyboard(h.BotName),
 	}
-	randomCard := h.buildInlineRandomCard(ctx, randomID+1, query.From.ID)
+	randomCard := h.buildInlineRandomCard(ctx, query.From.ID, query.From.ID)
 	if randomCard == nil {
 		randomCard = &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
-			ID:                  fmt.Sprintf("%d", randomID+1),
+			ID:                  inlineStableID("help_random_empty", fmt.Sprintf("%d", query.From.ID)),
 			Title:               "🎲 随机一首",
 			Description:         "当前缓存里暂无可随机歌曲",
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
@@ -273,7 +272,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 	if keyWord == "" {
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
-			ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()),
+			ID:                  "inline_empty_keyword",
 			Title:               "请输入关键词",
 			Description:         "MusicBot-Go",
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: "MusicBot-Go"},
@@ -350,7 +349,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 	if err != nil || len(tracks) == 0 {
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
-			ID:                  fmt.Sprintf("%d", time.Now().UnixMicro()),
+			ID:                  inlineStableID("inline_no_results", keyWord+"|"+platformName+"|"+qualityValue),
 			Title:               noResults,
 			Description:         noResults,
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
@@ -484,7 +483,7 @@ func buildInlineSearchHeader(h *InlineSearchHandler, platformName, qualityValue 
 	}
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
-		ID:                  fmt.Sprintf("meta_%d", time.Now().UnixMicro()),
+		ID:                  inlineStableID("meta", platformText+"|"+qualityText),
 		Title:               fmt.Sprintf("平台：%s | 音质：%s", platformText, qualityText),
 		Description:         "点击修改设置｜可在关键词后临时追加参数，例如：稻香 qq high",
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("当前用户设置\n平台：%s\n音质：%s\n\n💡 可在关键词后临时追加参数，例如：稻香 qq high", platformText, qualityText)},
@@ -528,11 +527,21 @@ func buildInlineSearchPageFooter(keyword, platformName, qualityValue string, pag
 	desc := fmt.Sprintf("共 %d 条结果｜在关键词末尾加数字翻页，如：%s", total, hintQuery)
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
-		ID:                  fmt.Sprintf("page_%d_%d_%d", page, pageCount, time.Now().UnixMicro()),
+		ID:                  inlineStableID("page", fmt.Sprintf("%s|%s|%s|%d|%d|%d", keyword, platformName, qualityValue, page, pageCount, total)),
 		Title:               title,
 		Description:         desc,
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: desc},
 	}
+}
+
+func inlineStableID(prefix, payload string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		prefix = "id"
+	}
+	payload = strings.TrimSpace(payload)
+	sum := md5.Sum([]byte(payload))
+	return fmt.Sprintf("%s_%x", prefix, sum[:6])
 }
 
 func parseInlineSearchOptions(text string, manager platform.Manager) (baseText, platformName, quality string, page int, invalidPageFallbackKeyword string) {
