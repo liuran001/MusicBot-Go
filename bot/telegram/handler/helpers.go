@@ -790,7 +790,10 @@ func matchPlatformTrack(ctx context.Context, manager platform.Manager, platformN
 			return id, true
 		}
 	}
-	return text, true
+	if isLikelyIDToken(text) && len(text) >= 5 {
+		return text, true
+	}
+	return "", false
 }
 
 func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, platformName, trackID string, message *telego.Message) {

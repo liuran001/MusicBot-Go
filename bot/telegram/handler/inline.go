@@ -51,7 +51,7 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 			return
 		}
 		normalized := normalizeInlineKeywordQuery(resolvedQuery)
-		baseText, platformSuffix, qualityOverride := parseTrailingOptions(normalized, h.PlatformManager)
+		baseText, platformSuffix, qualityOverride, requestedPage, invalidPageFallbackKeyword := parseInlineSearchOptions(normalized, h.PlatformManager)
 		baseText = strings.TrimSpace(baseText)
 		if baseText == "" {
 			h.inlineEmpty(ctx, b, query)
@@ -61,7 +61,7 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 			h.inlineCachedOrCommand(ctx, b, query, platformName, trackID, qualityOverride)
 			return
 		}
-		h.inlineSearch(ctx, b, query, baseText, platformSuffix, qualityOverride)
+		h.inlineSearch(ctx, b, query, baseText, platformSuffix, qualityOverride, requestedPage, invalidPageFallbackKeyword)
 	}
 }
 
@@ -112,7 +112,12 @@ func (h *InlineSearchHandler) inlineHelp(ctx context.Context, b *telego.Bot, que
 	})
 }
 
-func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, keyWord, requestedPlatform, qualityOverride string) {
+const (
+	inlineDefaultSearchLimit = 48
+	inlineNeteaseSearchLimit = 48
+)
+
+func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, keyWord, requestedPlatform, qualityOverride string, requestedPage int, invalidPageFallbackKeyword string) {
 	keyWord = strings.TrimSpace(keyWord)
 	if keyWord == "" {
 		inlineMsg := &telego.InlineQueryResultArticle{
@@ -170,22 +175,27 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 		return
 	}
 
-	limit := h.PageSize
-	if limit <= 0 {
-		limit = 8
-	}
-	tracks, err := plat.Search(ctx, keyWord, limit)
-	if (err != nil || len(tracks) == 0) && fallbackPlatform != "" && fallbackPlatform != platformName {
-		fallbackPlat := h.PlatformManager.Get(fallbackPlatform)
-		if fallbackPlat != nil && fallbackPlat.SupportsSearch() {
-			fallbackTracks, fallbackErr := fallbackPlat.Search(ctx, keyWord, limit)
-			if fallbackErr == nil && len(fallbackTracks) > 0 {
-				platformName = fallbackPlatform
-				tracks = fallbackTracks
-				err = nil
+	pageSize := h.inlinePageSize()
+	searchWithFallback := func(keyword string) ([]platform.Track, string, error) {
+		activePlatform := platformName
+		activeTracks, searchErr := plat.Search(ctx, keyword, h.inlineSearchLimit(activePlatform))
+		if (searchErr != nil || len(activeTracks) == 0) && fallbackPlatform != "" && fallbackPlatform != activePlatform {
+			fallbackPlat := h.PlatformManager.Get(fallbackPlatform)
+			if fallbackPlat != nil && fallbackPlat.SupportsSearch() {
+				fallbackTracks, fallbackErr := fallbackPlat.Search(ctx, keyword, h.inlineSearchLimit(fallbackPlatform))
+				if fallbackErr == nil && len(fallbackTracks) > 0 {
+					activePlatform = fallbackPlatform
+					activeTracks = fallbackTracks
+					searchErr = nil
+				}
 			}
 		}
+		return activeTracks, activePlatform, searchErr
 	}
+
+	tracks, matchedPlatform, err := searchWithFallback(keyWord)
+	platformName = matchedPlatform
+
 	if err != nil || len(tracks) == 0 {
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
@@ -199,15 +209,57 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 		return
 	}
 
-	inlineMsgs = make([]telego.InlineQueryResult, 0, limit+1)
+	pageCount := (len(tracks)-1)/pageSize + 1
+	page := requestedPage
+	if page > pageCount && strings.TrimSpace(invalidPageFallbackKeyword) != "" {
+		fallbackKeyword := strings.TrimSpace(invalidPageFallbackKeyword)
+		fallbackTracks, fallbackMatchedPlatform, fallbackErr := searchWithFallback(fallbackKeyword)
+		if fallbackErr == nil && len(fallbackTracks) > 0 {
+			keyWord = fallbackKeyword
+			tracks = fallbackTracks
+			platformName = fallbackMatchedPlatform
+			pageCount = (len(tracks)-1)/pageSize + 1
+		}
+	}
+	if page <= 0 || page > pageCount {
+		page = 1
+	}
+	start := (page - 1) * pageSize
+	if start < 0 {
+		start = 0
+	}
+	end := start + pageSize
+	if end > len(tracks) {
+		end = len(tracks)
+	}
+
+	inlineMsgs = make([]telego.InlineQueryResult, 0, pageSize+2)
 	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(h, platformName, qualityValue))
-	for i := 0; i < len(tracks) && i < limit; i++ {
+	for i := start; i < end; i++ {
 		track := tracks[i]
 		inlineMsg := buildInlineTrackArticle(ctx, h, platformName, track, qualityValue, query.From.ID)
 		inlineMsgs = append(inlineMsgs, inlineMsg)
 	}
+	inlineMsgs = append(inlineMsgs, buildInlineSearchPageFooter(keyWord, requestedPlatform, qualityOverride, page, pageCount, len(tracks)))
 	params.Results = inlineMsgs
 	_ = b.AnswerInlineQuery(ctx, params)
+}
+
+func (h *InlineSearchHandler) inlinePageSize() int {
+	if h == nil || h.PageSize <= 0 {
+		return 8
+	}
+	if h.PageSize > 48 {
+		return 48
+	}
+	return h.PageSize
+}
+
+func (h *InlineSearchHandler) inlineSearchLimit(platformName string) int {
+	if strings.TrimSpace(strings.ToLower(platformName)) == "netease" {
+		return inlineNeteaseSearchLimit
+	}
+	return inlineDefaultSearchLimit
 }
 
 func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, platformName, trackID, qualityOverride string) {
@@ -286,6 +338,95 @@ func buildInlineSearchHeader(h *InlineSearchHandler, platformName, qualityValue 
 		Description:         "点击修改设置",
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("当前用户设置\n平台：%s\n音质：%s\n\n💡 可在关键词后临时追加参数，例如：稻香 qq high", platformText, qualityText)},
 		ReplyMarkup:         replyMarkup,
+	}
+}
+
+func buildInlineSearchPageFooter(keyword, platformName, qualityValue string, page, pageCount, total int) telego.InlineQueryResult {
+	keyword = strings.TrimSpace(keyword)
+	platformName = inlinePageHintPlatformToken(strings.TrimSpace(platformName))
+	qualityValue = strings.TrimSpace(qualityValue)
+	if page < 1 {
+		page = 1
+	}
+	if pageCount < 1 {
+		pageCount = 1
+	}
+	if total < 0 {
+		total = 0
+	}
+	queryParts := make([]string, 0, 4)
+	if keyword != "" {
+		queryParts = append(queryParts, keyword)
+	}
+	if platformName != "" {
+		queryParts = append(queryParts, platformName)
+	}
+	if qualityValue != "" {
+		queryParts = append(queryParts, qualityValue)
+	}
+	nextPage := page + 1
+	if nextPage < 2 || nextPage > pageCount {
+		nextPage = 2
+	}
+	queryParts = append(queryParts, strconv.Itoa(nextPage))
+	hintQuery := strings.TrimSpace(strings.Join(queryParts, " "))
+	if hintQuery == "2" {
+		hintQuery = "关键词 qq hires 2"
+	}
+	title := fmt.Sprintf("第 %d 页 / 共 %d 页", page, pageCount)
+	desc := fmt.Sprintf("共 %d 条结果；在关键词末尾加数字翻页，如：%s", total, hintQuery)
+	return &telego.InlineQueryResultArticle{
+		Type:                telego.ResultTypeArticle,
+		ID:                  fmt.Sprintf("page_%d_%d_%d", page, pageCount, time.Now().UnixMicro()),
+		Title:               title,
+		Description:         desc,
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: desc},
+	}
+}
+
+func parseInlineSearchOptions(text string, manager platform.Manager) (baseText, platformName, quality string, page int, invalidPageFallbackKeyword string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", "", "", 1, ""
+	}
+	baseText, platformName, quality = parseTrailingOptions(trimmed, manager)
+	page = 1
+	invalidPageFallbackKeyword = ""
+
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 {
+		return baseText, platformName, quality, page, invalidPageFallbackKeyword
+	}
+	last := strings.TrimSpace(fields[len(fields)-1])
+	candidate, err := strconv.Atoi(last)
+	if err != nil {
+		return baseText, platformName, quality, page, invalidPageFallbackKeyword
+	}
+	if candidate <= 0 {
+		return baseText, platformName, quality, page, invalidPageFallbackKeyword
+	}
+
+	withoutPage := strings.TrimSpace(strings.Join(fields[:len(fields)-1], " "))
+	parsedBase, parsedPlatform, parsedQuality := parseTrailingOptions(withoutPage, manager)
+	if strings.TrimSpace(parsedBase) == "" {
+		return baseText, platformName, quality, page, invalidPageFallbackKeyword
+	}
+	if strings.TrimSpace(parsedPlatform) != "" || strings.TrimSpace(parsedQuality) != "" {
+		return parsedBase, parsedPlatform, parsedQuality, candidate, invalidPageFallbackKeyword
+	}
+	if candidate > 9 {
+		return baseText, platformName, quality, page, invalidPageFallbackKeyword
+	}
+	invalidPageFallbackKeyword = baseText
+	return parsedBase, parsedPlatform, parsedQuality, candidate, invalidPageFallbackKeyword
+}
+
+func inlinePageHintPlatformToken(platformName string) string {
+	switch strings.ToLower(strings.TrimSpace(platformName)) {
+	case "qqmusic":
+		return "qq"
+	default:
+		return strings.TrimSpace(platformName)
 	}
 }
 
