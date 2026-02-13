@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
@@ -300,5 +301,56 @@ func TestRepositoryGetUserSettingsConcurrentCreate(t *testing.T) {
 	}
 	if count != workers {
 		t.Fatalf("expected %d results, got %d", workers, count)
+	}
+}
+
+func TestSQLitePoolDefaultsFromEnv(t *testing.T) {
+	t.Setenv("MUSICBOT_DB_SQLITE_MAX_OPEN_CONNS", "")
+	t.Setenv("MUSICBOT_DB_SQLITE_MAX_IDLE_CONNS", "")
+	t.Setenv("MUSICBOT_DB_SQLITE_CONN_MAX_LIFETIME", "")
+
+	maxOpen, maxIdle, maxLifetime := sqlitePoolDefaultsFromEnv()
+	if maxOpen != 4 {
+		t.Fatalf("unexpected default maxOpen: %d", maxOpen)
+	}
+	if maxIdle != 2 {
+		t.Fatalf("unexpected default maxIdle: %d", maxIdle)
+	}
+	if maxLifetime != time.Hour {
+		t.Fatalf("unexpected default maxLifetime: %s", maxLifetime)
+	}
+}
+
+func TestSQLitePoolDefaultsFromEnv_OverrideAndClamp(t *testing.T) {
+	t.Setenv("MUSICBOT_DB_SQLITE_MAX_OPEN_CONNS", "3")
+	t.Setenv("MUSICBOT_DB_SQLITE_MAX_IDLE_CONNS", "10")
+	t.Setenv("MUSICBOT_DB_SQLITE_CONN_MAX_LIFETIME", "30m")
+
+	maxOpen, maxIdle, maxLifetime := sqlitePoolDefaultsFromEnv()
+	if maxOpen != 3 {
+		t.Fatalf("unexpected maxOpen: %d", maxOpen)
+	}
+	if maxIdle != 3 {
+		t.Fatalf("expected maxIdle clamped to 3, got %d", maxIdle)
+	}
+	if maxLifetime != 30*time.Minute {
+		t.Fatalf("unexpected maxLifetime: %s", maxLifetime)
+	}
+}
+
+func TestSQLitePoolDefaultsFromEnv_InvalidValuesFallback(t *testing.T) {
+	t.Setenv("MUSICBOT_DB_SQLITE_MAX_OPEN_CONNS", "0")
+	t.Setenv("MUSICBOT_DB_SQLITE_MAX_IDLE_CONNS", "-1")
+	t.Setenv("MUSICBOT_DB_SQLITE_CONN_MAX_LIFETIME", "bad-duration")
+
+	maxOpen, maxIdle, maxLifetime := sqlitePoolDefaultsFromEnv()
+	if maxOpen != 4 {
+		t.Fatalf("unexpected fallback maxOpen: %d", maxOpen)
+	}
+	if maxIdle != 2 {
+		t.Fatalf("unexpected fallback maxIdle: %d", maxIdle)
+	}
+	if maxLifetime != time.Hour {
+		t.Fatalf("unexpected fallback maxLifetime: %s", maxLifetime)
 	}
 }

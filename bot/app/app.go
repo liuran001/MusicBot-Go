@@ -277,6 +277,7 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	uploadQueueSize := a.Config.GetInt("UploadQueueSize")
 	uploadWorkerCount := a.Config.GetInt("UploadWorkerCount")
+	downloadQueueWaitLimit := a.Config.GetInt("DownloadQueueWaitLimit")
 	defaultPlatform := strings.TrimSpace(a.Config.GetString("DefaultPlatform"))
 	if defaultPlatform == "" {
 		defaultPlatform = "netease"
@@ -314,29 +315,30 @@ func (a *App) Start(ctx context.Context) error {
 	playlistCallback := &handler.PlaylistCallbackHandler{Playlist: playlistHandler, RateLimiter: rateLimiter}
 
 	musicHandler := &handler.MusicHandler{
-		Repo:               a.DB,
-		Pool:               a.Pool,
-		Logger:             a.Logger,
-		CacheDir:           cacheDir,
-		BotName:            botName,
-		DefaultQuality:     defaultQuality,
-		InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")),
-		DefaultPlatform:    defaultPlatform,
-		FallbackPlatform:   searchFallback,
-		AdminIDs:           a.AdminIDs,
-		AdminCommands:      adminCommands,
-		PlatformManager:    a.PlatformManager,
-		DownloadService:    downloadService,
-		ID3Service:         id3Service,
-		TagProviders:       tagProviders,
-		Limiter:            downloadLimiter,
-		UploadLimiter:      uploadLimiter,
-		UploadWorkerCount:  uploadWorkerCount,
-		UploadQueueSize:    uploadQueueSize,
-		UploadBot:          a.Telegram.UploadClient(),
-		RateLimiter:        rateLimiter,
-		Playlist:           playlistHandler,
-		RecognizeEnabled:   a.Config.GetBool("EnableRecognize"),
+		Repo:                   a.DB,
+		Pool:                   a.Pool,
+		Logger:                 a.Logger,
+		CacheDir:               cacheDir,
+		BotName:                botName,
+		DefaultQuality:         defaultQuality,
+		InlineUploadChatID:     int64(a.Config.GetInt("InlineUploadChatID")),
+		DefaultPlatform:        defaultPlatform,
+		FallbackPlatform:       searchFallback,
+		AdminIDs:               a.AdminIDs,
+		AdminCommands:          adminCommands,
+		PlatformManager:        a.PlatformManager,
+		DownloadService:        downloadService,
+		ID3Service:             id3Service,
+		TagProviders:           tagProviders,
+		Limiter:                downloadLimiter,
+		UploadLimiter:          uploadLimiter,
+		UploadWorkerCount:      uploadWorkerCount,
+		UploadQueueSize:        uploadQueueSize,
+		DownloadQueueWaitLimit: downloadQueueWaitLimit,
+		UploadBot:              a.Telegram.UploadClient(),
+		RateLimiter:            rateLimiter,
+		Playlist:               playlistHandler,
+		RecognizeEnabled:       a.Config.GetBool("EnableRecognize"),
 	}
 	musicHandler.StartWorker(ctx)
 

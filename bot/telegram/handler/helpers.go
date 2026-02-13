@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -429,6 +430,9 @@ func userVisibleDownloadError(err error) string {
 		}
 		if strings.Contains(errText, downloadTimeout) {
 			return downloadTimeout
+		}
+		if errors.Is(err, errDownloadQueueOverloaded) || strings.Contains(errText, "download queue overloaded") {
+			return "当前下载任务过多，请稍后再试"
 		}
 	}
 	return "下载/发送失败，请稍后重试"

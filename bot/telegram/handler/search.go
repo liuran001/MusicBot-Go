@@ -28,19 +28,52 @@ type SearchHandler struct {
 }
 
 const (
-	searchCacheTTL     = 10 * time.Minute
-	defaultSearchLimit = 48
-	neteaseSearchLimit = 48
+	searchCacheTTL        = 10 * time.Minute
+	searchCacheMaxEntries = 256
+	defaultSearchLimit    = 48
+	neteaseSearchLimit    = 48
 )
 
 type searchState struct {
-	keyword     string
-	platform    string
-	quality     string
-	requesterID int64
-	limit       int
-	currentPage int
-	updatedAt   time.Time
+	keyword          string
+	platform         string
+	quality          string
+	requesterID      int64
+	limit            int
+	currentPage      int
+	updatedAt        time.Time
+	tracksByPlatform map[string][]platform.Track
+}
+
+func (s *searchState) setTracks(platformName string, tracks []platform.Track) {
+	if s == nil {
+		return
+	}
+	name := strings.TrimSpace(platformName)
+	if name == "" || len(tracks) == 0 {
+		return
+	}
+	if s.tracksByPlatform == nil {
+		s.tracksByPlatform = make(map[string][]platform.Track)
+	}
+	copied := make([]platform.Track, len(tracks))
+	copy(copied, tracks)
+	s.tracksByPlatform[name] = copied
+}
+
+func (s *searchState) getTracks(platformName string) ([]platform.Track, bool) {
+	if s == nil || s.tracksByPlatform == nil {
+		return nil, false
+	}
+	name := strings.TrimSpace(platformName)
+	if name == "" {
+		return nil, false
+	}
+	tracks, ok := s.tracksByPlatform[name]
+	if !ok || len(tracks) == 0 {
+		return nil, false
+	}
+	return tracks, true
 }
 
 func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -256,7 +289,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	} else {
 		_, _ = b.EditMessageText(ctx, params)
 	}
-	h.storeSearchState(msgResult.MessageID, &searchState{
+	state := &searchState{
 		keyword:     keyword,
 		platform:    platformName,
 		quality:     qualityValue,
@@ -264,7 +297,9 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		limit:       searchLimit,
 		currentPage: 1,
 		updatedAt:   time.Now(),
-	})
+	}
+	state.setTracks(platformName, tracks)
+	h.storeSearchState(msgResult.MessageID, state)
 }
 
 type SearchCallbackHandler struct {
@@ -369,24 +404,28 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	if limit <= 0 {
 		limit = page * pageSize
 	}
-	tracks, err := plat.Search(ctx, state.keyword, limit)
-	if err != nil {
-		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: "搜索失败，请稍后重试"}
-		if h.RateLimiter != nil {
-			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
-		} else {
-			_, _ = b.EditMessageText(ctx, params)
+	tracks, ok := state.getTracks(state.platform)
+	if !ok {
+		tracks, err = plat.Search(ctx, state.keyword, limit)
+		if err != nil {
+			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: "搜索失败，请稍后重试"}
+			if h.RateLimiter != nil {
+				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.EditMessageText(ctx, params)
+			}
+			return
 		}
-		return
-	}
-	if len(tracks) == 0 {
-		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: noResults}
-		if h.RateLimiter != nil {
-			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
-		} else {
-			_, _ = b.EditMessageText(ctx, params)
+		if len(tracks) == 0 {
+			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: noResults}
+			if h.RateLimiter != nil {
+				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_, _ = b.EditMessageText(ctx, params)
+			}
+			return
 		}
-		return
+		state.setTracks(state.platform, tracks)
 	}
 	manager := h.Search.PlatformManager
 	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
@@ -626,5 +665,22 @@ func (h *SearchHandler) cleanupSearchStateLocked() {
 		if state == nil || state.updatedAt.Before(cutoff) {
 			delete(h.searchCache, key)
 		}
+	}
+	for len(h.searchCache) > searchCacheMaxEntries {
+		oldestKey := 0
+		oldestTime := time.Now()
+		first := true
+		for key, state := range h.searchCache {
+			updatedAt := time.Time{}
+			if state != nil {
+				updatedAt = state.updatedAt
+			}
+			if first || updatedAt.Before(oldestTime) {
+				first = false
+				oldestKey = key
+				oldestTime = updatedAt
+			}
+		}
+		delete(h.searchCache, oldestKey)
 	}
 }

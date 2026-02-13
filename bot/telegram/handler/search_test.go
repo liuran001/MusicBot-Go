@@ -371,3 +371,47 @@ func TestSearchHandler_cleanupSearchStateLocked(t *testing.T) {
 		t.Error("cleanupSearchStateLocked: recent state should be kept")
 	}
 }
+
+func TestSearchState_TracksCacheByPlatform(t *testing.T) {
+	state := &searchState{}
+	tracks := []platform.Track{{ID: "1", Title: "Song 1"}}
+	state.setTracks("netease", tracks)
+
+	cached, ok := state.getTracks("netease")
+	if !ok {
+		t.Fatal("getTracks: expected cache hit")
+	}
+	if len(cached) != 1 || cached[0].ID != "1" {
+		t.Fatalf("getTracks: unexpected cached tracks: %+v", cached)
+	}
+
+	tracks[0].Title = "mutated"
+	cached2, ok := state.getTracks("netease")
+	if !ok {
+		t.Fatal("getTracks: expected cache hit after source mutation")
+	}
+	if cached2[0].Title != "Song 1" {
+		t.Errorf("setTracks should copy input slice, got title %q", cached2[0].Title)
+	}
+}
+
+func TestSearchHandler_cleanupSearchStateLocked_MaxEntries(t *testing.T) {
+	handler := &SearchHandler{}
+	now := time.Now()
+
+	handler.searchMu.Lock()
+	handler.searchCache = make(map[int]*searchState, searchCacheMaxEntries+8)
+	for i := 1; i <= searchCacheMaxEntries+8; i++ {
+		handler.searchCache[i] = &searchState{
+			keyword:   "k",
+			updatedAt: now.Add(time.Duration(-i) * time.Second),
+		}
+	}
+	handler.cleanupSearchStateLocked()
+	finalSize := len(handler.searchCache)
+	handler.searchMu.Unlock()
+
+	if finalSize > searchCacheMaxEntries {
+		t.Fatalf("cleanupSearchStateLocked: size=%d, want <= %d", finalSize, searchCacheMaxEntries)
+	}
+}

@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"image"
 	"image/draw"
@@ -16,25 +14,8 @@ import (
 
 // resizeImg scales the image to 320x320 with padding.
 func resizeImg(filePath string) (string, error) {
-	file, err := os.Open(filePath)
+	img, err := decodeJPEGOrPNG(filePath)
 	if err != nil {
-		return "", err
-	}
-	buffer, err := io.ReadAll(bufio.NewReader(file))
-	if err != nil {
-		_ = file.Close()
-		return "", err
-	}
-
-	img, err := jpeg.Decode(bytes.NewReader(buffer))
-	if err != nil {
-		img, err = png.Decode(bytes.NewReader(buffer))
-		if err != nil {
-			_ = file.Close()
-			return "", fmt.Errorf("image decode error %s", filePath)
-		}
-	}
-	if err := file.Close(); err != nil {
 		return "", err
 	}
 
@@ -90,4 +71,30 @@ func resizeImg(filePath string) (string, error) {
 		return "", err
 	}
 	return filePath + ".resize.jpg", nil
+}
+
+func decodeJPEGOrPNG(filePath string) (image.Image, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	img, jpegErr := jpeg.Decode(file)
+	if jpegErr == nil {
+		return img, nil
+	}
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	img, pngErr := png.Decode(file)
+	if pngErr == nil {
+		return img, nil
+	}
+
+	return nil, fmt.Errorf("image decode error %s", filePath)
 }
