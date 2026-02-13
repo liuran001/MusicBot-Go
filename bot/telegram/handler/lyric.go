@@ -46,11 +46,18 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 	}
 
-	msgResult, err := b.SendMessage(ctx, &telego.SendMessageParams{
+	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		Text:            fetchingLyric,
 		ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
-	})
+	}
+	var msgResult *telego.Message
+	var err error
+	if h.RateLimiter != nil {
+		msgResult, err = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendParams)
+	} else {
+		msgResult, err = b.SendMessage(ctx, sendParams)
+	}
 	if err != nil {
 		return
 	}

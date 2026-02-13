@@ -934,7 +934,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 			Text:      text,
 		}
 		if h.RateLimiter != nil {
-			if editedMsg, err := telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, editParams); err == nil {
+			if editedMsg, err := telegram.EditMessageTextBestEffort(ctx, h.RateLimiter, b, editParams); err == nil {
 				if editedMsg != nil {
 					msg = editedMsg
 				} else {
@@ -1294,7 +1294,13 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 			MessageID: entry.message.MessageID,
 			Text:      text,
 		}
-		editedMsg, err := entry.bot.EditMessageText(ctx, params)
+		var editedMsg *telego.Message
+		var err error
+		if h.RateLimiter != nil {
+			editedMsg, err = telegram.EditMessageTextBestEffort(ctx, h.RateLimiter, entry.bot, params)
+		} else {
+			editedMsg, err = entry.bot.EditMessageText(ctx, params)
+		}
 		if err == nil {
 			if editedMsg != nil {
 				h.updateQueuedStatusMessage(entry.message.MessageID, editedMsg)

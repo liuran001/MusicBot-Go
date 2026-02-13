@@ -28,6 +28,7 @@ type playlistState struct {
 	collection   string
 	quality      string
 	requesterID  int64
+	currentPage  int
 	updatedAt    time.Time
 	totalTracks  int
 	displayLimit int
@@ -84,12 +85,19 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 
 	threadID := message.MessageThreadID
 	replyParams := buildReplyParams(message)
-	msgResult, err := b.SendMessage(ctx, &telego.SendMessageParams{
+	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,
 		Text:            fetchingText,
 		ReplyParameters: replyParams,
-	})
+	}
+	var msgResult *telego.Message
+	var err error
+	if h.RateLimiter != nil {
+		msgResult, err = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendParams)
+	} else {
+		msgResult, err = b.SendMessage(ctx, sendParams)
+	}
 	if err != nil {
 		return true
 	}
@@ -158,6 +166,7 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		collection:   collectionType,
 		quality:      qualityValue,
 		requesterID:  requesterID,
+		currentPage:  1,
 		updatedAt:    time.Now(),
 		totalTracks:  totalTracks,
 		displayLimit: 0,
@@ -244,6 +253,10 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	if page < 1 {
 		page = 1
 	}
+	if state.currentPage == page {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", page)})
+		return
+	}
 	totalTracks := state.totalTracks
 	if totalTracks <= 0 {
 		totalTracks = len(state.playlist.Tracks)
@@ -290,10 +303,14 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 	}
 	if h.RateLimiter != nil {
-		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		_, err = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 	} else {
-		_, _ = b.EditMessageText(ctx, params)
+		_, err = b.EditMessageText(ctx, params)
 	}
+	if err != nil {
+		return
+	}
+	state.currentPage = page
 	h.Playlist.storePlaylistState(messageID, state)
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 }
