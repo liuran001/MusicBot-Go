@@ -109,9 +109,9 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 	clearInlineReplyMarkup := func() {
 		_, _ = b.EditMessageReplyMarkup(ctx, &telego.EditMessageReplyMarkupParams{InlineMessageID: chosen.InlineMessageID})
 	}
-	editInlineMedia := func(songInfo *botpkg.SongInfo) error {
+	editInlineMedia := func(songInfo *botpkg.SongInfo) (bool, error) {
 		if songInfo == nil || strings.TrimSpace(songInfo.FileID) == "" {
-			return fmt.Errorf("inline media requires file_id")
+			return false, fmt.Errorf("inline media requires file_id")
 		}
 		media := &telego.InputMediaAudio{
 			Type:      telego.MediaTypeAudio,
@@ -132,9 +132,12 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 			ReplyMarkup:     replyMarkup,
 		})
 		if err != nil && telegram.IsMessageNotModified(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		if err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 
 	progress := func(text string) {
@@ -150,12 +153,18 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 		setInlineText(buildMusicInfoText("", "", "", userVisibleDownloadError(err)))
 		return
 	}
-	if err := editInlineMedia(songInfo); err != nil {
+	modified, err := editInlineMedia(songInfo)
+	if err != nil {
 		if h.Music.Logger != nil {
 			h.Music.Logger.Error("failed to edit inline media", "platform", platformName, "trackID", trackID, "error", err)
 		}
 		setInlineText(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err)))
 		return
+	}
+	if modified && h.Music.Repo != nil {
+		if err := h.Music.Repo.IncrementSendCount(ctx); err != nil && h.Music.Logger != nil {
+			h.Music.Logger.Error("failed to update send count", "error", err)
+		}
 	}
 }
 
