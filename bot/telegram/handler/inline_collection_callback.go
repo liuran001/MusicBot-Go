@@ -92,6 +92,10 @@ func (h *InlineCollectionCallbackHandler) Handle(ctx context.Context, b *telego.
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", targetPage)})
 			return
 		}
+		if err := h.Chosen.ensureInlineCollectionChunk(ctx, state, targetPage); err != nil {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "加载失败，请重试", ShowAlert: true})
+			return
+		}
 
 		text, markup := h.Chosen.renderInlineCollectionPage(state, token, targetPage)
 		params := &telego.EditMessageTextParams{
