@@ -126,6 +126,11 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 
 	poolSize := conf.GetInt("WorkerPoolSize")
 	pool := worker.New(poolSize)
+	pool.SetPanicHandler(func(recovered any, stack []byte) {
+		if log != nil {
+			log.Error("worker task panic recovered", "panic", recovered, "stack", string(stack))
+		}
+	})
 
 	platformManager := platform.NewManager()
 	dynManager := dynplugin.NewManager(log)
@@ -232,6 +237,7 @@ func (a *App) Start(ctx context.Context) error {
 		Timeout:              time.Duration(a.Config.GetInt("DownloadTimeout")) * time.Second,
 		ReverseProxy:         a.Config.GetString("ReverseProxy"),
 		CheckMD5:             a.Config.GetBool("CheckMD5"),
+		MaxRetries:           a.Config.GetInt("DownloadMaxRetries"),
 		EnableMultipart:      a.Config.GetBool("EnableMultipartDownload"),
 		MultipartConcurrency: a.Config.GetInt("MultipartConcurrency"),
 		MultipartMinSize:     int64(a.Config.GetInt("MultipartMinSizeMB")) * 1024 * 1024,
@@ -248,7 +254,15 @@ func (a *App) Start(ctx context.Context) error {
 	if rateLimitBurst <= 0 {
 		rateLimitBurst = 3
 	}
-	rateLimiter := telegram.NewRateLimiter(rateLimitPerSecond, rateLimitBurst)
+	globalRateLimitPerSecond := a.Config.GetFloat64("GlobalRateLimitPerSecond")
+	if globalRateLimitPerSecond < 0 {
+		globalRateLimitPerSecond = 0
+	}
+	globalRateLimitBurst := a.Config.GetInt("GlobalRateLimitBurst")
+	if globalRateLimitBurst < 0 {
+		globalRateLimitBurst = 0
+	}
+	rateLimiter := telegram.NewRateLimiterWithGlobal(rateLimitPerSecond, rateLimitBurst, globalRateLimitPerSecond, globalRateLimitBurst)
 	rateLimiter.SetLogger(a.Logger)
 
 	downloadConcurrency := a.Config.GetInt("DownloadConcurrency")
@@ -262,6 +276,7 @@ func (a *App) Start(ctx context.Context) error {
 		uploadLimiter = make(chan struct{}, uploadConcurrency)
 	}
 	uploadQueueSize := a.Config.GetInt("UploadQueueSize")
+	uploadWorkerCount := a.Config.GetInt("UploadWorkerCount")
 	defaultPlatform := strings.TrimSpace(a.Config.GetString("DefaultPlatform"))
 	if defaultPlatform == "" {
 		defaultPlatform = "netease"
@@ -316,6 +331,7 @@ func (a *App) Start(ctx context.Context) error {
 		TagProviders:       tagProviders,
 		Limiter:            downloadLimiter,
 		UploadLimiter:      uploadLimiter,
+		UploadWorkerCount:  uploadWorkerCount,
 		UploadQueueSize:    uploadQueueSize,
 		UploadBot:          a.Telegram.UploadClient(),
 		RateLimiter:        rateLimiter,
@@ -400,12 +416,16 @@ func (a *App) Start(ctx context.Context) error {
 		telego.BotCommand{Command: "status", Description: "查看统计信息"},
 		telego.BotCommand{Command: "about", Description: "关于本 Bot"},
 	)
-	_ = a.Telegram.Client().SetMyCommands(ctx, &telego.SetMyCommandsParams{
+	if err := a.Telegram.Client().SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: commands,
-	})
+	}); err != nil && a.Logger != nil {
+		a.Logger.Warn("failed to set bot commands", "error", err)
+	}
 
 	go func() {
-		_ = botHandler.Start()
+		if err := botHandler.Start(); err != nil && a.Logger != nil {
+			a.Logger.Error("telegram bot handler stopped with error", "error", err)
+		}
 	}()
 	return nil
 }

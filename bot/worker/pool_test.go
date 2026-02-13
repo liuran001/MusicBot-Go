@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,5 +68,36 @@ func TestPoolSubmitWaitContextTimeout(t *testing.T) {
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+}
+
+func TestPoolPanicHandlerCalled(t *testing.T) {
+	pool := New(1)
+	defer func() {
+		_ = pool.Shutdown(context.Background())
+	}()
+
+	called := make(chan struct{}, 1)
+	pool.SetPanicHandler(func(recovered any, stack []byte) {
+		if recovered == nil {
+			t.Errorf("expected recovered value")
+		}
+		if len(stack) == 0 || !strings.Contains(string(stack), "TestPoolPanicHandlerCalled") {
+			t.Errorf("expected stack trace to include test function")
+		}
+		select {
+		case called <- struct{}{}:
+		default:
+		}
+	})
+
+	if err := pool.Submit(func() { panic("boom") }); err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("panic handler was not called")
 	}
 }

@@ -28,6 +28,12 @@ type InlineSearchHandler struct {
 	PageSize         int
 }
 
+var (
+	qqCoverResizePattern = regexp.MustCompile(`T002R\d+x\d+M000`)
+	qqCoverMidPattern    = regexp.MustCompile(`T002M000([A-Za-z0-9]+)\.jpg`)
+	qqSongMidPattern     = regexp.MustCompile(`T062M000([A-Za-z0-9]+)\.jpg`)
+)
+
 func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.InlineQuery == nil {
 		return
@@ -653,18 +659,15 @@ func buildInlineThumbnailURL(platformName, rawURL string, size int) string {
 
 	// QQ音乐: T002R{size}x{size}M000
 	if strings.Contains(plat, "qq") || strings.Contains(plat, "tencent") {
-		re := regexp.MustCompile(`T002R\d+x\d+M000`)
-		if re.MatchString(rawURL) {
-			return re.ReplaceAllString(rawURL, fmt.Sprintf("T002R%dx%dM000", size, size))
+		if qqCoverResizePattern.MatchString(rawURL) {
+			return qqCoverResizePattern.ReplaceAllString(rawURL, fmt.Sprintf("T002R%dx%dM000", size, size))
 		}
 		// QQ 搜索结果常见格式: T002M000{mid}.jpg
-		reMid := regexp.MustCompile(`T002M000([A-Za-z0-9]+)\.jpg`)
-		if matches := reMid.FindStringSubmatch(rawURL); len(matches) == 2 {
+		if matches := qqCoverMidPattern.FindStringSubmatch(rawURL); len(matches) == 2 {
 			return strings.Replace(rawURL, matches[0], fmt.Sprintf("T002R%dx%dM000%s.jpg", size, size, matches[1]), 1)
 		}
 		// QQ 单曲封面格式: T062M000{mid}.jpg -> T062R{size}x{size}M000{mid}.jpg
-		reSong := regexp.MustCompile(`T062M000([A-Za-z0-9]+)\.jpg`)
-		if matches := reSong.FindStringSubmatch(rawURL); len(matches) == 2 {
+		if matches := qqSongMidPattern.FindStringSubmatch(rawURL); len(matches) == 2 {
 			return strings.Replace(rawURL, matches[0], fmt.Sprintf("T062R%dx%dM000%s.jpg", size, size, matches[1]), 1)
 		}
 	}

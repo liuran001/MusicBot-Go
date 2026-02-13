@@ -5,7 +5,14 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"sync"
 )
+
+var copyWithProgressBufferPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 32*1024)
+	},
+}
 
 func VerifyMD5(filePath, expected string) (bool, error) {
 	if expected == "" {
@@ -55,7 +62,8 @@ func CopyWithProgress(dst io.Writer, src io.Reader, total int64, progress Progre
 		return io.Copy(dst, src)
 	}
 
-	buf := make([]byte, 32*1024)
+	buf := copyWithProgressBufferPool.Get().([]byte)
+	defer copyWithProgressBufferPool.Put(buf)
 	var written int64
 
 	for {
