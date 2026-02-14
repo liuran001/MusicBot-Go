@@ -612,21 +612,16 @@ func groupSettingsToInternal(settings GroupSettingsModel) *bot.GroupSettings {
 // GetUserSettings retrieves settings for a user, creating default if not exists.
 func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.UserSettings, error) {
 	var settings UserSettingsModel
-	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		defaults := UserSettingsModel{
-			UserID:          userID,
+	err := r.db.WithContext(ctx).
+		Where(UserSettingsModel{UserID: userID}).
+		Attrs(UserSettingsModel{
 			DefaultPlatform: r.defaultPlatform,
 			DefaultQuality:  r.defaultQuality,
 			AutoDeleteList:  false,
 			AutoLinkDetect:  true,
-		}
-		if createErr := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_id"}},
-			DoNothing: true,
-		}).Create(&defaults).Error; createErr != nil {
-			return nil, createErr
-		}
+		}).
+		FirstOrCreate(&settings).Error
+	if isSQLiteUniqueConstraint(err) {
 		err = r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
 	}
 	if err != nil {
@@ -638,27 +633,30 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 // GetGroupSettings retrieves settings for a group, creating default if not exists.
 func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.GroupSettings, error) {
 	var settings GroupSettingsModel
-	err := r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		defaults := GroupSettingsModel{
-			ChatID:          chatID,
+	err := r.db.WithContext(ctx).
+		Where(GroupSettingsModel{ChatID: chatID}).
+		Attrs(GroupSettingsModel{
 			DefaultPlatform: r.defaultPlatform,
 			DefaultQuality:  r.defaultQuality,
 			AutoDeleteList:  true,
 			AutoLinkDetect:  true,
-		}
-		if createErr := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "chat_id"}},
-			DoNothing: true,
-		}).Create(&defaults).Error; createErr != nil {
-			return nil, createErr
-		}
+		}).
+		FirstOrCreate(&settings).Error
+	if isSQLiteUniqueConstraint(err) {
 		err = r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
 	}
 	if err != nil {
 		return nil, err
 	}
 	return groupSettingsToInternal(settings), nil
+}
+
+func isSQLiteUniqueConstraint(err error) bool {
+	if err == nil {
+		return false
+	}
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, "unique constraint failed")
 }
 
 // UpdateUserSettings updates user settings.

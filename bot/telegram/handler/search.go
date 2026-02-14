@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -173,14 +172,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	tracks, platformName, usedFallback, err := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.searchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
-		errorText := noResults
-		if errors.Is(err, platform.ErrUnsupported) {
-			errorText = "此平台不支持搜索功能"
-		} else if errors.Is(err, platform.ErrRateLimited) {
-			errorText = "请求过于频繁，请稍后再试"
-		} else if errors.Is(err, platform.ErrUnavailable) {
-			errorText = "搜索服务暂时不可用"
-		}
+		errorText := userVisibleSearchError(err, "搜索服务暂时不可用")
 		params := &telego.EditMessageTextParams{
 			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
 			MessageID: msgResult.MessageID,

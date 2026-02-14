@@ -313,6 +313,18 @@ func copyToPath(srcPath, destPath string, total int64, progress ProgressFunc) (i
 	if srcPath == "" {
 		return 0, errors.New("source path missing")
 	}
+	if progress == nil {
+		_ = os.Remove(destPath)
+		if err := os.Link(srcPath, destPath); err == nil {
+			if total > 0 {
+				return total, nil
+			}
+			if stat, statErr := os.Stat(srcPath); statErr == nil {
+				return stat.Size(), nil
+			}
+			return 0, nil
+		}
+	}
 	in, err := os.Open(srcPath)
 	if err != nil {
 		return 0, err

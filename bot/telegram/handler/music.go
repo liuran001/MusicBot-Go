@@ -453,7 +453,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	if !silent {
-		status.Upsert(waitForDown)
+		status.Upsert(fetchInfo)
 	}
 
 	var queueStatusUpdater func(string)
@@ -481,8 +481,6 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	} else if sent {
 		return nil
 	}
-
-	status.Edit(fetchInfo)
 
 	if h.PlatformManager == nil {
 		return errors.New("platform manager not configured")
@@ -1486,14 +1484,17 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 		h.UploadLimiter <- struct{}{}
 	}
 	if task.statusMsg != nil && task.statusBot != nil {
-		text := buildMusicInfoText(task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize), uploading)
-		statusCtx := task.ctx
-		if statusCtx == nil {
-			statusCtx = context.Background()
-		}
-		updated := editMessageTextOrSend(statusCtx, task.statusBot, h.RateLimiter, task.statusMsg, task.statusMsg.Chat.ID, text)
-		if updated != nil {
-			task.statusMsg = updated
+		// 缓存命中场景下，保持“命中缓存, 正在发送中...”文案，不再二次改成 uploading。
+		if !strings.Contains(task.statusMsg.Text, hitCache) {
+			text := buildMusicInfoText(task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize), uploading)
+			statusCtx := task.ctx
+			if statusCtx == nil {
+				statusCtx = context.Background()
+			}
+			updated := editMessageTextOrSend(statusCtx, task.statusBot, h.RateLimiter, task.statusMsg, task.statusMsg.Chat.ID, text)
+			if updated != nil {
+				task.statusMsg = updated
+			}
 		}
 	}
 	result := uploadResult{}
@@ -1826,6 +1827,8 @@ type statusSession struct {
 	chatID      int64
 	threadID    int
 	replyParams *telego.ReplyParameters
+	mu          sync.Mutex
+	lastEditAt  time.Time
 	msg         *telego.Message
 }
 
@@ -1844,6 +1847,8 @@ func (s *statusSession) Message() *telego.Message {
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.msg
 }
 
@@ -1851,14 +1856,54 @@ func (s *statusSession) Upsert(text string) {
 	if s == nil {
 		return
 	}
-	upsertStatusMessage(s.ctx, s.bot, s.rateLimiter, &s.msg, s.chatID, s.threadID, s.replyParams, text)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.msg != nil {
+		s.msg = s.editLocked(text)
+		return
+	}
+	newMsg, err := sendStatusMessage(s.ctx, s.bot, s.rateLimiter, s.chatID, s.threadID, s.replyParams, text)
+	if err == nil {
+		s.msg = newMsg
+		s.lastEditAt = time.Now()
+	}
 }
 
 func (s *statusSession) Edit(text string) {
 	if s == nil || s.msg == nil {
 		return
 	}
-	s.msg = editMessageTextOrSend(s.ctx, s.bot, s.rateLimiter, s.msg, s.chatID, text)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.msg == nil {
+		return
+	}
+	s.msg = s.editLocked(text)
+}
+
+func (s *statusSession) editLocked(text string) *telego.Message {
+	if s.msg == nil {
+		return nil
+	}
+	if s.msg.Text == text {
+		return s.msg
+	}
+	if shouldThrottleStatusEdit(text) && !s.lastEditAt.IsZero() && time.Since(s.lastEditAt) < 900*time.Millisecond {
+		// 降低短时间频繁 edit 触发 429 的概率；同步本地文本避免重复尝试。
+		s.msg.Text = text
+		return s.msg
+	}
+	edited := editMessageTextOrSend(s.ctx, s.bot, s.rateLimiter, s.msg, s.chatID, text)
+	s.lastEditAt = time.Now()
+	return edited
+}
+
+func shouldThrottleStatusEdit(text string) bool {
+	if strings.Contains(text, "失败") || strings.Contains(text, "请稍后重试") {
+		return false
+	}
+	return true
 }
 
 func upsertStatusMessage(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, msg **telego.Message, chatID int64, threadID int, replyParams *telego.ReplyParameters, text string) {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -20,19 +19,11 @@ type StatusHandler struct {
 	RateLimiter     *telegram.RateLimiter
 }
 
-var statLimiter = make(chan struct{}, 1)
-
 func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.Message == nil || h.Repo == nil {
 		return
 	}
 	message := update.Message
-
-	statLimiter <- struct{}{}
-	defer func() {
-		time.Sleep(500 * time.Millisecond)
-		<-statLimiter
-	}()
 
 	fromCount, _ := h.Repo.Count(ctx)
 	chatCount, _ := h.Repo.CountByChatID(ctx, message.Chat.ID)
