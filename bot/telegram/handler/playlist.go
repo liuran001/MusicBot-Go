@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -114,17 +113,7 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	lazy := h.shouldLazyLoad(platformName)
 	playlist, err := h.fetchInitialPlaylist(ctx, plat, playlistID, lazy)
 	if err != nil {
-		errText := noResults
-		if errors.Is(err, platform.ErrUnsupported) {
-			errText = "此平台不支持获取歌单"
-		} else if errors.Is(err, platform.ErrRateLimited) {
-			errText = "请求过于频繁，请稍后再试"
-		} else if errors.Is(err, platform.ErrUnavailable) {
-			errText = "歌单服务暂时不可用"
-		} else if errors.Is(err, platform.ErrNotFound) {
-			errText = "未找到歌单"
-		}
-		h.editPlaylistMessage(ctx, b, msgResult, errText, nil)
+		h.editPlaylistMessage(ctx, b, msgResult, userVisiblePlaylistError(err), nil)
 		return true
 	}
 	collectionType = detectCollectionType(playlistID, playlist.URL)

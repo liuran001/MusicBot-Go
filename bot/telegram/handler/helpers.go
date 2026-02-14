@@ -522,6 +522,44 @@ func userVisibleDownloadError(err error) string {
 	return "下载/发送失败，请稍后重试"
 }
 
+func userVisibleSearchError(err error, unavailableText string) string {
+	if err == nil {
+		return noResults
+	}
+	if errors.Is(err, platform.ErrUnsupported) {
+		return "此平台不支持搜索功能"
+	}
+	if errors.Is(err, platform.ErrRateLimited) {
+		return "请求过于频繁，请稍后再试"
+	}
+	if errors.Is(err, platform.ErrUnavailable) {
+		if strings.TrimSpace(unavailableText) != "" {
+			return unavailableText
+		}
+		return "搜索服务暂时不可用"
+	}
+	return noResults
+}
+
+func userVisiblePlaylistError(err error) string {
+	if err == nil {
+		return noResults
+	}
+	if errors.Is(err, platform.ErrUnsupported) {
+		return "此平台不支持获取歌单"
+	}
+	if errors.Is(err, platform.ErrRateLimited) {
+		return "请求过于频繁，请稍后再试"
+	}
+	if errors.Is(err, platform.ErrUnavailable) {
+		return "歌单服务暂时不可用"
+	}
+	if errors.Is(err, platform.ErrNotFound) {
+		return "未找到歌单"
+	}
+	return noResults
+}
+
 func isTelegramFileIDInvalid(err error) bool {
 	if err == nil {
 		return false

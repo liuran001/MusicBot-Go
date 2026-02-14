@@ -265,3 +265,52 @@ func TestSearchTracksWithFallback_PrimaryUnsupportedNoFallback(t *testing.T) {
 		t.Fatalf("expected ErrUnsupported, got %v", err)
 	}
 }
+
+func TestUserVisibleSearchError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "unsupported", err: platform.ErrUnsupported, want: "此平台不支持搜索功能"},
+		{name: "rate limited", err: platform.ErrRateLimited, want: "请求过于频繁，请稍后再试"},
+		{name: "unavailable", err: platform.ErrUnavailable, want: "搜索服务暂时不可用"},
+		{name: "default", err: errors.New("other"), want: noResults},
+		{name: "nil", err: nil, want: noResults},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := userVisibleSearchError(tt.err, ""); got != tt.want {
+				t.Fatalf("unexpected search error text: got %q want %q", got, tt.want)
+			}
+		})
+	}
+
+	if got := userVisibleSearchError(platform.ErrUnavailable, "自定义不可用"); got != "自定义不可用" {
+		t.Fatalf("expected custom unavailable text, got %q", got)
+	}
+}
+
+func TestUserVisiblePlaylistError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "unsupported", err: platform.ErrUnsupported, want: "此平台不支持获取歌单"},
+		{name: "rate limited", err: platform.ErrRateLimited, want: "请求过于频繁，请稍后再试"},
+		{name: "unavailable", err: platform.ErrUnavailable, want: "歌单服务暂时不可用"},
+		{name: "not found", err: platform.ErrNotFound, want: "未找到歌单"},
+		{name: "default", err: errors.New("other"), want: noResults},
+		{name: "nil", err: nil, want: noResults},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := userVisiblePlaylistError(tt.err); got != tt.want {
+				t.Fatalf("unexpected playlist error text: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
