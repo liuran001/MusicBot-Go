@@ -425,17 +425,47 @@ func buildMusicInfoTextf(songName, songAlbum, fileInfo, suffixFmt string, args .
 func userVisibleDownloadError(err error) string {
 	if err != nil {
 		errText := fmt.Sprintf("%v", err)
+		errLower := strings.ToLower(errText)
 		if strings.Contains(errText, md5VerFailed) {
 			return md5VerFailed
 		}
 		if strings.Contains(errText, downloadTimeout) {
 			return downloadTimeout
 		}
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(errLower, "context deadline exceeded") {
+			return "处理超时，请稍后重试"
+		}
+		if errors.Is(err, context.Canceled) || strings.Contains(errLower, "context canceled") {
+			return "任务已取消，请稍后重试"
+		}
 		if errors.Is(err, errDownloadQueueOverloaded) || strings.Contains(errText, "download queue overloaded") {
 			return "当前下载任务过多，请稍后再试"
 		}
+		if strings.Contains(errText, "upload queue is full") {
+			return "当前发送任务过多，请稍后再试"
+		}
+		if errors.Is(err, platform.ErrRateLimited) || strings.Contains(errText, "Too Many Requests") || strings.Contains(errLower, "retry after") {
+			return "请求过于频繁，请稍后重试"
+		}
+		if errors.Is(err, platform.ErrAuthRequired) {
+			return "平台认证已失效，请联系管理员更新凭据"
+		}
+		if errors.Is(err, platform.ErrUnavailable) {
+			return "当前歌曲暂不可用，请稍后再试"
+		}
 	}
 	return "下载/发送失败，请稍后重试"
+}
+
+func isTelegramFileIDInvalid(err error) bool {
+	if err == nil {
+		return false
+	}
+	errText := strings.ToLower(fmt.Sprintf("%v", err))
+	return strings.Contains(errText, "wrong file identifier") ||
+		strings.Contains(errText, "file_id_invalid") ||
+		strings.Contains(errText, "invalid file id") ||
+		strings.Contains(errText, "wrong remote file identifier")
 }
 
 func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {

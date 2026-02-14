@@ -19,6 +19,14 @@ type CallbackMusicHandler struct {
 	RateLimiter *telegram.RateLimiter
 }
 
+type parsedMusicCallback struct {
+	platformName    string
+	trackID         string
+	qualityOverride string
+	requesterID     int64
+	ok              bool
+}
+
 func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.CallbackQuery == nil {
 		return
@@ -33,43 +41,15 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		return
 	}
 
-	// Parse callback data: "music <platform> <trackID> <quality> <requesterID>" (new format)
-	// OR "music <musicID> <requesterID>" (old format for backward compatibility)
-	var platformName string
-	var trackID string
-	var requesterID int64
-	var qualityOverride string
-
-	if len(args) >= 5 {
-		// New format: music <platform> <trackID> <quality> <requesterID>
-		platformName = args[1]
-		trackID = args[2]
-		qualityOverride = args[3]
-		requesterID, _ = strconv.ParseInt(args[4], 10, 64)
-	} else if len(args) >= 4 {
-		// New format: music <platform> <trackID> <requesterID>
-		platformName = args[1]
-		trackID = args[2]
-		requesterID, _ = strconv.ParseInt(args[3], 10, 64)
-	} else if len(args) >= 3 {
-		// Could be new format without requester: music <platform> <trackID>
-		// OR old format with requester: music <musicID> <requesterID>
-		// Try to parse second arg as int to determine format
-		if _, err := strconv.Atoi(args[1]); err == nil && isNumeric(args[2]) {
-			// Old format: music <musicID> <requesterID>
-			platformName = "netease"
-			trackID = args[1]
-			requesterID, _ = strconv.ParseInt(args[2], 10, 64)
-		} else {
-			// New format: music <platform> <trackID>
-			platformName = args[1]
-			trackID = args[2]
-		}
-	} else {
-		// Old format: music <musicID>
-		platformName = "netease"
-		trackID = args[1]
+	parsed := parseMusicCallbackDataV2(args)
+	if !parsed.ok {
+		return
 	}
+
+	platformName := parsed.platformName
+	trackID := parsed.trackID
+	requesterID := parsed.requesterID
+	qualityOverride := parsed.qualityOverride
 	if qualityOverride != "" {
 		if _, err := platform.ParseQuality(qualityOverride); err != nil {
 			qualityOverride = ""
@@ -372,4 +352,35 @@ func isRequesterOrAdmin(ctx context.Context, b *telego.Bot, chatID int64, userID
 		return status == telego.MemberStatusCreator || status == telego.MemberStatusAdministrator
 	}
 	return false
+}
+
+func parseMusicCallbackDataV2(args []string) parsedMusicCallback {
+	if len(args) < 2 {
+		return parsedMusicCallback{}
+	}
+	parsed := parsedMusicCallback{ok: true}
+	switch len(args) {
+	case 2:
+		parsed.platformName = "netease"
+		parsed.trackID = args[1]
+	case 3:
+		if isNumeric(args[1]) && isNumeric(args[2]) {
+			parsed.platformName = "netease"
+			parsed.trackID = args[1]
+			parsed.requesterID, _ = strconv.ParseInt(args[2], 10, 64)
+		} else {
+			parsed.platformName = args[1]
+			parsed.trackID = args[2]
+		}
+	case 4:
+		parsed.platformName = args[1]
+		parsed.trackID = args[2]
+		parsed.requesterID, _ = strconv.ParseInt(args[3], 10, 64)
+	default:
+		parsed.platformName = args[1]
+		parsed.trackID = args[2]
+		parsed.qualityOverride = args[3]
+		parsed.requesterID, _ = strconv.ParseInt(args[4], 10, 64)
+	}
+	return parsed
 }

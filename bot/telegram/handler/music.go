@@ -94,6 +94,8 @@ type MusicHandler struct {
 	// DownloadQueueWaitLimit controls max waiting items in download queue.
 	// 0 or less means unlimited (legacy behavior).
 	DownloadQueueWaitLimit int
+
+	EnableQueueObservability bool
 }
 
 type downloadQueueEntry struct {
@@ -388,7 +390,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	var songInfo botpkg.SongInfo
-	var msgResult *telego.Message
+	status := newStatusSession(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams)
 
 	// Request-level cache to avoid duplicate DB queries
 	cacheMap := make(map[string]*botpkg.SongInfo)
@@ -412,9 +414,21 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			h.Logger.Error("failed to send music", "platform", platformName, "trackID", trackID, "error", err)
 		}
 		text := buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err))
-		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
+		status.Edit(text)
+	}
+	handleInvalidCachedFileID := func(err error, cacheQuality string) bool {
+		if !isTelegramFileIDInvalid(err) {
+			return false
 		}
+		if h.Logger != nil {
+			h.Logger.Warn("cached telegram file id invalid, fallback to redownload", "platform", platformName, "trackID", trackID, "quality", cacheQuality, "error", err)
+		}
+		if h.Repo != nil {
+			_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, cacheQuality)
+		}
+		songInfo.FileID = ""
+		songInfo.ThumbFileID = ""
+		return true
 	}
 
 	var userID int64
@@ -422,27 +436,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		userID = message.From.ID
 	}
 
-	quality := platform.QualityHigh
-	if h.Repo != nil {
-		if message != nil && message.Chat.Type != "private" {
-			if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
-				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
-					quality = q
-				}
-			}
-		} else if userID != 0 {
-			if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
-				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
-					quality = q
-				}
-			}
-		}
-	}
-	if strings.TrimSpace(qualityOverride) != "" {
-		if q, err := platform.ParseQuality(qualityOverride); err == nil {
-			quality = q
-		}
-	}
+	quality := h.resolveRequestedQuality(ctx, message, userID, qualityOverride)
 
 	qualityStr := quality.String()
 
@@ -453,34 +447,33 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 			} else {
 				songInfo = *cached
-				if msgResult != nil {
-					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-				} else {
-					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-				}
+				status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
 
-				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
-					sendFailed(err)
-					return err
+				if err = h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
+					if !handleInvalidCachedFileID(err, qualityStr) {
+						sendFailed(err)
+						return err
+					}
+				} else {
+					return nil
 				}
-				return nil
 			}
 		}
 	}
 
 	if !silent {
-		msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, waitForDown)
+		status.Upsert(waitForDown)
 	}
 
 	var queueStatusUpdater func(string)
-	if msgResult != nil {
-		lastQueueText := msgResult.Text
+	if status.Message() != nil {
+		lastQueueText := status.Message().Text
 		queueStatusUpdater = func(text string) {
 			if text == lastQueueText {
 				return
 			}
 			lastQueueText = text
-			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, text)
+			status.Edit(text)
 		}
 	}
 	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, queueStatusUpdater)
@@ -498,91 +491,37 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 				if !silent {
-					if msgResult != nil {
-						msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-					} else {
-						msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+				}
+				if err = h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
+					if !handleInvalidCachedFileID(err, qualityStr) {
+						sendFailed(err)
+						return err
 					}
+				} else {
+					return nil
 				}
-				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
-					sendFailed(err)
-					return err
-				}
-				return nil
 			}
 		}
 	}
 
-	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfo)
-	}
+	status.Edit(fetchInfo)
 
 	if h.PlatformManager == nil {
 		return errors.New("platform manager not configured")
 	}
 
-	var (
-		track *platform.Track
-		plat  platform.Platform
-	)
-	for {
-		plat = h.PlatformManager.Get(platformName)
-		if plat == nil {
-			if h.Logger != nil {
-				h.Logger.Error("platform not found", "platform", platformName)
-			}
-			if msgResult != nil {
-				msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
-			}
-			return fmt.Errorf("platform not found: %s", platformName)
-		}
-
-		var err error
-		track, err = h.getTrackSingleflight(ctx, platformName, trackID)
-		if err == nil {
-			break
-		}
-		if errors.Is(err, platform.ErrNotFound) {
-			if nextPlatform, nextTrackID, ok := h.resolveFallbackTrack(ctx, message, platformName, trackID); ok {
-				platformName = nextPlatform
-				trackID = nextTrackID
-				if msgResult != nil {
-					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfo)
-				}
-				continue
-			}
-		}
-		if h.Logger != nil {
-			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
-		}
-		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
-		}
+	track, plat, resolvedPlatform, resolvedTrackID, err := h.loadTrackWithFallback(ctx, message, status, platformName, trackID)
+	if err != nil {
 		return err
 	}
+	platformName = resolvedPlatform
+	trackID = resolvedTrackID
 
 	fillSongInfoFromTrack(&songInfo, track, platformName, trackID, message)
-	info, err := h.getDownloadInfoSingleflight(ctx, platformName, trackID, quality)
+	info, err := h.loadDownloadInfo(ctx, status, platformName, trackID, quality)
 	if err != nil {
-		if h.Logger != nil {
-			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
-		}
-		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
-		}
 		return err
-	}
-	if info == nil || info.URL == "" {
-		if msgResult != nil {
-			msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, fetchInfoFailed)
-		}
-		return errors.New("download info unavailable")
-	}
-	if h.Logger != nil {
-		h.Logger.Debug("download url", "platform", platformName, "trackID", trackID, "quality", info.Quality.String(), "url", info.URL)
-	}
-	if info.Format == "" {
-		info.Format = "mp3"
 	}
 
 	actualQuality := info.Quality.String()
@@ -604,26 +543,23 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 				if !silent {
-					if msgResult != nil {
-						msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-					} else {
-						msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+				}
+				if err = h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
+					if !handleInvalidCachedFileID(err, actualQuality) {
+						sendFailed(err)
+						return err
 					}
+				} else {
+					return nil
 				}
-				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
-					sendFailed(err)
-					return err
-				}
-				return nil
 			}
 		}
 	}
 
-	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
-	}
+	status.Edit(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
 
-	musicPath, picPath, releasePrepared, err := h.acquirePreparedMedia(ctx, platformName, trackID, actualQuality, plat, track, info, msgResult, b, message, &songInfo, nil)
+	musicPath, picPath, releasePrepared, err := h.acquirePreparedMedia(ctx, platformName, trackID, actualQuality, plat, track, info, status.Message(), b, message, &songInfo, nil)
 	if err != nil {
 		if h.Logger != nil {
 			h.Logger.Error("failed to download and prepare", "platform", platformName, "trackID", trackID, "error", err)
@@ -632,11 +568,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		return err
 	}
 
-	if msgResult != nil {
-		msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploading))
-	}
+	status.Edit(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploading))
 
-	if err := h.sendMusic(ctx, b, msgResult, message, &songInfo, musicPath, picPath, nil, releasePrepared, platformName, trackID); err != nil {
+	if err := h.sendMusic(ctx, b, status.Message(), message, &songInfo, musicPath, picPath, nil, releasePrepared, platformName, trackID); err != nil {
 		if releasePrepared != nil {
 			releasePrepared()
 		}
@@ -645,6 +579,89 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	return nil
+}
+
+func (h *MusicHandler) resolveRequestedQuality(ctx context.Context, message *telego.Message, userID int64, qualityOverride string) platform.Quality {
+	quality := platform.QualityHigh
+	if h != nil && h.Repo != nil {
+		if message != nil && message.Chat.Type != "private" {
+			if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
+					quality = q
+				}
+			}
+		} else if userID != 0 {
+			if settings, err := h.Repo.GetUserSettings(ctx, userID); err == nil && settings != nil {
+				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
+					quality = q
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(qualityOverride) != "" {
+		if q, err := platform.ParseQuality(qualityOverride); err == nil {
+			quality = q
+		}
+	}
+	return quality
+}
+
+func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *telego.Message, status *statusSession, platformName, trackID string) (*platform.Track, platform.Platform, string, string, error) {
+	if h == nil || h.PlatformManager == nil {
+		status.Edit(fetchInfoFailed)
+		return nil, nil, platformName, trackID, errors.New("platform manager not configured")
+	}
+
+	for {
+		plat := h.PlatformManager.Get(platformName)
+		if plat == nil {
+			if h.Logger != nil {
+				h.Logger.Error("platform not found", "platform", platformName)
+			}
+			status.Edit(fetchInfoFailed)
+			return nil, nil, platformName, trackID, fmt.Errorf("platform not found: %s", platformName)
+		}
+
+		track, err := h.getTrackSingleflight(ctx, platformName, trackID)
+		if err == nil {
+			return track, plat, platformName, trackID, nil
+		}
+		if errors.Is(err, platform.ErrNotFound) {
+			if nextPlatform, nextTrackID, ok := h.resolveFallbackTrack(ctx, message, platformName, trackID); ok {
+				platformName = nextPlatform
+				trackID = nextTrackID
+				status.Edit(fetchInfo)
+				continue
+			}
+		}
+		if h.Logger != nil {
+			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
+		}
+		status.Edit(fetchInfoFailed)
+		return nil, nil, platformName, trackID, err
+	}
+}
+
+func (h *MusicHandler) loadDownloadInfo(ctx context.Context, status *statusSession, platformName, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
+	info, err := h.getDownloadInfoSingleflight(ctx, platformName, trackID, quality)
+	if err != nil {
+		if h != nil && h.Logger != nil {
+			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
+		}
+		status.Edit(fetchInfoFailed)
+		return nil, err
+	}
+	if info == nil || info.URL == "" {
+		status.Edit(fetchInfoFailed)
+		return nil, errors.New("download info unavailable")
+	}
+	if h != nil && h.Logger != nil {
+		h.Logger.Debug("download url", "platform", platformName, "trackID", trackID, "quality", info.Quality.String(), "url", info.URL)
+	}
+	if info.Format == "" {
+		info.Format = "mp3"
+	}
+	return info, nil
 }
 
 func (h *MusicHandler) getTrackSingleflight(ctx context.Context, platformName, trackID string) (*platform.Track, error) {
@@ -1186,45 +1203,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	// Derive bitrate from actual file size + duration (from track or FLAC streaminfo)
 	deriveBitrateFromFile(filePath, songInfo)
 
-	picPath, resizePicPath := "", ""
-	coverURL := ""
-	if track.CoverURL != "" {
-		coverURL = track.CoverURL
-	} else if track.Album != nil && track.Album.CoverURL != "" {
-		coverURL = track.Album.CoverURL
-	}
-	if coverURL != "" {
-		picPath = filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(coverURL)))
-		if _, err := h.DownloadService.Download(ctx, &platform.DownloadInfo{URL: coverURL, Size: 0}, picPath, nil); err == nil {
-			if stat, statErr := os.Stat(picPath); statErr == nil && stat.Size() > 0 {
-				songInfo.PicSize = int(stat.Size())
-				cleanupList = append(cleanupList, picPath)
-				if resized, err := resizeImg(picPath); err == nil {
-					resizePicPath = resized
-					cleanupList = append(cleanupList, resizePicPath)
-				} else {
-					if h.Logger != nil {
-						h.Logger.Warn("failed to resize cover image", "track", trackID, "error", err)
-					}
-				}
-			} else {
-				if h.Logger != nil {
-					if statErr != nil {
-						h.Logger.Warn("failed to stat cover file", "track", trackID, "error", statErr)
-					} else {
-						h.Logger.Warn("cover file is empty", "track", trackID)
-					}
-				}
-				_ = os.Remove(picPath)
-				picPath = ""
-			}
-		} else {
-			if h.Logger != nil {
-				h.Logger.Warn("failed to download cover", "track", trackID, "url", coverURL, "error", err)
-			}
-			picPath = ""
-		}
-	}
+	picPath, resizePicPath := h.prepareCoverFiles(ctx, track, trackID, stamp, songInfo, &cleanupList)
 
 	embedPicPath := picPath
 	thumbPicPath := picPath
@@ -1253,36 +1232,92 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	}
 	cleanupList = append(cleanupList, filePath, finalDir)
 
-	if h.ID3Service != nil {
-		var tagData *id3.TagData
+	h.embedTrackTags(ctx, plat, track, trackID, info, filePath, embedPicPath)
 
-		if h.TagProviders != nil {
-			if provider, ok := h.TagProviders[plat.Name()]; ok && provider != nil {
-				var tagErr error
-				tagData, tagErr = provider.GetTagData(ctx, track, info)
-				if tagErr != nil {
-					if h.Logger != nil {
-						h.Logger.Error("failed to get tag data", "platform", plat.Name(), "trackID", trackID, "error", tagErr)
-					}
-					tagData = nil
-				}
+	return filePath, thumbPicPath, cleanupList, nil
+}
+
+func (h *MusicHandler) prepareCoverFiles(ctx context.Context, track *platform.Track, trackID string, stamp int64, songInfo *botpkg.SongInfo, cleanupList *[]string) (string, string) {
+	if h == nil || track == nil || h.DownloadService == nil {
+		return "", ""
+	}
+	coverURL := ""
+	if track.CoverURL != "" {
+		coverURL = track.CoverURL
+	} else if track.Album != nil && track.Album.CoverURL != "" {
+		coverURL = track.Album.CoverURL
+	}
+	if coverURL == "" {
+		return "", ""
+	}
+
+	picPath := filepath.Join(h.CacheDir, fmt.Sprintf("%d-%s", stamp, path.Base(coverURL)))
+	if _, err := h.DownloadService.Download(ctx, &platform.DownloadInfo{URL: coverURL, Size: 0}, picPath, nil); err != nil {
+		if h.Logger != nil {
+			h.Logger.Warn("failed to download cover", "track", trackID, "url", coverURL, "error", err)
+		}
+		return "", ""
+	}
+
+	stat, statErr := os.Stat(picPath)
+	if statErr != nil || stat.Size() <= 0 {
+		if h.Logger != nil {
+			if statErr != nil {
+				h.Logger.Warn("failed to stat cover file", "track", trackID, "error", statErr)
+			} else {
+				h.Logger.Warn("cover file is empty", "track", trackID)
 			}
 		}
+		_ = os.Remove(picPath)
+		return "", ""
+	}
 
-		if tagData == nil {
-			tagData = h.buildFallbackTagData(ctx, plat, track, embedPicPath)
+	songInfo.PicSize = int(stat.Size())
+	if cleanupList != nil {
+		*cleanupList = append(*cleanupList, picPath)
+	}
+
+	resizePicPath := ""
+	if resized, err := resizeImg(picPath); err == nil {
+		resizePicPath = resized
+		if cleanupList != nil {
+			*cleanupList = append(*cleanupList, resizePicPath)
 		}
+	} else if h.Logger != nil {
+		h.Logger.Warn("failed to resize cover image", "track", trackID, "error", err)
+	}
 
-		if tagData != nil {
-			if err := h.ID3Service.EmbedTags(filePath, tagData, embedPicPath); err != nil {
+	return picPath, resizePicPath
+}
+
+func (h *MusicHandler) embedTrackTags(ctx context.Context, plat platform.Platform, track *platform.Track, trackID string, info *platform.DownloadInfo, filePath, embedPicPath string) {
+	if h == nil || h.ID3Service == nil {
+		return
+	}
+
+	var tagData *id3.TagData
+	if h.TagProviders != nil {
+		if provider, ok := h.TagProviders[plat.Name()]; ok && provider != nil {
+			var tagErr error
+			tagData, tagErr = provider.GetTagData(ctx, track, info)
+			if tagErr != nil {
 				if h.Logger != nil {
-					h.Logger.Error("failed to embed tags", "platform", plat.Name(), "trackID", trackID, "error", err)
+					h.Logger.Error("failed to get tag data", "platform", plat.Name(), "trackID", trackID, "error", tagErr)
 				}
+				tagData = nil
 			}
 		}
 	}
 
-	return filePath, thumbPicPath, cleanupList, nil
+	if tagData == nil {
+		tagData = h.buildFallbackTagData(ctx, plat, track, embedPicPath)
+	}
+	if tagData == nil {
+		return
+	}
+	if err := h.ID3Service.EmbedTags(filePath, tagData, embedPicPath); err != nil && h.Logger != nil {
+		h.Logger.Error("failed to embed tags", "platform", plat.Name(), "trackID", trackID, "error", err)
+	}
 }
 
 func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *telego.Message, message *telego.Message, songInfo *botpkg.SongInfo, musicPath, picPath string, cleanup []string, cleanupDone func(), platformName, trackID string) error {
@@ -1360,9 +1395,15 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 	}
 	select {
 	case h.UploadQueue <- task:
+		if h.Logger != nil && h.EnableQueueObservability {
+			h.Logger.Debug("upload task enqueued", "platform", platformName, "trackID", trackID, "queue_len", len(h.UploadQueue), "queue_cap", cap(h.UploadQueue))
+		}
 		return nil
 	default:
 		cancel()
+		if h.Logger != nil && h.EnableQueueObservability {
+			h.Logger.Warn("upload queue full", "platform", platformName, "trackID", trackID, "queue_len", len(h.UploadQueue), "queue_cap", cap(h.UploadQueue))
+		}
 		if cleanupDone != nil {
 			cleanupDone()
 		}
@@ -1408,10 +1449,10 @@ func (h *MusicHandler) runStatusRefresher(ctx context.Context) {
 }
 
 func (h *MusicHandler) processUploadTask(task uploadTask) {
-	if h != nil && h.Logger != nil && !task.enqueuedAt.IsZero() {
+	if h != nil && h.Logger != nil && h.EnableQueueObservability && !task.enqueuedAt.IsZero() {
 		wait := time.Since(task.enqueuedAt)
 		if wait > 2*time.Second {
-			h.Logger.Warn("upload task waited in queue", "wait_ms", wait.Milliseconds())
+			h.Logger.Warn("upload task waited in queue", "wait_ms", wait.Milliseconds(), "queue_len", len(h.UploadQueue), "queue_cap", cap(h.UploadQueue))
 		}
 	}
 
@@ -1757,6 +1798,62 @@ func sendStatusMessage(ctx context.Context, b *telego.Bot, rateLimiter *telegram
 		}
 	}
 	return msg, err
+}
+
+type statusSession struct {
+	ctx         context.Context
+	bot         *telego.Bot
+	rateLimiter *telegram.RateLimiter
+	chatID      int64
+	threadID    int
+	replyParams *telego.ReplyParameters
+	msg         *telego.Message
+}
+
+func newStatusSession(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, chatID int64, threadID int, replyParams *telego.ReplyParameters) *statusSession {
+	return &statusSession{
+		ctx:         ctx,
+		bot:         b,
+		rateLimiter: rateLimiter,
+		chatID:      chatID,
+		threadID:    threadID,
+		replyParams: replyParams,
+	}
+}
+
+func (s *statusSession) Message() *telego.Message {
+	if s == nil {
+		return nil
+	}
+	return s.msg
+}
+
+func (s *statusSession) Upsert(text string) {
+	if s == nil {
+		return
+	}
+	upsertStatusMessage(s.ctx, s.bot, s.rateLimiter, &s.msg, s.chatID, s.threadID, s.replyParams, text)
+}
+
+func (s *statusSession) Edit(text string) {
+	if s == nil || s.msg == nil {
+		return
+	}
+	s.msg = editMessageTextOrSend(s.ctx, s.bot, s.rateLimiter, s.msg, s.chatID, text)
+}
+
+func upsertStatusMessage(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, msg **telego.Message, chatID int64, threadID int, replyParams *telego.ReplyParameters, text string) {
+	if msg == nil {
+		return
+	}
+	if *msg != nil {
+		*msg = editMessageTextOrSend(ctx, b, rateLimiter, *msg, chatID, text)
+		return
+	}
+	newMsg, err := sendStatusMessage(ctx, b, rateLimiter, chatID, threadID, replyParams, text)
+	if err == nil {
+		*msg = newMsg
+	}
 }
 
 func editMessageTextOrSend(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, msg *telego.Message, chatID int64, text string) *telego.Message {
@@ -2161,6 +2258,9 @@ func (h *MusicHandler) enqueueDownloadQueue(update func(text string)) (int64, bo
 	}
 	h.downloadQueueMu.Lock()
 	if h.DownloadQueueWaitLimit > 0 && len(h.downloadQueue) >= h.DownloadQueueWaitLimit {
+		if h.Logger != nil && h.EnableQueueObservability {
+			h.Logger.Warn("download queue overloaded", "queue_len", len(h.downloadQueue), "queue_wait_limit", h.DownloadQueueWaitLimit)
+		}
 		h.downloadQueueMu.Unlock()
 		return 0, false
 	}
@@ -2168,6 +2268,9 @@ func (h *MusicHandler) enqueueDownloadQueue(update func(text string)) (int64, bo
 	entryID := h.downloadQueueSeq
 	h.downloadQueue = append(h.downloadQueue, downloadQueueEntry{id: entryID, update: update})
 	snapshot := append([]downloadQueueEntry(nil), h.downloadQueue...)
+	if h.Logger != nil && h.EnableQueueObservability {
+		h.Logger.Debug("download task enqueued", "queue_len", len(h.downloadQueue), "queue_wait_limit", h.DownloadQueueWaitLimit)
+	}
 	h.downloadQueueMu.Unlock()
 	h.refreshDownloadQueue(snapshot)
 	return entryID, true
