@@ -7,10 +7,13 @@ type qqSinger struct {
 }
 
 type qqAlbum struct {
-	ID    int64  `json:"id"`
-	Mid   string `json:"mid"`
-	Name  string `json:"name"`
-	Title string `json:"title"`
+	ID         int64  `json:"id"`
+	Mid        string `json:"mid"`
+	Name       string `json:"name"`
+	Title      string `json:"title"`
+	Year       int    `json:"year"`
+	TimePublic string `json:"time_public"`
+	PubTime    string `json:"pub_time"`
 }
 
 type qqSearchSong struct {
@@ -48,13 +51,20 @@ type qqSearchSongMobile struct {
 }
 
 type qqSongDetail struct {
-	ID       int64      `json:"id"`
-	Mid      string     `json:"mid"`
-	Name     string     `json:"name"`
-	Title    string     `json:"title"`
-	Album    qqAlbum    `json:"album"`
-	Singer   []qqSinger `json:"singer"`
-	Interval int        `json:"interval"`
+	ID          int64      `json:"id"`
+	Mid         string     `json:"mid"`
+	Name        string     `json:"name"`
+	Title       string     `json:"title"`
+	Album       qqAlbum    `json:"album"`
+	Singer      []qqSinger `json:"singer"`
+	Interval    int        `json:"interval"`
+	Year        int        `json:"year"`
+	TimePublic  string     `json:"time_public"`
+	PubTime     string     `json:"pub_time"`
+	IndexAlbum  int        `json:"index_album"`
+	IndexCD     int        `json:"index_cd"`
+	TrackNumber int        `json:"track_number"`
+	DiscNumber  int        `json:"disc_number"`
 }
 
 type qqFileInfo struct {

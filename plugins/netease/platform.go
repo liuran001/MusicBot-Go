@@ -491,20 +491,26 @@ func (n *NeteasePlatform) convertSongDetailToTrack(song bot.SongDetail) platform
 			Artists:  artists,
 			URL:      fmt.Sprintf("https://music.163.com/album?id=%d", songData.Al.Id),
 		}
+		if year := neteaseYearFromMillis(int64(songData.PublishTime)); year > 0 {
+			album.Year = year
+		}
 	}
 
 	// Convert duration from milliseconds to time.Duration
 	duration := time.Duration(songData.Dt) * time.Millisecond
 
 	return platform.Track{
-		ID:       strconv.Itoa(songData.Id),
-		Platform: "netease",
-		Title:    songData.Name,
-		Artists:  artists,
-		Album:    album,
-		Duration: duration,
-		CoverURL: songData.Al.PicUrl,
-		URL:      fmt.Sprintf("https://music.163.com/song?id=%d", songData.Id),
+		ID:          strconv.Itoa(songData.Id),
+		Platform:    "netease",
+		Title:       songData.Name,
+		Artists:     artists,
+		Album:       album,
+		Duration:    duration,
+		CoverURL:    songData.Al.PicUrl,
+		URL:         fmt.Sprintf("https://music.163.com/song?id=%d", songData.Id),
+		Year:        neteaseYearFromMillis(int64(songData.PublishTime)),
+		TrackNumber: songData.No,
+		DiscNumber:  neteaseDiscNumber(songData.Cd),
 	}
 }
 
@@ -528,17 +534,23 @@ func (n *NeteasePlatform) convertSongDetailDataToTrack(song types.SongDetailData
 			Artists:  artists,
 			URL:      fmt.Sprintf("https://music.163.com/album?id=%d", song.Al.Id),
 		}
+		if year := neteaseYearFromMillis(int64(song.PublishTime)); year > 0 {
+			album.Year = year
+		}
 	}
 	duration := time.Duration(song.Dt) * time.Millisecond
 	return platform.Track{
-		ID:       strconv.Itoa(song.Id),
-		Platform: "netease",
-		Title:    song.Name,
-		Artists:  artists,
-		Album:    album,
-		Duration: duration,
-		CoverURL: song.Al.PicUrl,
-		URL:      fmt.Sprintf("https://music.163.com/song?id=%d", song.Id),
+		ID:          strconv.Itoa(song.Id),
+		Platform:    "netease",
+		Title:       song.Name,
+		Artists:     artists,
+		Album:       album,
+		Duration:    duration,
+		CoverURL:    song.Al.PicUrl,
+		URL:         fmt.Sprintf("https://music.163.com/song?id=%d", song.Id),
+		Year:        neteaseYearFromMillis(int64(song.PublishTime)),
+		TrackNumber: song.No,
+		DiscNumber:  neteaseDiscNumber(song.Cd),
 	}
 }
 
@@ -616,6 +628,7 @@ func (n *NeteasePlatform) convertSearchSongToTrack(song struct {
 		if song.Album.PublishTime > 0 {
 			releaseDate := time.Unix(song.Album.PublishTime/1000, 0)
 			album.ReleaseDate = &releaseDate
+			album.Year = releaseDate.Year()
 		}
 	}
 
@@ -630,7 +643,39 @@ func (n *NeteasePlatform) convertSearchSongToTrack(song struct {
 		Album:    album,
 		Duration: duration,
 		URL:      fmt.Sprintf("https://music.163.com/song?id=%d", song.Id),
+		Year:     neteaseYearFromMillis(song.Album.PublishTime),
 	}
+}
+
+func neteaseYearFromMillis(ms int64) int {
+	if ms <= 0 {
+		return 0
+	}
+	return time.Unix(ms/1000, 0).Year()
+}
+
+func neteaseDiscNumber(disc string) int {
+	disc = strings.TrimSpace(disc)
+	if disc == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(disc); err == nil && n > 0 {
+		return n
+	}
+	for i := 0; i < len(disc); i++ {
+		if disc[i] < '0' || disc[i] > '9' {
+			continue
+		}
+		j := i
+		for j < len(disc) && disc[j] >= '0' && disc[j] <= '9' {
+			j++
+		}
+		if n, err := strconv.Atoi(disc[i:j]); err == nil && n > 0 {
+			return n
+		}
+		i = j
+	}
+	return 0
 }
 
 // convertLyrics converts NetEase lyrics to platform Lyrics.

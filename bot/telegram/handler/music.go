@@ -2497,6 +2497,12 @@ func (h *MusicHandler) buildFallbackTagData(ctx context.Context, plat platform.P
 
 	if track.Album != nil {
 		tagData.Album = track.Album.Title
+		if track.Album.Year > 0 && tagData.Year == "" {
+			tagData.Year = strconv.Itoa(track.Album.Year)
+		}
+		if track.Album.ReleaseDate != nil && !track.Album.ReleaseDate.IsZero() && tagData.Year == "" {
+			tagData.Year = strconv.Itoa(track.Album.ReleaseDate.Year())
+		}
 		if len(track.Album.Artists) > 0 {
 			artists := make([]string, len(track.Album.Artists))
 			for i, a := range track.Album.Artists {
@@ -2504,6 +2510,16 @@ func (h *MusicHandler) buildFallbackTagData(ctx context.Context, plat platform.P
 			}
 			tagData.AlbumArtist = strings.Join(artists, ", ")
 		}
+	}
+
+	if track.Year > 0 {
+		tagData.Year = strconv.Itoa(track.Year)
+	}
+	if track.TrackNumber > 0 {
+		tagData.TrackNumber = track.TrackNumber
+	}
+	if track.DiscNumber > 0 {
+		tagData.DiscNumber = track.DiscNumber
 	}
 
 	if plat.SupportsLyrics() {

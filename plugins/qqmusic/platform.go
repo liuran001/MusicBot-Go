@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -572,6 +573,7 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 	coverURL := buildTrackCoverURL(detail.Album.Mid)
 	var album *platform.Album
 	if albumTitle != "" || strings.TrimSpace(detail.Album.Mid) != "" {
+		albumYear := firstPositiveInt(parseQQYear(detail.Album.TimePublic), parseQQYear(detail.Album.PubTime), detail.Album.Year)
 		album = &platform.Album{
 			ID:       strings.TrimSpace(detail.Album.Mid),
 			Platform: "qqmusic",
@@ -579,23 +581,60 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 			Artists:  artists,
 			CoverURL: buildAlbumCoverURL(detail.Album.Mid),
 			URL:      buildAlbumURL(detail.Album.Mid),
+			Year:     albumYear,
 		}
 	}
 	title := strings.TrimSpace(detail.Title)
 	if title == "" {
 		title = strings.TrimSpace(detail.Name)
 	}
+	year := firstPositiveInt(detail.Year, parseQQYear(detail.TimePublic), parseQQYear(detail.PubTime))
+	if year == 0 && album != nil {
+		year = album.Year
+	}
+	trackNo := firstPositiveInt(detail.TrackNumber, detail.IndexAlbum)
+	discNo := firstPositiveInt(detail.DiscNumber, detail.IndexCD)
 	duration := time.Duration(detail.Interval) * time.Second
 	return platform.Track{
-		ID:       trackID,
-		Platform: "qqmusic",
-		Title:    title,
-		Artists:  artists,
-		Album:    album,
-		Duration: duration,
-		CoverURL: coverURL,
-		URL:      buildTrackURL(trackID),
+		ID:          trackID,
+		Platform:    "qqmusic",
+		Title:       title,
+		Artists:     artists,
+		Album:       album,
+		Duration:    duration,
+		CoverURL:    coverURL,
+		URL:         buildTrackURL(trackID),
+		Year:        year,
+		TrackNumber: trackNo,
+		DiscNumber:  discNo,
 	}
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+func parseQQYear(s string) int {
+	s = strings.TrimSpace(s)
+	if len(s) < 4 {
+		return 0
+	}
+	for i := 0; i+4 <= len(s); i++ {
+		chunk := s[i : i+4]
+		if chunk[0] < '0' || chunk[0] > '9' || chunk[1] < '0' || chunk[1] > '9' || chunk[2] < '0' || chunk[2] > '9' || chunk[3] < '0' || chunk[3] > '9' {
+			continue
+		}
+		y, err := strconv.Atoi(chunk)
+		if err == nil && y > 0 {
+			return y
+		}
+	}
+	return 0
 }
 
 func buildTrackURL(trackID string) string {
