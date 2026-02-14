@@ -16,6 +16,7 @@ type Pool struct {
 	wg       sync.WaitGroup
 	shutdown chan struct{}
 	mu       sync.Mutex
+	tasksMu  sync.RWMutex
 	closed   bool
 	size     int
 	onPanic  func(recovered any, stack []byte)
@@ -100,6 +101,9 @@ func (p *Pool) Submit(task func()) (err error) {
 		return ErrPoolClosed
 	}
 
+	p.tasksMu.RLock()
+	defer p.tasksMu.RUnlock()
+
 	select {
 	case <-p.shutdown:
 		return ErrPoolClosed
@@ -156,7 +160,9 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 	p.mu.Lock()
 	if !p.closed {
 		p.closed = true
+		p.tasksMu.Lock()
 		close(p.tasks)
+		p.tasksMu.Unlock()
 	}
 	p.mu.Unlock()
 
