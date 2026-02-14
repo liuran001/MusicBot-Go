@@ -31,6 +31,15 @@ type Track struct {
 
 	// ISRC is the International Standard Recording Code (if available).
 	ISRC string `json:"isrc,omitempty"`
+
+	// Year is the release year (if available).
+	Year int `json:"year,omitempty"`
+
+	// TrackNumber is the track number within album (if available).
+	TrackNumber int `json:"track_number,omitempty"`
+
+	// DiscNumber is the disc number within multi-disc album (if available).
+	DiscNumber int `json:"disc_number,omitempty"`
 }
 
 // Artist represents a music artist from any platform.
@@ -76,6 +85,9 @@ type Album struct {
 
 	// URL is the direct URL to the album (if available).
 	URL string `json:"url,omitempty"`
+
+	// Year is the album release year (if available).
+	Year int `json:"year,omitempty"`
 }
 
 // Playlist represents a music playlist from any platform.
