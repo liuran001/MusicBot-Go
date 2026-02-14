@@ -28,6 +28,10 @@ jobs:
         run: go version
       - name: Download modules
         run: go mod download
+      - name: Run vet
+        run: go vet ./...
+      - name: Run race tests (critical packages)
+        run: go test -race ./bot/telegram/handler ./bot/download ./bot/platform ./bot/worker
       - name: Run tests
         run: go test ./...
   build:

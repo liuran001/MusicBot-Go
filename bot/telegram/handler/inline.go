@@ -353,20 +353,8 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 
 	pageSize := h.inlinePageSize()
 	searchWithFallback := func(keyword string) ([]platform.Track, string, error) {
-		activePlatform := platformName
-		activeTracks, searchErr := plat.Search(ctx, keyword, h.inlineSearchLimit(activePlatform))
-		if (searchErr != nil || len(activeTracks) == 0) && fallbackPlatform != "" && fallbackPlatform != activePlatform {
-			fallbackPlat := h.PlatformManager.Get(fallbackPlatform)
-			if fallbackPlat != nil && fallbackPlat.SupportsSearch() {
-				fallbackTracks, fallbackErr := fallbackPlat.Search(ctx, keyword, h.inlineSearchLimit(fallbackPlatform))
-				if fallbackErr == nil && len(fallbackTracks) > 0 {
-					activePlatform = fallbackPlatform
-					activeTracks = fallbackTracks
-					searchErr = nil
-				}
-			}
-		}
-		return activeTracks, activePlatform, searchErr
+		tracks, matchedPlatform, _, searchErr := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.inlineSearchLimit, true)
+		return tracks, matchedPlatform, searchErr
 	}
 
 	tracks, matchedPlatform, err := searchWithFallback(keyWord)

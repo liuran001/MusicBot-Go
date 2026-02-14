@@ -1178,3 +1178,49 @@ func TestCompositePlatform_SearchEmptyResultsThenError(t *testing.T) {
 		t.Errorf("Expected no tracks on error, got %d", len(tracks))
 	}
 }
+
+func TestManager_CachesCompositePlatformInstance(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{name: "test-platform", supportsSearch: true}
+	mock2 := &mockPlatform{name: "test-platform", supportsSearch: true}
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	first := manager.Get("test-platform")
+	second := manager.Get("test-platform")
+	if first == nil || second == nil {
+		t.Fatal("expected non-nil platforms")
+	}
+	if first != second {
+		t.Fatal("expected cached composite platform instance")
+	}
+}
+
+func TestManager_InvalidatesCompositeCacheOnRegister(t *testing.T) {
+	reg := registry.New()
+	manager := NewManagerWithRegistry(reg)
+
+	mock1 := &mockPlatform{name: "test-platform", supportsSearch: true}
+	mock2 := &mockPlatform{name: "test-platform", supportsSearch: true}
+	manager.Register(mock1)
+	manager.Register(mock2)
+
+	before := manager.Get("test-platform")
+	if before == nil {
+		t.Fatal("expected non-nil composite platform")
+	}
+
+	// Registering another provider should invalidate composite cache.
+	mock3 := &mockPlatform{name: "test-platform", supportsSearch: true}
+	manager.Register(mock3)
+
+	after := manager.Get("test-platform")
+	if after == nil {
+		t.Fatal("expected non-nil composite platform after register")
+	}
+	if before == after {
+		t.Fatal("expected composite cache invalidation on register")
+	}
+}

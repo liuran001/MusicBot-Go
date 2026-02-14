@@ -92,16 +92,54 @@ type BuildInfo struct {
 
 // New builds the application container.
 func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) {
+	conf, log, err := loadConfigAndLogger(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	repo, err := initRepository(conf, log)
+	if err != nil {
+		return nil, err
+	}
+
+	pool := initWorkerPool(conf, log)
+	platformManager, dynManager, adminIDs, pluginTagProviders, adminCommands, recognizeService := initPluginRuntime(ctx, conf, log)
+
+	tele, err := initTelegramBot(conf, log)
+	if err != nil {
+		return nil, err
+	}
+
+	return &App{
+		Config:           conf,
+		ConfigPath:       configPath,
+		Logger:           log,
+		DB:               repo,
+		Pool:             pool,
+		PlatformManager:  platformManager,
+		DynPlugins:       dynManager,
+		AdminIDs:         adminIDs,
+		AdminCommands:    adminCommands,
+		Telegram:         tele,
+		RecognizeService: recognizeService,
+		TagProviders:     pluginTagProviders,
+		Build:            build,
+	}, nil
+}
+
+func loadConfigAndLogger(configPath string) (*config.Config, *logpkg.Logger, error) {
 	conf, err := config.Load(configPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
 	log, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), conf.GetBool("LogSource"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	return conf, log, nil
+}
 
+func initRepository(conf *config.Config, log *logpkg.Logger) (*db.Repository, error) {
 	gormLogger := logpkg.NewGormLogger(log.Slog(), mapGormLogLevel(conf.GetString("GormLogLevel"), conf.GetString("LogLevel")))
 	databasePath := conf.GetString("Database")
 	if strings.TrimSpace(databasePath) == "" {
@@ -123,7 +161,10 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 		defaultPlatform = "netease"
 	}
 	repo.SetDefaults(defaultPlatform, conf.GetString("DefaultQuality"))
+	return repo, nil
+}
 
+func initWorkerPool(conf *config.Config, log *logpkg.Logger) *worker.Pool {
 	poolSize := conf.GetInt("WorkerPoolSize")
 	pool := worker.New(poolSize)
 	pool.SetPanicHandler(func(recovered any, stack []byte) {
@@ -131,13 +172,23 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 			log.Error("worker task panic recovered", "panic", recovered, "stack", string(stack))
 		}
 	})
+	return pool
+}
 
-	platformManager := platform.NewManager()
-	dynManager := dynplugin.NewManager(log)
-	adminIDs := parseAdminIDs(conf.GetString("BotAdmin"))
-	pluginTagProviders := make(map[string]id3.ID3TagProvider)
-	adminCommands := make([]admincmd.Command, 0)
-	var recognizeService recognize.Service
+func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Logger) (
+	platformManager platform.Manager,
+	dynManager *dynplugin.Manager,
+	adminIDs map[int64]struct{},
+	pluginTagProviders map[string]id3.ID3TagProvider,
+	adminCommands []admincmd.Command,
+	recognizeService recognize.Service,
+) {
+	platformManager = platform.NewManager()
+	dynManager = dynplugin.NewManager(log)
+	adminIDs = parseAdminIDs(conf.GetString("BotAdmin"))
+	pluginTagProviders = make(map[string]id3.ID3TagProvider)
+	adminCommands = make([]admincmd.Command, 0)
+
 	pluginNames := conf.PluginNames()
 	if len(pluginNames) == 0 {
 		pluginNames = platformplugins.Names()
@@ -177,26 +228,15 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 		}
 	}
 
+	return
+}
+
+func initTelegramBot(conf *config.Config, log *logpkg.Logger) (*telegram.Bot, error) {
 	tele, err := telegram.New(conf, log)
 	if err != nil {
 		return nil, fmt.Errorf("init telegram: %w", err)
 	}
-
-	return &App{
-		Config:           conf,
-		ConfigPath:       configPath,
-		Logger:           log,
-		DB:               repo,
-		Pool:             pool,
-		PlatformManager:  platformManager,
-		DynPlugins:       dynManager,
-		AdminIDs:         adminIDs,
-		AdminCommands:    adminCommands,
-		Telegram:         tele,
-		RecognizeService: recognizeService,
-		TagProviders:     pluginTagProviders,
-		Build:            build,
-	}, nil
+	return tele, nil
 }
 
 // Start initializes background services. Telegram startup is added in later waves.

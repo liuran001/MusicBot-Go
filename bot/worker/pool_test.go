@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -100,4 +101,76 @@ func TestPoolPanicHandlerCalled(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("panic handler was not called")
 	}
+}
+
+func TestShutdownDrainsQueuedTasks(t *testing.T) {
+	pool := New(1)
+
+	var done int32
+	task := func() {
+		time.Sleep(20 * time.Millisecond)
+		atomic.AddInt32(&done, 1)
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := pool.Submit(task); err != nil {
+			t.Fatalf("submit failed: %v", err)
+		}
+	}
+
+	if err := pool.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&done); got != 3 {
+		t.Fatalf("expected all queued tasks drained, got %d", got)
+	}
+}
+
+func TestStopNowRejectsFurtherSubmissions(t *testing.T) {
+	pool := New(1)
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	if err := pool.Submit(func() {
+		started <- struct{}{}
+		<-release
+	}); err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("worker task did not start")
+	}
+
+	pool.StopNow()
+	if err := pool.Submit(func() {}); !errors.Is(err, ErrPoolClosed) {
+		t.Fatalf("expected ErrPoolClosed after StopNow, got %v", err)
+	}
+
+	close(release)
+}
+
+func TestConcurrentSubmitAfterShutdownNoPanic(t *testing.T) {
+	pool := New(2)
+	var wg sync.WaitGroup
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		_ = pool.Shutdown(context.Background())
+		close(shutdownDone)
+	}()
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = pool.Submit(func() {})
+		}()
+	}
+
+	wg.Wait()
+	<-shutdownDone
 }

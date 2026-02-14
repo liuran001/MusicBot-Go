@@ -138,6 +138,71 @@ func parseTrailingOptions(text string, manager platform.Manager) (baseText, plat
 	return baseText, platformName, quality
 }
 
+type searchLimitFunc func(platformName string) int
+
+// searchTracksWithFallback runs search on primary platform and optionally falls back
+// to another searchable platform when primary fails (or returns empty, when enabled).
+// Returns tracks, matched platform name, whether fallback was used, and terminal error.
+func searchTracksWithFallback(ctx context.Context, manager platform.Manager, primaryPlatform, fallbackPlatform, keyword string, limitFn searchLimitFunc, fallbackOnEmpty bool) ([]platform.Track, string, bool, error) {
+	primaryPlatform = strings.TrimSpace(primaryPlatform)
+	fallbackPlatform = strings.TrimSpace(fallbackPlatform)
+	if manager == nil {
+		return nil, primaryPlatform, false, platform.ErrUnavailable
+	}
+	plat := manager.Get(primaryPlatform)
+	if plat == nil || !plat.SupportsSearch() {
+		if fallbackPlatform != "" && fallbackPlatform != primaryPlatform {
+			fallbackPlat := manager.Get(fallbackPlatform)
+			if fallbackPlat != nil && fallbackPlat.SupportsSearch() {
+				fallbackLimit := defaultSearchLimit
+				if limitFn != nil {
+					if v := limitFn(fallbackPlatform); v > 0 {
+						fallbackLimit = v
+					}
+				}
+				fallbackTracks, fallbackErr := fallbackPlat.Search(ctx, keyword, fallbackLimit)
+				if fallbackErr == nil && len(fallbackTracks) > 0 {
+					return fallbackTracks, fallbackPlatform, true, nil
+				}
+				if fallbackErr != nil {
+					return fallbackTracks, fallbackPlatform, true, fallbackErr
+				}
+			}
+		}
+		return nil, primaryPlatform, false, platform.ErrUnsupported
+	}
+
+	limit := defaultSearchLimit
+	if limitFn != nil {
+		if v := limitFn(primaryPlatform); v > 0 {
+			limit = v
+		}
+	}
+	tracks, err := plat.Search(ctx, keyword, limit)
+
+	shouldFallback := err != nil || (fallbackOnEmpty && len(tracks) == 0)
+	if shouldFallback && fallbackPlatform != "" && fallbackPlatform != primaryPlatform {
+		fallbackPlat := manager.Get(fallbackPlatform)
+		if fallbackPlat != nil && fallbackPlat.SupportsSearch() {
+			fallbackLimit := limit
+			if limitFn != nil {
+				if v := limitFn(fallbackPlatform); v > 0 {
+					fallbackLimit = v
+				}
+			}
+			fallbackTracks, fallbackErr := fallbackPlat.Search(ctx, keyword, fallbackLimit)
+			if fallbackErr == nil && len(fallbackTracks) > 0 {
+				return fallbackTracks, fallbackPlatform, true, nil
+			}
+		}
+	}
+
+	if err != nil {
+		return tracks, primaryPlatform, false, err
+	}
+	return tracks, primaryPlatform, false, nil
+}
+
 var urlMatcher = regexp.MustCompile(`https?://[^\s\x{00A0}\x{2000}-\x{200D}\x{202F}\x{205F}\x{3000}<>"'()（）\[\]{}【】《》「」『』]+`)
 
 func extractFirstURL(text string) string {
