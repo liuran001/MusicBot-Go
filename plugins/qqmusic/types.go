@@ -62,6 +62,7 @@ type qqSongDetail struct {
 	TimePublic  string     `json:"time_public"`
 	PubTime     string     `json:"pub_time"`
 	IndexAlbum  int        `json:"index_album"`
+	No          int        `json:"no"`
 	IndexCD     int        `json:"index_cd"`
 	TrackNumber int        `json:"track_number"`
 	DiscNumber  int        `json:"disc_number"`

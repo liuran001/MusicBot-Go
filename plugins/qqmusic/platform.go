@@ -592,8 +592,8 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 	if year == 0 && album != nil {
 		year = album.Year
 	}
-	trackNo := firstPositiveInt(detail.TrackNumber, detail.IndexAlbum)
-	discNo := firstPositiveInt(detail.DiscNumber, detail.IndexCD)
+	trackNo := firstPositiveInt(detail.TrackNumber, detail.IndexAlbum, detail.No)
+	discNo := resolveQQDiscNumber(detail.DiscNumber, detail.IndexCD)
 	duration := time.Duration(detail.Interval) * time.Second
 	return platform.Track{
 		ID:          trackID,
@@ -608,6 +608,19 @@ func convertSongDetail(detail *qqSongDetail) platform.Track {
 		TrackNumber: trackNo,
 		DiscNumber:  discNo,
 	}
+}
+
+func resolveQQDiscNumber(discNumber int, indexCD int) int {
+	if discNumber > 0 {
+		return discNumber
+	}
+	if indexCD == 0 {
+		return 1
+	}
+	if indexCD > 0 {
+		return indexCD
+	}
+	return 0
 }
 
 func firstPositiveInt(values ...int) int {
