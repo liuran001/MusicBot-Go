@@ -336,7 +336,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 }
 
 func (h *MusicHandler) dispatch(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID string, qualityOverride string) {
-	processCtx, cancel := h.processContext(ctx)
+	processCtx, cancel := h.processContext(detachContext(ctx))
 	if h.Pool == nil {
 		go func() {
 			defer cancel()
@@ -453,8 +453,11 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
 			} else {
 				songInfo = *cached
-
-				msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+				if msgResult != nil {
+					msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+				} else {
+					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+				}
 
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -495,7 +498,11 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 				if !silent {
-					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					if msgResult != nil {
+						msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					} else {
+						msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					}
 				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -597,7 +604,11 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 			} else {
 				songInfo = *cached
 				if !silent {
-					msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					if msgResult != nil {
+						msgResult = editMessageTextOrSend(ctx, b, h.RateLimiter, msgResult, message.Chat.ID, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					} else {
+						msgResult, _ = sendStatusMessage(ctx, b, h.RateLimiter, message.Chat.ID, threadID, replyParams, buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+					}
 				}
 				if err = h.sendMusic(ctx, b, msgResult, message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
 					sendFailed(err)
@@ -1281,7 +1292,7 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 
 	h.registerQueuedStatus(b, statusMsg, songInfo)
 
-	baseCtx := ctx
+	baseCtx := detachContext(ctx)
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
