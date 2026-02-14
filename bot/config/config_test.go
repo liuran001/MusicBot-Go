@@ -210,3 +210,85 @@ priority = 10
 		t.Errorf("plugin int access failed in mixed format")
 	}
 }
+
+func TestValidateMissingToken(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_config_invalid_*.ini")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configContent := `MUSIC_U = test_music_u`
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tmpFile.Close()
+
+	_, err = Load(tmpFile.Name())
+	if err == nil {
+		t.Fatal("expected load to fail when BOT_TOKEN is missing")
+	}
+}
+
+func TestValidateInvalidQueueSize(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_config_invalid_*.ini")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configContent := `BOT_TOKEN = test_token
+UploadQueueSize = 0
+`
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tmpFile.Close()
+
+	_, err = Load(tmpFile.Name())
+	if err == nil {
+		t.Fatal("expected load to fail when UploadQueueSize <= 0")
+	}
+}
+
+func TestValidateRecognizeDisabledAllowsZeroPort(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_config_invalid_*.ini")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configContent := `BOT_TOKEN = test_token
+EnableRecognize = false
+RecognizePort = 0
+`
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tmpFile.Close()
+
+	if _, err := Load(tmpFile.Name()); err != nil {
+		t.Fatalf("expected config to load when recognize disabled and port is 0, got: %v", err)
+	}
+}
+
+func TestValidateRecognizeEnabledRejectsZeroPort(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_config_invalid_*.ini")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configContent := `BOT_TOKEN = test_token
+EnableRecognize = true
+RecognizePort = 0
+`
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tmpFile.Close()
+
+	if _, err := Load(tmpFile.Name()); err == nil {
+		t.Fatal("expected load to fail when recognize enabled and port is 0")
+	}
+}

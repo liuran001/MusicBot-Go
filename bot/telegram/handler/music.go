@@ -76,20 +76,24 @@ type MusicHandler struct {
 	UploadQueueSize    int
 	UploadBot          *telego.Bot
 	RateLimiter        *telegram.RateLimiter
-	queueMu            sync.Mutex
-	queuedStatus       []queuedStatus
-	statusDirty        bool
-	trackFetchGroup    singleflight.Group
-	downloadInfoGroup  singleflight.Group
-	prepareGroup       singleflight.Group
-	prepareMu          sync.Mutex
-	preparedInFlight   map[string]*preparedArtifactState
-	inlineMu           sync.Mutex
-	inlineInFlight     map[string]*inlineProcessCall
-	downloadQueueMu    sync.Mutex
-	downloadQueueSeq   int64
-	downloadQueue      []downloadQueueEntry
-	downloadQueueText  map[int64]string
+	// queueMu protects queuedStatus/statusDirty state.
+	queueMu           sync.RWMutex
+	queuedStatus      []queuedStatus
+	statusDirty       bool
+	trackFetchGroup   singleflight.Group
+	downloadInfoGroup singleflight.Group
+	prepareGroup      singleflight.Group
+	// prepareMu protects preparedInFlight map only.
+	prepareMu        sync.Mutex
+	preparedInFlight map[string]*preparedArtifactState
+	// inlineMu protects inlineInFlight map only.
+	inlineMu       sync.Mutex
+	inlineInFlight map[string]*inlineProcessCall
+	// downloadQueueMu protects downloadQueue/downloadQueueText/downloadQueueSeq.
+	downloadQueueMu   sync.Mutex
+	downloadQueueSeq  int64
+	downloadQueue     []downloadQueueEntry
+	downloadQueueText map[int64]string
 
 	// DownloadQueueWaitLimit controls max waiting items in download queue.
 	// 0 or less means unlimited (legacy behavior).
@@ -440,25 +444,12 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 
 	qualityStr := quality.String()
 
-	if h.Repo != nil {
-		cached, err := getCached(platformName, trackID, qualityStr)
-		if err == nil && cached != nil {
-			if cached.FileID == "" {
-				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
-			} else {
-				songInfo = *cached
-				status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-
-				if err = h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
-					if !handleInvalidCachedFileID(err, qualityStr) {
-						sendFailed(err)
-						return err
-					}
-				} else {
-					return nil
-				}
-			}
-		}
+	if cachedInfo, sent, err := h.trySendCachedTrack(ctx, b, status, message, platformName, trackID, qualityStr, false, getCached, handleInvalidCachedFileID); err != nil {
+		songInfo = cachedInfo
+		sendFailed(err)
+		return err
+	} else if sent {
+		return nil
 	}
 
 	if !silent {
@@ -483,26 +474,12 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 	defer releaseDownloadSlot()
 
-	if h.Repo != nil {
-		cached, err := getCached(platformName, trackID, qualityStr)
-		if err == nil && cached != nil {
-			if cached.FileID == "" {
-				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, qualityStr)
-			} else {
-				songInfo = *cached
-				if !silent {
-					status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-				}
-				if err = h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
-					if !handleInvalidCachedFileID(err, qualityStr) {
-						sendFailed(err)
-						return err
-					}
-				} else {
-					return nil
-				}
-			}
-		}
+	if cachedInfo, sent, err := h.trySendCachedTrack(ctx, b, status, message, platformName, trackID, qualityStr, silent, getCached, handleInvalidCachedFileID); err != nil {
+		songInfo = cachedInfo
+		sendFailed(err)
+		return err
+	} else if sent {
+		return nil
 	}
 
 	status.Edit(fetchInfo)
@@ -535,25 +512,13 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	songInfo.MusicSize = int(info.Size)
 	songInfo.BitRate = info.Bitrate * 1000
 
-	if h.Repo != nil && actualQuality != qualityStr {
-		cached, err := getCached(platformName, trackID, actualQuality)
-		if err == nil && cached != nil {
-			if cached.FileID == "" {
-				_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, actualQuality)
-			} else {
-				songInfo = *cached
-				if !silent {
-					status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
-				}
-				if err = h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
-					if !handleInvalidCachedFileID(err, actualQuality) {
-						sendFailed(err)
-						return err
-					}
-				} else {
-					return nil
-				}
-			}
+	if actualQuality != qualityStr {
+		if cachedInfo, sent, err := h.trySendCachedTrack(ctx, b, status, message, platformName, trackID, actualQuality, silent, getCached, handleInvalidCachedFileID); err != nil {
+			songInfo = cachedInfo
+			sendFailed(err)
+			return err
+		} else if sent {
+			return nil
 		}
 	}
 
@@ -604,6 +569,47 @@ func (h *MusicHandler) resolveRequestedQuality(ctx context.Context, message *tel
 		}
 	}
 	return quality
+}
+
+func (h *MusicHandler) trySendCachedTrack(
+	ctx context.Context,
+	b *telego.Bot,
+	status *statusSession,
+	message *telego.Message,
+	platformName, trackID, cacheQuality string,
+	silent bool,
+	getCached func(platformName, trackID, quality string) (*botpkg.SongInfo, error),
+	onInvalidCachedFileID func(err error, cacheQuality string) bool,
+) (botpkg.SongInfo, bool, error) {
+	// Return values:
+	//   songInfo: resolved cached song info (non-zero when cache record exists)
+	//   sent:     true when message has been successfully sent and caller should return
+	//   err:      terminal error for caller-side reporting
+	if h == nil || h.Repo == nil || getCached == nil {
+		return botpkg.SongInfo{}, false, nil
+	}
+
+	cached, err := getCached(platformName, trackID, cacheQuality)
+	if err != nil || cached == nil {
+		return botpkg.SongInfo{}, false, nil
+	}
+	if cached.FileID == "" {
+		_ = h.Repo.DeleteByPlatformTrackID(ctx, platformName, trackID, cacheQuality)
+		return botpkg.SongInfo{}, false, nil
+	}
+
+	songInfo := *cached
+	if !silent {
+		status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+	}
+	if err := h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
+		if onInvalidCachedFileID != nil && onInvalidCachedFileID(err, cacheQuality) {
+			return songInfo, false, nil
+		}
+		return songInfo, false, err
+	}
+
+	return songInfo, true, nil
 }
 
 func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *telego.Message, status *statusSession, platformName, trackID string) (*platform.Track, platform.Platform, string, string, error) {
@@ -1435,12 +1441,17 @@ func (h *MusicHandler) runStatusRefresher(ctx context.Context) {
 			return
 		case <-ticker.C:
 			shouldRefresh := false
-			h.queueMu.Lock()
-			if h.statusDirty {
-				h.statusDirty = false
-				shouldRefresh = true
+			h.queueMu.RLock()
+			dirty := h.statusDirty
+			h.queueMu.RUnlock()
+			if dirty {
+				h.queueMu.Lock()
+				if h.statusDirty {
+					h.statusDirty = false
+					shouldRefresh = true
+				}
+				h.queueMu.Unlock()
 			}
-			h.queueMu.Unlock()
 			if shouldRefresh {
 				h.refreshQueuedStatuses(ctx)
 			}
@@ -1497,6 +1508,8 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 	}
 }
 
+// registerQueuedStatus appends one status message entry into upload-status queue.
+// Lock scope: queueMu only.
 func (h *MusicHandler) registerQueuedStatus(b *telego.Bot, statusMsg *telego.Message, songInfo *botpkg.SongInfo) {
 	if h == nil || statusMsg == nil || songInfo == nil {
 		return
@@ -1508,6 +1521,8 @@ func (h *MusicHandler) registerQueuedStatus(b *telego.Bot, statusMsg *telego.Mes
 	h.statusDirty = true
 }
 
+// removeQueuedStatus removes all entries matching message id (and nil placeholders).
+// Lock scope: queueMu only.
 func (h *MusicHandler) removeQueuedStatus(statusMsg *telego.Message) {
 	if h == nil || statusMsg == nil {
 		return
@@ -1525,6 +1540,8 @@ func (h *MusicHandler) removeQueuedStatus(statusMsg *telego.Message) {
 	h.statusDirty = true
 }
 
+// dequeueQueuedStatus removes only the first matching entry to preserve queue order semantics.
+// Lock scope: queueMu only.
 func (h *MusicHandler) dequeueQueuedStatus(statusMsg *telego.Message) {
 	if h == nil || statusMsg == nil {
 		return
@@ -1544,6 +1561,8 @@ func (h *MusicHandler) dequeueQueuedStatus(statusMsg *telego.Message) {
 	h.statusDirty = true
 }
 
+// refreshQueuedStatuses snapshots queuedStatus under lock, then edits messages outside lock.
+// Lock scope: queueMu only for snapshot/update helper methods.
 func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 	if h == nil {
 		return
@@ -1552,12 +1571,12 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 		ctx = context.Background()
 	}
 	var snapshot []queuedStatus
-	h.queueMu.Lock()
+	h.queueMu.RLock()
 	if len(h.queuedStatus) > 0 {
 		snapshot = make([]queuedStatus, len(h.queuedStatus))
 		copy(snapshot, h.queuedStatus)
 	}
-	h.queueMu.Unlock()
+	h.queueMu.RUnlock()
 	if len(snapshot) == 0 {
 		return
 	}
@@ -2228,6 +2247,8 @@ func (h *MusicHandler) prepareInlineSong(
 	return &copy, nil
 }
 
+// acquireDownloadSlot acquires download limiter or enqueues wait-state updater when full.
+// Lock scope: downloadQueueMu is handled by enqueue/dequeue helpers.
 func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, update func(text string)) (func(), error) {
 	if h == nil || h.Limiter == nil {
 		return func() {}, nil

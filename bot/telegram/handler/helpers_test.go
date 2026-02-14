@@ -3,12 +3,56 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
+
+type fallbackTestPlatform struct {
+	name           string
+	searchFunc     func(ctx context.Context, query string, limit int) ([]platform.Track, error)
+	supportsSearch bool
+}
+
+func (p *fallbackTestPlatform) Name() string              { return p.name }
+func (p *fallbackTestPlatform) SupportsDownload() bool    { return false }
+func (p *fallbackTestPlatform) SupportsSearch() bool      { return p.supportsSearch }
+func (p *fallbackTestPlatform) SupportsLyrics() bool      { return false }
+func (p *fallbackTestPlatform) SupportsRecognition() bool { return false }
+func (p *fallbackTestPlatform) Capabilities() platform.Capabilities {
+	return platform.Capabilities{Search: p.supportsSearch}
+}
+func (p *fallbackTestPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *fallbackTestPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+	if p.searchFunc != nil {
+		return p.searchFunc(ctx, query, limit)
+	}
+	return nil, platform.ErrUnsupported
+}
+func (p *fallbackTestPlatform) GetLyrics(ctx context.Context, trackID string) (*platform.Lyrics, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *fallbackTestPlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*platform.Track, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *fallbackTestPlatform) GetTrack(ctx context.Context, trackID string) (*platform.Track, error) {
+	return &platform.Track{ID: trackID, Title: "t", Duration: time.Second}, nil
+}
+func (p *fallbackTestPlatform) GetArtist(ctx context.Context, artistID string) (*platform.Artist, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *fallbackTestPlatform) GetAlbum(ctx context.Context, albumID string) (*platform.Album, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *fallbackTestPlatform) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
+	return nil, platform.ErrUnsupported
+}
 
 func TestSanitizeFileName(t *testing.T) {
 	name := "a/b:c*?d|e\\f\"g"
@@ -113,5 +157,111 @@ func TestIsTelegramFileIDInvalid(t *testing.T) {
 				t.Fatalf("unexpected result: got %v want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSearchTracksWithFallback_PrimarySuccess(t *testing.T) {
+	mgr := newStubManager()
+	primary := &fallbackTestPlatform{name: "netease", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{{ID: "1", Title: "ok"}}, nil
+	}}
+	fallback := &fallbackTestPlatform{name: "qqmusic", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{{ID: "2", Title: "fallback"}}, nil
+	}}
+	mgr.Register(primary)
+	mgr.Register(fallback)
+
+	tracks, usedPlatform, usedFallback, err := searchTracksWithFallback(context.Background(), mgr, "netease", "qqmusic", "k", func(platformName string) int { return 10 }, true)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if usedFallback {
+		t.Fatalf("expected primary path")
+	}
+	if usedPlatform != "netease" || len(tracks) != 1 || tracks[0].ID != "1" {
+		t.Fatalf("unexpected result: platform=%s tracks=%v", usedPlatform, tracks)
+	}
+}
+
+func TestSearchTracksWithFallback_FallbackOnEmpty(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{name: "netease", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{}, nil
+	}})
+	mgr.Register(&fallbackTestPlatform{name: "qqmusic", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{{ID: "2", Title: "fallback"}}, nil
+	}})
+
+	tracks, usedPlatform, usedFallback, err := searchTracksWithFallback(context.Background(), mgr, "netease", "qqmusic", "k", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !usedFallback || usedPlatform != "qqmusic" || len(tracks) != 1 {
+		t.Fatalf("expected fallback result, got fallback=%v platform=%s tracks=%v", usedFallback, usedPlatform, tracks)
+	}
+}
+
+func TestSearchTracksWithFallback_FallbackOnError(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{name: "netease", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return nil, platform.ErrUnavailable
+	}})
+	mgr.Register(&fallbackTestPlatform{name: "qqmusic", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{{ID: "2", Title: "fallback"}}, nil
+	}})
+
+	tracks, usedPlatform, usedFallback, err := searchTracksWithFallback(context.Background(), mgr, "netease", "qqmusic", "k", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !usedFallback || usedPlatform != "qqmusic" || len(tracks) != 1 {
+		t.Fatalf("expected fallback result, got fallback=%v platform=%s tracks=%v", usedFallback, usedPlatform, tracks)
+	}
+}
+
+func TestSearchTracksWithFallback_NoFallbackWhenDisabled(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{name: "netease", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{}, nil
+	}})
+	mgr.Register(&fallbackTestPlatform{name: "qqmusic", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{{ID: "2", Title: "fallback"}}, nil
+	}})
+
+	tracks, usedPlatform, usedFallback, err := searchTracksWithFallback(context.Background(), mgr, "netease", "qqmusic", "k", nil, false)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if usedFallback {
+		t.Fatalf("did not expect fallback when fallbackOnEmpty=false")
+	}
+	if usedPlatform != "netease" || len(tracks) != 0 {
+		t.Fatalf("expected empty primary result, got platform=%s tracks=%v", usedPlatform, tracks)
+	}
+}
+
+func TestSearchTracksWithFallback_PrimaryUnsupported(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{name: "netease", supportsSearch: false})
+	mgr.Register(&fallbackTestPlatform{name: "qqmusic", supportsSearch: true, searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+		return []platform.Track{{ID: "2", Title: "fallback"}}, nil
+	}})
+
+	tracks, usedPlatform, usedFallback, err := searchTracksWithFallback(context.Background(), mgr, "netease", "qqmusic", "k", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !usedFallback || usedPlatform != "qqmusic" || len(tracks) != 1 {
+		t.Fatalf("expected fallback result for unsupported primary, got fallback=%v platform=%s tracks=%v", usedFallback, usedPlatform, tracks)
+	}
+}
+
+func TestSearchTracksWithFallback_PrimaryUnsupportedNoFallback(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{name: "netease", supportsSearch: false})
+
+	_, _, _, err := searchTracksWithFallback(context.Background(), mgr, "netease", "qqmusic", "k", nil, true)
+	if !errors.Is(err, platform.ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported, got %v", err)
 	}
 }

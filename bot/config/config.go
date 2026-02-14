@@ -40,6 +40,9 @@ func Load(path string) (*Config, error) {
 		}
 
 		loadPlugins(cfg, c)
+		if err := c.Validate(); err != nil {
+			return nil, fmt.Errorf("validate config: %w", err)
+		}
 		return c, nil
 	} else {
 		v.SetConfigFile(path)
@@ -48,10 +51,89 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	return &Config{
+	c := &Config{
 		v:       v,
 		plugins: make(map[string]PluginConfig),
-	}, nil
+	}
+	if err := c.Validate(); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
+	return c, nil
+}
+
+// Validate checks critical configuration values for sane ranges.
+func (c *Config) Validate() error {
+	if c == nil || c.v == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	if strings.TrimSpace(c.GetString("BOT_TOKEN")) == "" {
+		return fmt.Errorf("bot token is required")
+	}
+	if strings.TrimSpace(c.GetString("DefaultPlatform")) == "" {
+		return fmt.Errorf("default platform cannot be empty")
+	}
+	if strings.TrimSpace(c.GetString("SearchFallbackPlatform")) == "" {
+		return fmt.Errorf("search fallback platform cannot be empty")
+	}
+	if strings.TrimSpace(c.GetString("DefaultQuality")) == "" {
+		return fmt.Errorf("default quality cannot be empty")
+	}
+
+	mustPositive := map[string]int{
+		"DownloadTimeout":    c.GetInt("DownloadTimeout"),
+		"ListPageSize":       c.GetInt("ListPageSize"),
+		"InlineListPageSize": c.GetInt("InlineListPageSize"),
+		"WorkerPoolSize":     c.GetInt("WorkerPoolSize"),
+		"RateLimitBurst":     c.GetInt("RateLimitBurst"),
+		"UploadWorkerCount":  c.GetInt("UploadWorkerCount"),
+		"UploadQueueSize":    c.GetInt("UploadQueueSize"),
+	}
+	for k, v := range mustPositive {
+		if v <= 0 {
+			return fmt.Errorf("%s must be greater than 0", strings.ToLower(k))
+		}
+	}
+
+	mustNonNegative := map[string]int{
+		"DBMaxOpenConns":         c.GetInt("DBMaxOpenConns"),
+		"DBMaxIdleConns":         c.GetInt("DBMaxIdleConns"),
+		"DBConnMaxLifetimeSec":   c.GetInt("DBConnMaxLifetimeSec"),
+		"MultipartMinSizeMB":     c.GetInt("MultipartMinSizeMB"),
+		"GlobalRateLimitBurst":   c.GetInt("GlobalRateLimitBurst"),
+		"DownloadConcurrency":    c.GetInt("DownloadConcurrency"),
+		"DownloadMaxRetries":     c.GetInt("DownloadMaxRetries"),
+		"DownloadQueueWaitLimit": c.GetInt("DownloadQueueWaitLimit"),
+		"UploadConcurrency":      c.GetInt("UploadConcurrency"),
+	}
+	for k, v := range mustNonNegative {
+		if v < 0 {
+			return fmt.Errorf("%s must be non-negative", strings.ToLower(k))
+		}
+	}
+
+	if c.GetBool("EnableMultipartDownload") && c.GetInt("MultipartConcurrency") <= 0 {
+		return fmt.Errorf("multipart concurrency must be greater than 0 when multipart download is enabled")
+	}
+
+	ratePerSecond := c.GetFloat64("RateLimitPerSecond")
+	if ratePerSecond <= 0 {
+		return fmt.Errorf("rate limit per second must be greater than 0")
+	}
+	globalRatePerSecond := c.GetFloat64("GlobalRateLimitPerSecond")
+	if globalRatePerSecond < 0 {
+		return fmt.Errorf("global rate limit per second must be non-negative")
+	}
+
+	port := c.GetInt("RecognizePort")
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("recognize port must be between 1 and 65535")
+	}
+	if c.GetBool("EnableRecognize") && port == 0 {
+		return fmt.Errorf("recognize port must be between 1 and 65535")
+	}
+
+	return nil
 }
 
 func setDefaults(v *viper.Viper) {

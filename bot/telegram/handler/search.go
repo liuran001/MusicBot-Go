@@ -170,73 +170,28 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		fallbackPlatform = ""
 	}
 
-	plat := h.PlatformManager.Get(platformName)
-	if plat == nil {
-		params := &telego.EditMessageTextParams{
-			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
-			MessageID: msgResult.MessageID,
-			Text:      noResults,
-		}
-		if h.RateLimiter != nil {
-			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
-		} else {
-			_, _ = b.EditMessageText(ctx, params)
-		}
-		return
-	}
-
-	if !plat.SupportsSearch() {
-		params := &telego.EditMessageTextParams{
-			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
-			MessageID: msgResult.MessageID,
-			Text:      "此平台不支持搜索功能",
-		}
-		if h.RateLimiter != nil {
-			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
-		} else {
-			_, _ = b.EditMessageText(ctx, params)
-		}
-		return
-	}
-
+	tracks, platformName, usedFallback, err := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.searchLimit, true)
 	searchLimit := h.searchLimit(platformName)
-	tracks, err := plat.Search(ctx, keyword, searchLimit)
-	usedFallback := false
 	if err != nil {
-		if fallbackPlatform != "" && platformName != fallbackPlatform {
-			fallbackPlat := h.PlatformManager.Get(fallbackPlatform)
-			if fallbackPlat != nil && fallbackPlat.SupportsSearch() {
-				fallbackLimit := h.searchLimit(fallbackPlatform)
-				tracks, err = fallbackPlat.Search(ctx, keyword, fallbackLimit)
-				if err == nil && len(tracks) > 0 {
-					platformName = fallbackPlatform
-					usedFallback = true
-					searchLimit = fallbackLimit
-				}
-			}
+		errorText := noResults
+		if errors.Is(err, platform.ErrUnsupported) {
+			errorText = "此平台不支持搜索功能"
+		} else if errors.Is(err, platform.ErrRateLimited) {
+			errorText = "请求过于频繁，请稍后再试"
+		} else if errors.Is(err, platform.ErrUnavailable) {
+			errorText = "搜索服务暂时不可用"
 		}
-
-		if err != nil {
-			errorText := noResults
-			if errors.Is(err, platform.ErrUnsupported) {
-				errorText = "此平台不支持搜索功能"
-			} else if errors.Is(err, platform.ErrRateLimited) {
-				errorText = "请求过于频繁，请稍后再试"
-			} else if errors.Is(err, platform.ErrUnavailable) {
-				errorText = "搜索服务暂时不可用"
-			}
-			params := &telego.EditMessageTextParams{
-				ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
-				MessageID: msgResult.MessageID,
-				Text:      errorText,
-			}
-			if h.RateLimiter != nil {
-				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
-			} else {
-				_, _ = b.EditMessageText(ctx, params)
-			}
-			return
+		params := &telego.EditMessageTextParams{
+			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
+			MessageID: msgResult.MessageID,
+			Text:      errorText,
 		}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
+		return
 	}
 
 	if len(tracks) == 0 {

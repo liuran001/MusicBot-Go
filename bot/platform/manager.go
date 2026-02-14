@@ -19,17 +19,21 @@ type DefaultManager struct {
 	mu       sync.RWMutex
 	// providers maps platform name to a list of providers in registration order
 	providers map[string][]Platform
-	meta      map[string]Meta
-	aliases   map[string]string
+	// composites caches composite platforms for names with multiple providers.
+	// Invalidated on Register for the target name.
+	composites map[string]Platform
+	meta       map[string]Meta
+	aliases    map[string]string
 }
 
 // NewManager creates a new manager instance with the default global registry.
 func NewManager() *DefaultManager {
 	return &DefaultManager{
-		registry:  registry.Default,
-		providers: make(map[string][]Platform),
-		meta:      make(map[string]Meta),
-		aliases:   make(map[string]string),
+		registry:   registry.Default,
+		providers:  make(map[string][]Platform),
+		composites: make(map[string]Platform),
+		meta:       make(map[string]Meta),
+		aliases:    make(map[string]string),
 	}
 }
 
@@ -37,10 +41,11 @@ func NewManager() *DefaultManager {
 // This is useful for testing or isolated instances.
 func NewManagerWithRegistry(reg *registry.Registry) *DefaultManager {
 	return &DefaultManager{
-		registry:  reg,
-		providers: make(map[string][]Platform),
-		meta:      make(map[string]Meta),
-		aliases:   make(map[string]string),
+		registry:   reg,
+		providers:  make(map[string][]Platform),
+		composites: make(map[string]Platform),
+		meta:       make(map[string]Meta),
+		aliases:    make(map[string]string),
 	}
 }
 
@@ -53,6 +58,7 @@ func (m *DefaultManager) Register(platform Platform) {
 
 	name := platform.Name()
 	m.providers[name] = append(m.providers[name], platform)
+	delete(m.composites, name)
 	meta := buildMeta(platform, name)
 	if existing, ok := m.meta[name]; ok {
 		meta = mergeMeta(existing, meta)
@@ -86,11 +92,16 @@ func (m *DefaultManager) Get(name string) Platform {
 		return providers[0]
 	}
 
-	// Multiple providers: return composite with fallback
-	return &compositePlatform{
+	// Multiple providers: return cached composite with fallback
+	if cached, ok := m.composites[name]; ok {
+		return cached
+	}
+	composite := &compositePlatform{
 		name:      name,
 		providers: providers,
 	}
+	m.composites[name] = composite
+	return composite
 }
 
 // compositePlatform implements Platform by trying multiple providers in order with fallback.

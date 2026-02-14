@@ -86,7 +86,20 @@ func (p *Pool) handlePanic(recovered any, stack []byte) {
 }
 
 // Submit enqueues a task for execution.
-func (p *Pool) Submit(task func()) error {
+func (p *Pool) Submit(task func()) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = ErrPoolClosed
+		}
+	}()
+
+	p.mu.Lock()
+	closed := p.closed
+	p.mu.Unlock()
+	if closed {
+		return ErrPoolClosed
+	}
+
 	select {
 	case <-p.shutdown:
 		return ErrPoolClosed
@@ -137,12 +150,13 @@ func (p *Pool) SubmitWaitContext(ctx context.Context, task func() error) error {
 	}
 }
 
-// Shutdown waits for in-flight tasks until context is done.
+// Shutdown gracefully drains queued tasks and waits for workers to exit.
+// Contrast with StopNow, which stops immediately without draining the queue.
 func (p *Pool) Shutdown(ctx context.Context) error {
 	p.mu.Lock()
 	if !p.closed {
 		p.closed = true
-		close(p.shutdown)
+		close(p.tasks)
 	}
 	p.mu.Unlock()
 
