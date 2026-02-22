@@ -1,3 +1,5 @@
+github.com/Sorrow446/go-mp4tag v0.0.0-20240130220823-68ce31d53e37 h1:6X6U2D53ITfDGiyGN+sOVm/iFveFHrFRS7icGJ+u88M=
+github.com/Sorrow446/go-mp4tag v0.0.0-20240130220823-68ce31d53e37/go.mod h1:l5rVvaRUrCot83416D6xggKCeFZQAXcv02tnJslG26s=
 github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936 h1:to5zIst65bM0aYtqsUU97yE6kuHKUB078F2z+G4ZQH4=
 github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936/go.mod h1:L6oR/uZwUSBO7o57qbul/zwUuuKpP4EVnFKmTBscvLY=
 github.com/XiaoMengXinX/Music163Api-Go v0.1.30 h1:MqRItDFtX1J0JTlFtwN2RwjsYMA7/g/+cTjcOJXy19s=

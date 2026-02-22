@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Sorrow446/go-mp4tag"
 	marker "github.com/XiaoMengXinX/163KeyMarker"
 	"github.com/bogem/id3v2"
 	"github.com/go-flac/flacpicture"
@@ -38,6 +39,8 @@ func (s *ID3Service) EmbedTags(audioPath string, tag *TagData, coverPath string)
 				return s.embedMp3TagsWithMarker(audioPath, tag, coverPath, markerData)
 			} else if ext == ".flac" {
 				return s.embedFlacTagsWithMarker(audioPath, tag, coverPath, markerData)
+			} else if ext == ".m4a" {
+				return s.embedM4aTagsWithMarker(audioPath, tag, coverPath, markerData)
 			}
 		}
 	}
@@ -47,6 +50,8 @@ func (s *ID3Service) EmbedTags(audioPath string, tag *TagData, coverPath string)
 		return s.embedMp3Tags(audioPath, tag, coverPath)
 	case ".flac":
 		return s.embedFlacTags(audioPath, tag, coverPath)
+	case ".m4a", ".mp4":
+		return s.embedM4aTags(audioPath, tag, coverPath)
 	default:
 		return errors.New("unsupported audio format for tags")
 	}
@@ -353,4 +358,101 @@ func (s *ID3Service) embedMp3TagsWithMarker(audioPath string, tagData *TagData, 
 	s.writeMp3Cover(meta, coverPath)
 
 	return meta.Save()
+}
+
+func (s *ID3Service) writeM4aTags(mp4 *mp4tag.MP4, tagData *TagData, coverPath string) error {
+	tags := &mp4tag.MP4Tags{}
+
+	if tagData.Title != "" {
+		tags.Title = tagData.Title
+	}
+	if tagData.Artist != "" {
+		tags.Artist = tagData.Artist
+	}
+	if tagData.Album != "" {
+		tags.Album = tagData.Album
+	}
+	if tagData.AlbumArtist != "" {
+		tags.AlbumArtist = tagData.AlbumArtist
+	}
+	if tagData.Year != "" {
+		tags.Date = tagData.Year
+	}
+	if tagData.Genre != "" {
+		tags.CustomGenre = tagData.Genre
+	}
+	if tagData.Comment != "" {
+		tags.Comment = tagData.Comment
+	}
+	if tagData.TrackNumber > 0 {
+		tags.TrackNumber = int16(tagData.TrackNumber)
+	}
+	if tagData.DiscNumber > 0 {
+		tags.DiscNumber = int16(tagData.DiscNumber)
+	}
+
+	lyrics := platform.NormalizeLRCTimestamps(tagData.Lyrics)
+	if lyrics != "" {
+		tags.Lyrics = lyrics
+	} else if s.logger != nil {
+		s.logger.Warn("m4a lyrics field is empty, skipping lyrics embedding")
+	}
+
+	if coverPath != "" {
+		artwork, err := readCoverWithLimit(coverPath, 10*1024*1024)
+		if err == nil && len(artwork) > 0 {
+			format := mp4tag.ImageTypeJPEG
+			mime := http.DetectContentType(artwork[:minInt(len(artwork), 32)])
+			if strings.Contains(mime, "png") {
+				format = mp4tag.ImageTypePNG
+			}
+			tags.Pictures = []*mp4tag.MP4Picture{
+				{
+					Format: format,
+					Data:   artwork,
+				},
+			}
+		} else if err != nil && s.logger != nil {
+			s.logger.Warn("failed to read cover for m4a embedding", "error", err)
+		}
+	}
+
+	return mp4.Write(tags, []string{})
+}
+
+func (s *ID3Service) embedM4aTags(audioPath string, tagData *TagData, coverPath string) error {
+	mp4, err := mp4tag.Open(audioPath)
+	if err != nil {
+		return err
+	}
+	defer mp4.Close()
+
+	if err := s.writeM4aTags(mp4, tagData, coverPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *ID3Service) embedM4aTagsWithMarker(audioPath string, tagData *TagData, coverPath string, markerData marker.MarkerData) error {
+	mp4, err := mp4tag.Open(audioPath)
+	if err != nil {
+		return err
+	}
+	defer mp4.Close()
+
+	key163 := marker.Create163KeyStr(markerData)
+	if tagData.Comment != "" {
+		tagData.Comment = tagData.Comment + "\n" + key163
+	} else {
+		tagData.Comment = key163
+	}
+
+	if err := s.writeM4aTags(mp4, tagData, coverPath); err != nil {
+		return err
+	}
+
+	if s.logger != nil {
+		s.logger.Debug("embedded 163key marker in m4a", "key_length", len(key163))
+	}
+	return nil
 }
