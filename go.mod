@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	github.com/Sorrow446/go-mp4tag v0.0.0-20240130220823-68ce31d53e37 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
