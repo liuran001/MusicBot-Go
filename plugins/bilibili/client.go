@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -164,6 +165,7 @@ type VideoSubtitleItem struct {
 	SubtitleURLV2 string `json:"subtitle_url_v2"`
 	Lan           string `json:"lan"`
 	LanDoc        string `json:"lan_doc"`
+	AiType        int    `json:"ai_type"`
 }
 
 type VideoSubtitleData struct {
@@ -409,6 +411,135 @@ func (c *Client) GetLyric(ctx context.Context, lyricUrl string) (string, error) 
 		return "", err
 	}
 	return lyric, nil
+}
+
+// GetAudioSongLyric fetches lyric content directly by bilibili audio sid.
+func (c *Client) GetAudioSongLyric(ctx context.Context, sid int) (string, error) {
+	if sid <= 0 {
+		return "", errors.New("bilibili: invalid audio sid")
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("bilibili: fetching audio lyric by sid", "sid", sid)
+	}
+
+	apiURL := fmt.Sprintf("https://www.bilibili.com/audio/music-service-c/web/song/lyric?sid=%d", sid)
+
+	var result struct {
+		Code    int     `json:"code"`
+		Message string  `json:"msg"`
+		Data    *string `json:"data"`
+	}
+
+	err := c.execute(ctx, func() error {
+		req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if err != nil {
+			return err
+		}
+
+		c.setHeaders(req)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("bilibili: unexpected status code %d: %s", resp.StatusCode, string(body))
+		}
+
+		if err := json.Unmarshal(body, &result); err != nil {
+			return fmt.Errorf("bilibili: decode song lyric: %w", err)
+		}
+
+		if result.Code != 0 {
+			return fmt.Errorf("bilibili: API error code %d: %s", result.Code, result.Message)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if result.Data == nil {
+		return "", nil
+	}
+
+	return strings.TrimSpace(*result.Data), nil
+}
+
+func pickBestSubtitleURL(items []VideoSubtitleItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+
+	type subtitleCandidate struct {
+		url   string
+		score int
+		lan   string
+	}
+
+	candidates := make([]subtitleCandidate, 0, len(items)*2)
+	for _, item := range items {
+		score := subtitleLanguagePriority(item.Lan, item.LanDoc)
+		if item.AiType != 0 {
+			score += 5
+		}
+
+		for _, raw := range []string{item.SubtitleURL, item.SubtitleURLV2} {
+			u := strings.TrimSpace(raw)
+			if u == "" {
+				continue
+			}
+			if strings.HasPrefix(u, "//") {
+				u = "https:" + u
+			}
+			candidates = append(candidates, subtitleCandidate{
+				url:   u,
+				score: score,
+				lan:   strings.ToLower(strings.TrimSpace(item.Lan)),
+			})
+		}
+	}
+
+	if len(candidates) == 0 {
+		return ""
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score < candidates[j].score
+		}
+		if candidates[i].lan != candidates[j].lan {
+			return candidates[i].lan < candidates[j].lan
+		}
+		return candidates[i].url < candidates[j].url
+	})
+
+	return candidates[0].url
+}
+
+func subtitleLanguagePriority(lan, lanDoc string) int {
+	lanNorm := strings.ToLower(strings.TrimSpace(lan))
+	lanDocNorm := strings.ToLower(strings.TrimSpace(lanDoc))
+
+	switch {
+	case lanNorm == "zh-cn" || lanNorm == "zh-hans" || lanNorm == "zh":
+		return 0
+	case strings.HasPrefix(lanNorm, "zh"):
+		return 1
+	case strings.Contains(lanDocNorm, "中文") || strings.Contains(lanDocNorm, "汉") || strings.Contains(lanDocNorm, "漢"):
+		return 2
+	default:
+		return 10
+	}
 }
 
 // ResolveB23ID follows a b23.tv shortlink and finds the actual track ID
@@ -720,18 +851,8 @@ func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) 
 			continue
 		}
 
-		for _, item := range result.Data.Subtitle.Subtitles {
-			candidates := []string{item.SubtitleURL, item.SubtitleURLV2}
-			for _, candidate := range candidates {
-				urlValue := strings.TrimSpace(candidate)
-				if urlValue == "" {
-					continue
-				}
-				if strings.HasPrefix(urlValue, "//") {
-					urlValue = "https:" + urlValue
-				}
-				return urlValue, nil
-			}
+		if selected := pickBestSubtitleURL(result.Data.Subtitle.Subtitles); selected != "" {
+			return selected, nil
 		}
 	}
 
