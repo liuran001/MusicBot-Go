@@ -694,22 +694,27 @@ func buildInlineEpisodePickerPage(platformName, trackID, qualityValue string, re
 	if page <= 0 {
 		page = 1
 	}
-	totalPages := int(math.Ceil(float64(len(episodes)) / float64(episodePageSize)))
+	// inline 多P页面与 inline 专辑页保持同样的单页容量（当前为 8）
+	pageSize := episodePageSize
+	totalPages := int(math.Ceil(float64(len(episodes)) / float64(pageSize)))
 	if totalPages <= 0 {
 		totalPages = 1
 	}
 	if page > totalPages {
 		page = totalPages
 	}
-	start := (page - 1) * episodePageSize
-	end := start + episodePageSize
+	start := (page - 1) * pageSize
+	end := start + pageSize
 	if end > len(episodes) {
 		end = len(episodes)
 	}
 	visible := episodes[start:end]
-	textLines := buildEpisodeHeaderLines(episodes)
+	textLines := make([]string, 0, len(visible)+8)
+	textLines = append(textLines, fmt.Sprintf("%s *%s* 选集", platformEmoji(nil, platformName), mdV2Replacer.Replace(platformDisplayName(nil, platformName))), "")
+	textLines = append(textLines, buildEpisodeHeaderLines(episodes)...)
 	textLines = append(textLines, fmt.Sprintf("第 %d/%d 页", page, totalPages), "")
 	for _, ep := range visible {
+		displayIndex := ep.Index
 		title := strings.TrimSpace(ep.Title)
 		if title == "" {
 			title = fmt.Sprintf("P%d", ep.Index)
@@ -718,20 +723,21 @@ func buildInlineEpisodePickerPage(platformName, trackID, qualityValue string, re
 		if strings.TrimSpace(ep.URL) != "" {
 			episodeLink = fmt.Sprintf("[%s](%s)", mdV2Replacer.Replace(title), strings.TrimSpace(ep.URL))
 		}
-		textLines = append(textLines, fmt.Sprintf("%d\\. %s", ep.Index, episodeLink))
+		textLines = append(textLines, fmt.Sprintf("%d\\. %s", displayIndex, episodeLink))
 	}
 
 	rows := make([][]telego.InlineKeyboardButton, 0, 8)
-	currentRow := make([]telego.InlineKeyboardButton, 0, episodePageSize)
+	currentRow := make([]telego.InlineKeyboardButton, 0, pageSize)
 	for _, ep := range visible {
+		displayIndex := ep.Index
 		cb := buildInlineEpisodeSelectCallbackData(platformName, trackID, qualityValue, requesterID, ep.Index)
 		if cb == "" {
 			continue
 		}
-		currentRow = append(currentRow, telego.InlineKeyboardButton{Text: fmt.Sprintf("%d", ep.Index), CallbackData: cb})
-		if len(currentRow) == episodePageSize {
+		currentRow = append(currentRow, telego.InlineKeyboardButton{Text: fmt.Sprintf("%d", displayIndex), CallbackData: cb})
+		if len(currentRow) == pageSize {
 			rows = append(rows, currentRow)
-			currentRow = make([]telego.InlineKeyboardButton, 0, episodePageSize)
+			currentRow = make([]telego.InlineKeyboardButton, 0, pageSize)
 		}
 	}
 	if len(currentRow) > 0 {
