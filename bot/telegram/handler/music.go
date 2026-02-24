@@ -238,7 +238,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 		params := &telego.SendMessageParams{
 			ChatID:             telego.ChatID{ID: message.Chat.ID},
-			Text:               buildHelpText(h.PlatformManager, isAdmin, adminHelp, h.RecognizeEnabled),
+			Text:               buildHelpText(h.PlatformManager, isAdmin, adminHelp, h.RecognizeEnabled, strings.EqualFold(strings.TrimSpace(message.Chat.Type), "private")),
 			ParseMode:          telego.ModeMarkdownV2,
 			LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 			ReplyParameters:    &telego.ReplyParameters{MessageID: message.MessageID},

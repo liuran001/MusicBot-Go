@@ -56,7 +56,7 @@ var (
 	callbackDenied = "仅发起人或管理员可操作"
 )
 
-func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command, recognizeEnabled bool) string {
+func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command, recognizeEnabled bool, isPrivateChat bool) string {
 	aliasText := buildAliasHint(manager)
 	platformText := buildPlatformList(manager)
 	if aliasText == "" {
@@ -66,9 +66,11 @@ func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admin
 		platformText = "网易云音乐, QQ音乐"
 	}
 	text := "欢迎使用 MusicBot\\-Go \\!\n" +
-		"这是一个强大的音乐下载机器人，支持多平台歌曲的搜索与下载\n" +
-		"直接发送 链接/歌曲名/ID 即可下载对应歌曲\n\n" +
-		"使用方法:\n" +
+		"这是一个强大的音乐下载机器人，支持多平台歌曲的搜索与下载\n"
+	if isPrivateChat {
+		text += "直接发送 链接/歌曲名/ID 即可下载对应歌曲\n"
+	}
+	text += "\n使用方法:\n" +
 		"`/music` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\<\\(可选\\)音质\\> \\- 下载歌曲\n" +
 		"`/search` \\<关键词\\> \\<\\(可选\\)搜索平台\\> \\<\\(可选\\)音质\\> \\- 搜索歌曲\n" +
 		"`/lyric` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\- 获取歌词\n"
