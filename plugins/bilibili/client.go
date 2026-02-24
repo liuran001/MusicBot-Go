@@ -86,25 +86,33 @@ type AudioStreamUrlResponse struct {
 
 // VideoInfoData contains metadata for a video
 type VideoInfoData struct {
-	Bvid      string `json:"bvid"`
-	Aid       int    `json:"aid"`
-	Cid       int    `json:"cid"`
-	Tid       int    `json:"tid"`
-	Tname     string `json:"tname"`
-	TypeName  string `json:"type_name"`
-	TidV2     int    `json:"tid_v2"`
-	TnameV2   string `json:"tname_v2"`
-	PidV2     int    `json:"pid_v2"`
-	PidNameV2 string `json:"pid_name_v2"`
-	Title     string `json:"title"`
-	Pic       string `json:"pic"`
-	Desc      string `json:"desc"`
-	Duration  int    `json:"duration"`
+	Bvid      string      `json:"bvid"`
+	Aid       int         `json:"aid"`
+	Cid       int         `json:"cid"`
+	Pages     []VideoPage `json:"pages"`
+	Tid       int         `json:"tid"`
+	Tname     string      `json:"tname"`
+	TypeName  string      `json:"type_name"`
+	TidV2     int         `json:"tid_v2"`
+	TnameV2   string      `json:"tname_v2"`
+	PidV2     int         `json:"pid_v2"`
+	PidNameV2 string      `json:"pid_name_v2"`
+	Title     string      `json:"title"`
+	Pic       string      `json:"pic"`
+	Desc      string      `json:"desc"`
+	Duration  int         `json:"duration"`
 	Owner     struct {
 		Mid  int    `json:"mid"`
 		Name string `json:"name"`
 		Face string `json:"face"`
 	} `json:"owner"`
+}
+
+type VideoPage struct {
+	Cid      int    `json:"cid"`
+	Page     int    `json:"page"`
+	Part     string `json:"part"`
+	Duration int    `json:"duration"`
 }
 
 type VideoInfoResponse struct {

@@ -150,7 +150,7 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 			if strings.TrimSpace(songInfo.ThumbFileID) != "" {
 				media.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
 			}
-			replyMarkup := buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+			replyMarkup := buildForwardKeyboardWithEpisodes(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID, qualityValue, chosen.From.ID)
 			params := &telego.EditMessageMediaParams{
 				InlineMessageID: chosen.InlineMessageID,
 				Media:           media,

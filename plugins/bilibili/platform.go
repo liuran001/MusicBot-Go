@@ -2,6 +2,7 @@ package bilibili
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -16,6 +17,74 @@ import (
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
+
+var (
+	bilibiliBVTrackPattern = regexp.MustCompile(`^(BV[a-zA-Z0-9]{10})(?:_p(\d+))?$`)
+	bilibiliAVTrackPattern = regexp.MustCompile(`^(?i)(av\d+)(?:_p(\d+))?$`)
+)
+
+func parseBilibiliVideoTrackID(trackID string) (baseID string, page int, ok bool) {
+	trimmed := strings.TrimSpace(trackID)
+	if trimmed == "" {
+		return "", 0, false
+	}
+	if matches := bilibiliBVTrackPattern.FindStringSubmatch(trimmed); len(matches) == 3 {
+		page = 1
+		if strings.TrimSpace(matches[2]) != "" {
+			if parsed, err := strconv.Atoi(matches[2]); err == nil && parsed > 0 {
+				page = parsed
+			}
+		}
+		return matches[1], page, true
+	}
+	if matches := bilibiliAVTrackPattern.FindStringSubmatch(trimmed); len(matches) == 3 {
+		page = 1
+		if strings.TrimSpace(matches[2]) != "" {
+			if parsed, err := strconv.Atoi(matches[2]); err == nil && parsed > 0 {
+				page = parsed
+			}
+		}
+		return strings.ToLower(matches[1]), page, true
+	}
+	return "", 0, false
+}
+
+func buildBilibiliVideoTrackID(baseID string, page int) string {
+	baseID = strings.TrimSpace(baseID)
+	if baseID == "" {
+		return ""
+	}
+	if page <= 1 {
+		return baseID
+	}
+	return fmt.Sprintf("%s_p%d", baseID, page)
+}
+
+func selectedBilibiliPage(videoInfo *VideoInfoData, requestedPage int) (page VideoPage, resolvedPage int, err error) {
+	if requestedPage <= 0 {
+		requestedPage = 1
+	}
+	if videoInfo == nil {
+		return VideoPage{}, 0, errors.New("nil video info")
+	}
+	if len(videoInfo.Pages) == 0 {
+		return VideoPage{Cid: videoInfo.Cid, Page: 1, Part: "", Duration: videoInfo.Duration}, 1, nil
+	}
+	if requestedPage > len(videoInfo.Pages) {
+		return VideoPage{}, 0, fmt.Errorf("page out of range: %d", requestedPage)
+	}
+	selected := videoInfo.Pages[requestedPage-1]
+	if selected.Cid == 0 {
+		selected.Cid = videoInfo.Cid
+	}
+	if selected.Page <= 0 {
+		selected.Page = requestedPage
+	}
+	if selected.Duration <= 0 {
+		selected.Duration = videoInfo.Duration
+	}
+	return selected, requestedPage, nil
+}
 
 // BilibiliPlatform implements the Platform interface for Bilibili Audio & Video.
 type BilibiliPlatform struct {
@@ -226,7 +295,7 @@ func (b *BilibiliPlatform) GetDownloadInfo(ctx context.Context, trackID string, 
 		trackID = resolvedID
 	}
 
-	if strings.HasPrefix(trackID, "BV") || strings.HasPrefix(strings.ToLower(trackID), "av") {
+	if _, _, isVideo := parseBilibiliVideoTrackID(trackID); isVideo {
 		return b.getVideoDownloadInfo(ctx, trackID, quality)
 	}
 	return b.getAudioDownloadInfo(ctx, trackID, quality)
@@ -278,16 +347,20 @@ func (b *BilibiliPlatform) getAudioDownloadInfo(ctx context.Context, trackID str
 }
 
 func (b *BilibiliPlatform) getVideoDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
-	videoInfo, err := b.client.GetVideoInfo(ctx, trackID)
+	baseID, selectedPage, ok := parseBilibiliVideoTrackID(trackID)
+	if !ok {
+		return nil, platform.NewNotFoundError("bilibili", "track", trackID)
+	}
+	videoInfo, err := b.client.GetVideoInfo(ctx, baseID)
 	if err != nil {
 		return nil, fmt.Errorf("bilibili: failed to fetch video info for stream: %w", err)
 	}
-
-	if videoInfo == nil || videoInfo.Cid == 0 {
+	selected, _, err := selectedBilibiliPage(videoInfo, selectedPage)
+	if err != nil || selected.Cid == 0 {
 		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
 	}
 
-	audioStreams, err := b.client.GetVideoPlayUrl(ctx, videoInfo.Bvid, videoInfo.Cid)
+	audioStreams, err := b.client.GetVideoPlayUrl(ctx, videoInfo.Bvid, selected.Cid)
 	if err != nil {
 		return nil, fmt.Errorf("bilibili: failed to fetch dash play stream: %w", err)
 	}
@@ -368,7 +441,7 @@ func (b *BilibiliPlatform) GetTrack(ctx context.Context, trackID string) (*platf
 		trackID = resolvedID
 	}
 
-	if strings.HasPrefix(trackID, "BV") || strings.HasPrefix(strings.ToLower(trackID), "av") {
+	if _, _, isVideo := parseBilibiliVideoTrackID(trackID); isVideo {
 		return b.getVideoTrack(ctx, trackID)
 	}
 	return b.getAudioTrack(ctx, trackID)
@@ -410,7 +483,11 @@ func (b *BilibiliPlatform) getAudioTrack(ctx context.Context, trackID string) (*
 }
 
 func (b *BilibiliPlatform) getVideoTrack(ctx context.Context, trackID string) (*platform.Track, error) {
-	videoInfo, err := b.client.GetVideoInfo(ctx, trackID)
+	baseID, selectedPage, ok := parseBilibiliVideoTrackID(trackID)
+	if !ok {
+		return nil, platform.NewNotFoundError("bilibili", "track", trackID)
+	}
+	videoInfo, err := b.client.GetVideoInfo(ctx, baseID)
 	if err != nil {
 		return nil, fmt.Errorf("bilibili: failed to get video detail: %w", err)
 	}
@@ -428,14 +505,35 @@ func (b *BilibiliPlatform) getVideoTrack(ctx context.Context, trackID string) (*
 		},
 	}
 
+	selected, resolvedPage, err := selectedBilibiliPage(videoInfo, selectedPage)
+	if err != nil {
+		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
+	}
+	title := strings.TrimSpace(videoInfo.Title)
+	if len(videoInfo.Pages) > 1 {
+		part := strings.TrimSpace(selected.Part)
+		if part == "" {
+			part = fmt.Sprintf("P%d", resolvedPage)
+		}
+		title = strings.TrimSpace(fmt.Sprintf("%s - P%d %s", videoInfo.Title, resolvedPage, part))
+	}
+	trackURL := fmt.Sprintf("https://www.bilibili.com/video/%s", videoInfo.Bvid)
+	if resolvedPage > 1 {
+		trackURL = fmt.Sprintf("%s?p=%d", trackURL, resolvedPage)
+	}
+	duration := time.Duration(videoInfo.Duration) * time.Second
+	if selected.Duration > 0 {
+		duration = time.Duration(selected.Duration) * time.Second
+	}
+
 	return &platform.Track{
-		ID:       videoInfo.Bvid,
+		ID:       buildBilibiliVideoTrackID(videoInfo.Bvid, resolvedPage),
 		Platform: "bilibili",
-		Title:    videoInfo.Title,
+		Title:    title,
 		Artists:  artists,
-		Duration: time.Duration(videoInfo.Duration) * time.Second,
+		Duration: duration,
 		CoverURL: videoInfo.Pic,
-		URL:      fmt.Sprintf("https://www.bilibili.com/video/%s", videoInfo.Bvid),
+		URL:      trackURL,
 	}, nil
 }
 
@@ -449,13 +547,17 @@ func (b *BilibiliPlatform) GetLyrics(ctx context.Context, trackID string) (*plat
 		trackID = resolvedID
 	}
 
-	if strings.HasPrefix(trackID, "BV") || strings.HasPrefix(strings.ToLower(trackID), "av") {
-		videoInfo, err := b.client.GetVideoInfo(ctx, trackID)
+	if baseID, selectedPage, isVideo := parseBilibiliVideoTrackID(trackID); isVideo {
+		videoInfo, err := b.client.GetVideoInfo(ctx, baseID)
 		if err != nil {
 			return nil, fmt.Errorf("bilibili: failed to fetch video info for lyric: %w", err)
 		}
+		selected, _, err := selectedBilibiliPage(videoInfo, selectedPage)
+		if err != nil || selected.Cid == 0 {
+			return nil, platform.NewUnavailableError("bilibili", "lyrics", trackID)
+		}
 
-		subtitleURL, err := b.client.GetVideoSubtitleURL(ctx, videoInfo.Bvid, videoInfo.Cid)
+		subtitleURL, err := b.client.GetVideoSubtitleURL(ctx, videoInfo.Bvid, selected.Cid)
 		if err != nil {
 			return nil, fmt.Errorf("bilibili: failed to fetch subtitle list: %w", err)
 		}
@@ -503,6 +605,65 @@ func (b *BilibiliPlatform) GetLyrics(ctx context.Context, trackID string) (*plat
 		Plain:       lyricStr,
 		Timestamped: platform.ParseLRCTimestampedLines(lyricStr),
 	}, nil
+}
+
+func (b *BilibiliPlatform) ListEpisodes(ctx context.Context, trackID string) ([]platform.Episode, error) {
+	if strings.HasPrefix(trackID, "b23:") {
+		resolvedID, err := b.client.ResolveB23ID(ctx, strings.TrimPrefix(trackID, "b23:"))
+		if err != nil {
+			return nil, platform.NewUnavailableError("bilibili", "shortlink", trackID)
+		}
+		trackID = resolvedID
+	}
+	baseID, _, ok := parseBilibiliVideoTrackID(trackID)
+	if !ok {
+		return nil, platform.NewUnsupportedError("bilibili", "list episodes")
+	}
+	videoInfo, err := b.client.GetVideoInfo(ctx, baseID)
+	if err != nil {
+		return nil, fmt.Errorf("bilibili: failed to fetch video info for episodes: %w", err)
+	}
+	if videoInfo == nil || strings.TrimSpace(videoInfo.Bvid) == "" {
+		return nil, platform.NewNotFoundError("bilibili", "track", trackID)
+	}
+	videoURL := fmt.Sprintf("https://www.bilibili.com/video/%s", strings.TrimSpace(videoInfo.Bvid))
+	if len(videoInfo.Pages) == 0 {
+		duration := time.Duration(videoInfo.Duration) * time.Second
+		return []platform.Episode{{
+			Index:    1,
+			Title:    "P1",
+			TrackID:  buildBilibiliVideoTrackID(videoInfo.Bvid, 1),
+			URL:      videoURL,
+			Duration: duration,
+		}}, nil
+	}
+	episodes := make([]platform.Episode, 0, len(videoInfo.Pages))
+	for idx, page := range videoInfo.Pages {
+		number := idx + 1
+		if page.Page > 0 {
+			number = page.Page
+		}
+		title := strings.TrimSpace(page.Part)
+		if title == "" {
+			title = fmt.Sprintf("P%d", number)
+		}
+		url := videoURL
+		if number > 1 {
+			url = fmt.Sprintf("%s?p=%d", videoURL, number)
+		}
+		d := 0 * time.Second
+		if page.Duration > 0 {
+			d = time.Duration(page.Duration) * time.Second
+		}
+		episodes = append(episodes, platform.Episode{
+			Index:    number,
+			Title:    title,
+			TrackID:  buildBilibiliVideoTrackID(videoInfo.Bvid, number),
+			URL:      url,
+			Duration: d,
+		})
+	}
+	return episodes, nil
 }
 
 func convertSubtitleLinesToLyrics(lines []SubtitleBodyLine) (string, []platform.LyricLine) {
