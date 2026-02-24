@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -159,6 +160,29 @@ type VideoSubtitleResponse struct {
 	Code    int                `json:"code"`
 	Message string             `json:"message"`
 	Data    *VideoSubtitleData `json:"data"`
+}
+
+type VideoSearchItem struct {
+	TypeName string `json:"typename"`
+	ArcURL   string `json:"arcurl"`
+	AID      int    `json:"aid"`
+	BVID     string `json:"bvid"`
+	Title    string `json:"title"`
+	Pic      string `json:"pic"`
+	Duration string `json:"duration"`
+	Author   string `json:"author"`
+	Mid      int    `json:"mid"`
+	TypeID   string `json:"typeid"`
+}
+
+type VideoSearchData struct {
+	Result []VideoSearchItem `json:"result"`
+}
+
+type VideoSearchResponse struct {
+	Code    int              `json:"code"`
+	Message string           `json:"message"`
+	Data    *VideoSearchData `json:"data"`
 }
 
 type SubtitleBodyLine struct {
@@ -458,6 +482,64 @@ func (c *Client) GetVideoInfo(ctx context.Context, id string) (*VideoInfoData, e
 		return nil, err
 	}
 	return result.Data, nil
+}
+
+func (c *Client) SearchVideo(ctx context.Context, keyword string, page int) ([]VideoSearchItem, error) {
+	if c.logger != nil {
+		c.logger.Debug("bilibili: searching video", "keyword", keyword, "page", page)
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	query := url.Values{}
+	query.Set("search_type", "video")
+	query.Set("keyword", keyword)
+	query.Set("page", fmt.Sprintf("%d", page))
+
+	apiURL := "https://api.bilibili.com/x/web-interface/search/type?" + query.Encode()
+
+	var result VideoSearchResponse
+	err := c.execute(ctx, func() error {
+		req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if err != nil {
+			return err
+		}
+
+		c.setHeaders(req)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("bilibili: unexpected status code %d: %s", resp.StatusCode, string(body))
+		}
+
+		if err := json.Unmarshal(body, &result); err != nil {
+			return fmt.Errorf("bilibili: decode video search: %w", err)
+		}
+
+		if result.Code != 0 {
+			return fmt.Errorf("bilibili: API error code %d: %s", result.Code, result.Message)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Data == nil {
+		return nil, nil
+	}
+	return result.Data.Result, nil
 }
 
 // GetVideoPlayUrl fetches the actual raw dash audio streams for a video track.

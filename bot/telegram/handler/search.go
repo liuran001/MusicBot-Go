@@ -42,6 +42,7 @@ type searchState struct {
 	currentPage      int
 	updatedAt        time.Time
 	tracksByPlatform map[string][]platform.Track
+	unavailable      map[string]bool
 }
 
 func (s *searchState) setTracks(platformName string, tracks []platform.Track) {
@@ -73,6 +74,24 @@ func (s *searchState) getTracks(platformName string) ([]platform.Track, bool) {
 		return nil, false
 	}
 	return tracks, true
+}
+
+func (s *searchState) setUnavailable(platformName string, unavailable bool) {
+	if s == nil {
+		return
+	}
+	name := strings.TrimSpace(platformName)
+	if name == "" {
+		return
+	}
+	if s.unavailable == nil {
+		s.unavailable = make(map[string]bool)
+	}
+	if unavailable {
+		s.unavailable[name] = true
+		return
+	}
+	delete(s.unavailable, name)
 }
 
 func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -168,6 +187,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		platformName = requestedPlatform
 		fallbackPlatform = ""
 	}
+	primaryPlatform := platformName
 
 	tracks, platformName, usedFallback, err := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.searchLimit, true)
 	searchLimit := h.searchLimit(platformName)
@@ -186,17 +206,43 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		return
 	}
 
+	requesterID := int64(0)
+	if message.From != nil {
+		requesterID = message.From.ID
+	}
+	unavailable := make(map[string]bool)
+	if usedFallback && strings.TrimSpace(primaryPlatform) != "" {
+		unavailable[primaryPlatform] = true
+	}
+
 	if len(tracks) == 0 {
+		state := &searchState{
+			keyword:          keyword,
+			platform:         platformName,
+			quality:          qualityOverride,
+			requesterID:      requesterID,
+			limit:            searchLimit,
+			currentPage:      1,
+			updatedAt:        time.Now(),
+			tracksByPlatform: make(map[string][]platform.Track),
+			unavailable:      unavailable,
+		}
+		if hasPlatformSuffix {
+			state.setUnavailable(platformName, true)
+		}
+		text, keyboard := h.buildNoResultsPage(state, msgResult.MessageID)
 		params := &telego.EditMessageTextParams{
-			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
-			MessageID: msgResult.MessageID,
-			Text:      noResults,
+			ChatID:      telego.ChatID{ID: msgResult.Chat.ID},
+			MessageID:   msgResult.MessageID,
+			Text:        text,
+			ReplyMarkup: keyboard,
 		}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
 			_, _ = b.EditMessageText(ctx, params)
 		}
+		h.storeSearchState(msgResult.MessageID, state)
 		return
 	}
 
@@ -211,16 +257,11 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 
 	textMessage.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji, mdV2Replacer.Replace(displayName)))
 
-	requesterID := int64(0)
-	if message.From != nil {
-		requesterID = message.From.ID
-	}
-
 	qualityValue := h.resolveDefaultQuality(ctx, message, userID)
 	if strings.TrimSpace(qualityOverride) != "" {
 		qualityValue = qualityOverride
 	}
-	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1)
+	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable)
 	textMessage.WriteString(pageText)
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -244,6 +285,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		limit:       searchLimit,
 		currentPage: 1,
 		updatedAt:   time.Now(),
+		unavailable: unavailable,
 	}
 	state.setTracks(platformName, tracks)
 	h.storeSearchState(msgResult.MessageID, state)
@@ -325,6 +367,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		state.platform = strings.TrimSpace(parts[3])
 		page = 1
 		state.limit = h.Search.searchLimit(state.platform)
+		state.setUnavailable(state.platform, false)
 	}
 	if action == "home" {
 		page = 1
@@ -364,19 +407,22 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 			return
 		}
 		if len(tracks) == 0 {
-			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: noResults}
+			state.setUnavailable(state.platform, true)
+			text, keyboard := h.Search.buildNoResultsPage(state, messageID)
+			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: text, ReplyMarkup: keyboard}
 			if h.RateLimiter != nil {
 				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 			} else {
 				_, _ = b.EditMessageText(ctx, params)
 			}
+			h.Search.storeSearchState(messageID, state)
 			return
 		}
 		state.setTracks(state.platform, tracks)
 	}
 	manager := h.Search.PlatformManager
 	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
-	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page)
+	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable)
 	text := textHeader + pageText
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -440,7 +486,7 @@ func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *tele
 	return qualityValue
 }
 
-func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int) (string, *telego.InlineKeyboardMarkup) {
+func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool) (string, *telego.InlineKeyboardMarkup) {
 	pageSize := h.pageSize()
 	if page < 1 {
 		page = 1
@@ -520,23 +566,53 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 		rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
 
-	platforms := h.searchPlatforms()
-	if len(platforms) > 1 {
-		switchRow := make([]telego.InlineKeyboardButton, 0, len(platforms))
-		for _, name := range platforms {
-			text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), platformDisplayName(h.PlatformManager, name))
-			if name == platformName {
-				text = "✅ " + text
-			}
-			switchRow = append(switchRow, telego.InlineKeyboardButton{
-				Text:         text,
-				CallbackData: fmt.Sprintf("search %d platform %s %d", messageID, name, requesterID),
-			})
-		}
+	if switchRow := h.buildPlatformSwitchRow(platformName, requesterID, messageID, unavailable); len(switchRow) > 0 {
 		rows = append(rows, switchRow)
 	}
 	keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 	return textMessage.String(), keyboard
+}
+
+func (h *SearchHandler) buildNoResultsPage(state *searchState, messageID int) (string, *telego.InlineKeyboardMarkup) {
+	if state == nil {
+		keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, 0)}}}}
+		return noResults, keyboard
+	}
+	text := noResults
+	if state.platform != "" {
+		text = fmt.Sprintf("未找到结果（%s）", platformDisplayName(h.PlatformManager, state.platform))
+	}
+	rows := make([][]telego.InlineKeyboardButton, 0, 2)
+	if switchRow := h.buildPlatformSwitchRow(state.platform, state.requesterID, messageID, state.unavailable); len(switchRow) > 0 {
+		rows = append(rows, switchRow)
+	}
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
+	return text, &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func (h *SearchHandler) buildPlatformSwitchRow(currentPlatform string, requesterID int64, messageID int, unavailable map[string]bool) []telego.InlineKeyboardButton {
+	platforms := h.searchPlatforms()
+	if len(platforms) <= 1 {
+		return nil
+	}
+	row := make([]telego.InlineKeyboardButton, 0, len(platforms))
+	for _, name := range platforms {
+		if unavailable != nil && unavailable[name] {
+			continue
+		}
+		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), platformDisplayName(h.PlatformManager, name))
+		if name == currentPlatform {
+			text = "✅ " + text
+		}
+		row = append(row, telego.InlineKeyboardButton{
+			Text:         text,
+			CallbackData: fmt.Sprintf("search %d platform %s %d", messageID, name, requesterID),
+		})
+	}
+	if len(row) <= 1 {
+		return nil
+	}
+	return row
 }
 
 func (h *SearchHandler) searchPlatforms() []string {
