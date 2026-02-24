@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // Platform defines the interface that all music platform implementations must satisfy.
@@ -125,6 +126,22 @@ type AutoParseDecider interface {
 	AutoParseSettingKey() string
 	// ShouldAutoParse returns whether this track should be auto-parsed under mode.
 	ShouldAutoParse(ctx context.Context, trackID string, mode string) (bool, error)
+}
+
+// Episode represents a selectable sub-item for a playable resource
+// (e.g. B站多P中的某一P)。
+type Episode struct {
+	Index    int           `json:"index"`
+	Title    string        `json:"title"`
+	TrackID  string        `json:"track_id"`
+	URL      string        `json:"url,omitempty"`
+	Duration time.Duration `json:"duration,omitempty"`
+}
+
+// EpisodeProvider defines an optional interface for platforms that support
+// listing selectable sub-items (e.g. B站多P选集)。
+type EpisodeProvider interface {
+	ListEpisodes(ctx context.Context, trackID string) ([]Episode, error)
 }
 
 // Manager provides a registry for multiple platform implementations.

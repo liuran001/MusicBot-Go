@@ -653,6 +653,30 @@ func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.Inline
 	}}
 }
 
+func buildForwardKeyboardWithEpisodes(trackURL, platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
+	base := buildForwardKeyboard(trackURL, platformName, trackID)
+	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+		return base
+	}
+	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
+	if hasExplicitPage || baseTrackID == "" {
+		return base
+	}
+	callbackData := buildInlineEpisodeShowCallbackData("bilibili", baseTrackID, qualityValue, requesterID, 1)
+	if callbackData == "" {
+		return base
+	}
+	if base == nil {
+		return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
+			{Text: "展示选集", CallbackData: callbackData},
+		}}}
+	}
+	rows := make([][]telego.InlineKeyboardButton, 0, len(base.InlineKeyboard)+1)
+	rows = append(rows, base.InlineKeyboard...)
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "展示选集", CallbackData: callbackData}})
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
 func buildInlineSendKeyboard(platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
 	callbackData := buildInlineSendCallbackData(platformName, trackID, qualityValue, requesterID)
 	if callbackData == "" {
@@ -705,6 +729,73 @@ func buildInlineSendCallbackData(platformName, trackID, qualityValue string, req
 		return data
 	}
 	data = fmt.Sprintf("music i %s %s %d", platformName, trackID, requesterID)
+	if len(data) <= 64 {
+		return data
+	}
+	return ""
+}
+
+func splitBilibiliTrackPage(trackID string) (baseID string, hasExplicitPage bool) {
+	trackID = strings.TrimSpace(trackID)
+	if trackID == "" {
+		return "", false
+	}
+	lower := strings.ToLower(trackID)
+	if !strings.HasPrefix(trackID, "BV") && !strings.HasPrefix(lower, "av") {
+		return trackID, false
+	}
+	idx := strings.LastIndex(lower, "_p")
+	if idx <= 0 || idx+2 >= len(trackID) {
+		return trackID, false
+	}
+	if _, err := strconv.Atoi(trackID[idx+2:]); err != nil {
+		return trackID, false
+	}
+	return trackID[:idx], true
+}
+
+func buildBilibiliVideoTrackID(baseID string, page int) string {
+	baseID = strings.TrimSpace(baseID)
+	if baseID == "" {
+		return ""
+	}
+	if page <= 1 {
+		return baseID
+	}
+	return fmt.Sprintf("%s_p%d", baseID, page)
+}
+
+func buildInlineEpisodeShowCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	return buildInlineEpisodeCallbackData("s", platformName, trackID, qualityValue, requesterID, page)
+}
+
+func buildInlineEpisodeSelectCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	return buildInlineEpisodeCallbackData("p", platformName, trackID, qualityValue, requesterID, page)
+}
+
+func buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	return buildInlineEpisodeCallbackData("n", platformName, trackID, qualityValue, requesterID, page)
+}
+
+func buildInlineEpisodeCallbackData(action, platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	action = strings.TrimSpace(strings.ToLower(action))
+	platformName = strings.TrimSpace(platformName)
+	trackID = strings.TrimSpace(trackID)
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if requesterID == 0 || !isInlineStartToken(action) || !isInlineStartToken(platformName) || !isInlineStartToken(trackID) || !isInlineStartToken(qualityValue) {
+		return ""
+	}
+	data := fmt.Sprintf("music iep %s %s %s %s %d %d", action, platformName, trackID, qualityValue, requesterID, page)
+	if len(data) <= 64 {
+		return data
+	}
+	data = fmt.Sprintf("music iep %s %s %s %d %d", action, platformName, trackID, requesterID, page)
 	if len(data) <= 64 {
 		return data
 	}

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,8 @@ type parsedMusicCallback struct {
 	ok              bool
 }
 
+const episodePageSize = 8
+
 func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.CallbackQuery == nil {
 		return
@@ -36,8 +39,12 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	if len(args) < 2 {
 		return
 	}
-	if len(args) >= 3 && args[1] == "i" {
+	if len(args) >= 3 && (args[1] == "i" || args[1] == "iep") {
 		h.handleInlineCallback(ctx, b, query, args)
+		return
+	}
+	if len(args) >= 4 && args[1] == "ep" {
+		h.handleEpisodeCallback(ctx, b, query, args)
 		return
 	}
 
@@ -71,6 +78,10 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 
 	if chatType == "private" {
+		if h.tryPresentEpisodePicker(ctx, b, query, msg, msgToUse, platformName, trackID, qualityOverride, query.From.ID, requesterID) {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "请选择分P"})
+			return
+		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		if h.Music != nil {
 			h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, trackID, qualityOverride)
@@ -96,6 +107,9 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+	if h.tryPresentEpisodePicker(ctx, b, query, msg, msgToUse, platformName, trackID, qualityOverride, query.From.ID, requesterID) {
+		return
+	}
 	autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
 	if h.Music != nil {
 		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, trackID, qualityOverride)
@@ -115,6 +129,10 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 		return
 	}
 	if query.InlineMessageID == "" {
+		return
+	}
+	if len(args) >= 4 && strings.TrimSpace(args[1]) == "iep" {
+		h.handleInlineEpisodeCallback(ctx, b, query, args)
 		return
 	}
 	if len(args) >= 4 && strings.TrimSpace(args[2]) == "random" {
@@ -154,6 +172,387 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 
 	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
+}
+
+func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, listMsg, msgToUse *telego.Message, platformName, trackID, qualityOverride string, operatorID, requesterID int64) bool {
+	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || query == nil || listMsg == nil || msgToUse == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+		return false
+	}
+	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
+	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
+		return false
+	}
+	episodes, err := h.fetchEpisodes(ctx, "bilibili", baseTrackID)
+	if err != nil || len(episodes) <= 1 {
+		return false
+	}
+	reqID := requesterID
+	if reqID == 0 {
+		reqID = operatorID
+	}
+	text, keyboard := buildEpisodePickerPage("bilibili", baseTrackID, qualityOverride, reqID, episodes, 1)
+	if strings.TrimSpace(text) == "" || keyboard == nil {
+		return false
+	}
+	params := &telego.EditMessageTextParams{
+		ChatID:      telego.ChatID{ID: listMsg.Chat.ID},
+		MessageID:   listMsg.MessageID,
+		Text:        text,
+		ReplyMarkup: keyboard,
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageText(ctx, params)
+	}
+	return true
+}
+
+func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, platformName, trackID string) ([]platform.Episode, error) {
+	if h == nil || h.Music == nil || h.Music.PlatformManager == nil {
+		return nil, platform.ErrUnavailable
+	}
+	plat := h.Music.PlatformManager.Get(strings.TrimSpace(platformName))
+	if plat == nil {
+		return nil, platform.ErrUnavailable
+	}
+	provider, ok := plat.(platform.EpisodeProvider)
+	if !ok {
+		return nil, platform.ErrUnsupported
+	}
+	return provider.ListEpisodes(ctx, strings.TrimSpace(trackID))
+}
+
+func buildEpisodePickerPage(platformName, trackID, qualityValue string, requesterID int64, episodes []platform.Episode, page int) (string, *telego.InlineKeyboardMarkup) {
+	if len(episodes) == 0 {
+		return "", nil
+	}
+	if page <= 0 {
+		page = 1
+	}
+	totalPages := int(math.Ceil(float64(len(episodes)) / float64(episodePageSize)))
+	if totalPages <= 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * episodePageSize
+	end := start + episodePageSize
+	if end > len(episodes) {
+		end = len(episodes)
+	}
+	visible := episodes[start:end]
+
+	textLines := make([]string, 0, len(visible)+2)
+	textLines = append(textLines, "请选择要解析的分P：")
+	for _, ep := range visible {
+		title := strings.TrimSpace(ep.Title)
+		if title == "" {
+			title = fmt.Sprintf("P%d", ep.Index)
+		}
+		textLines = append(textLines, fmt.Sprintf("%d. %s", ep.Index, title))
+	}
+	textLines = append(textLines, fmt.Sprintf("第 %d/%d 页", page, totalPages))
+
+	rows := make([][]telego.InlineKeyboardButton, 0, 6)
+	currentRow := make([]telego.InlineKeyboardButton, 0, 2)
+	for _, ep := range visible {
+		cb := buildEpisodeSelectCallbackData(platformName, trackID, qualityValue, requesterID, ep.Index)
+		if cb == "" {
+			continue
+		}
+		currentRow = append(currentRow, telego.InlineKeyboardButton{Text: fmt.Sprintf("%d", ep.Index), CallbackData: cb})
+		if len(currentRow) == 4 {
+			rows = append(rows, currentRow)
+			currentRow = make([]telego.InlineKeyboardButton, 0, 2)
+		}
+	}
+	if len(currentRow) > 0 {
+		rows = append(rows, currentRow)
+	}
+
+	nav := make([]telego.InlineKeyboardButton, 0, 2)
+	if page > 1 {
+		if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, page-1); cb != "" {
+			nav = append(nav, telego.InlineKeyboardButton{Text: "⬅️", CallbackData: cb})
+		}
+	}
+	if page < totalPages {
+		if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, page+1); cb != "" {
+			nav = append(nav, telego.InlineKeyboardButton{Text: "➡️", CallbackData: cb})
+		}
+	}
+	if len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return strings.Join(textLines, "\n"), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func buildEpisodeShowCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	return buildEpisodeCallbackData("s", platformName, trackID, qualityValue, requesterID, page)
+}
+
+func buildEpisodeSelectCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	return buildEpisodeCallbackData("p", platformName, trackID, qualityValue, requesterID, page)
+}
+
+func buildEpisodeNavCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	return buildEpisodeCallbackData("n", platformName, trackID, qualityValue, requesterID, page)
+}
+
+func buildEpisodeCallbackData(action, platformName, trackID, qualityValue string, requesterID int64, page int) string {
+	action = strings.TrimSpace(strings.ToLower(action))
+	platformName = strings.TrimSpace(platformName)
+	trackID = strings.TrimSpace(trackID)
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if requesterID == 0 || !isInlineStartToken(action) || !isInlineStartToken(platformName) || !isInlineStartToken(trackID) || !isInlineStartToken(qualityValue) {
+		return ""
+	}
+	data := fmt.Sprintf("music ep %s %s %s %s %d %d", action, platformName, trackID, qualityValue, requesterID, page)
+	if len(data) <= 64 {
+		return data
+	}
+	data = fmt.Sprintf("music ep %s %s %s %d %d", action, platformName, trackID, requesterID, page)
+	if len(data) <= 64 {
+		return data
+	}
+	return ""
+}
+
+func parseEpisodeCallbackArgs(args []string) (action, platformName, trackID, qualityValue string, requesterID int64, page int, ok bool) {
+	if len(args) < 7 || strings.TrimSpace(args[1]) != "ep" {
+		return "", "", "", "", 0, 0, false
+	}
+	action = strings.TrimSpace(args[2])
+	platformName = strings.TrimSpace(args[3])
+	trackID = strings.TrimSpace(args[4])
+	if action == "" || platformName == "" || trackID == "" {
+		return "", "", "", "", 0, 0, false
+	}
+	if len(args) >= 8 {
+		qualityValue = strings.TrimSpace(args[5])
+		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[6]), 10, 64)
+		page, _ = strconv.Atoi(strings.TrimSpace(args[7]))
+	} else {
+		qualityValue = ""
+		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[5]), 10, 64)
+		page, _ = strconv.Atoi(strings.TrimSpace(args[6]))
+	}
+	if page <= 0 {
+		page = 1
+	}
+	return action, platformName, trackID, qualityValue, requesterID, page, true
+}
+
+func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {
+	if h == nil || h.Music == nil || b == nil || query == nil || query.Message == nil {
+		return
+	}
+	action, platformName, trackID, qualityValue, requesterID, page, ok := parseEpisodeCallbackArgs(args)
+	if !ok {
+		return
+	}
+	msg := query.Message.Message()
+	if msg == nil {
+		return
+	}
+	if msg.Chat.Type != "private" && !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, requesterID) {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		return
+	}
+	if requesterID != 0 && requesterID != query.From.ID && msg.Chat.Type == "private" {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "s", "n":
+		episodes, err := h.fetchEpisodes(ctx, platformName, trackID)
+		if err != nil || len(episodes) == 0 {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "选集加载失败", ShowAlert: true})
+			return
+		}
+		text, keyboard := buildEpisodePickerPage(platformName, trackID, qualityValue, requesterID, episodes, page)
+		if text == "" || keyboard == nil {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "选集加载失败", ShowAlert: true})
+			return
+		}
+		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: text, ReplyMarkup: keyboard}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+	case "p":
+		msgToUse := msg
+		if msg.ReplyToMessage != nil {
+			msgToUse = msg.ReplyToMessage
+		}
+		selectedTrackID := buildBilibiliVideoTrackID(trackID, page)
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+		autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
+		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, selectedTrackID, qualityValue)
+		if autoDelete {
+			deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
+			if h.RateLimiter != nil {
+				_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+			} else {
+				_ = b.DeleteMessage(ctx, deleteParams)
+			}
+		}
+	default:
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+	}
+}
+
+func parseInlineEpisodeCallbackArgs(args []string) (action, platformName, trackID, qualityValue string, requesterID int64, page int, ok bool) {
+	if len(args) < 7 || strings.TrimSpace(args[1]) != "iep" {
+		return "", "", "", "", 0, 0, false
+	}
+	action = strings.TrimSpace(args[2])
+	platformName = strings.TrimSpace(args[3])
+	trackID = strings.TrimSpace(args[4])
+	if action == "" || platformName == "" || trackID == "" {
+		return "", "", "", "", 0, 0, false
+	}
+	if len(args) >= 8 {
+		qualityValue = strings.TrimSpace(args[5])
+		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[6]), 10, 64)
+		page, _ = strconv.Atoi(strings.TrimSpace(args[7]))
+	} else {
+		qualityValue = ""
+		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[5]), 10, 64)
+		page, _ = strconv.Atoi(strings.TrimSpace(args[6]))
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if page <= 0 {
+		page = 1
+	}
+	return action, platformName, trackID, qualityValue, requesterID, page, true
+}
+
+func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {
+	if h == nil || h.Music == nil || b == nil || query == nil || strings.TrimSpace(query.InlineMessageID) == "" {
+		return
+	}
+	action, platformName, trackID, qualityValue, requesterID, page, ok := parseInlineEpisodeCallbackArgs(args)
+	if !ok {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+		return
+	}
+	if requesterID != 0 && requesterID != query.From.ID {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "s", "n":
+		episodes, err := h.fetchEpisodes(ctx, platformName, trackID)
+		if err != nil || len(episodes) == 0 {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "选集加载失败", ShowAlert: true})
+			return
+		}
+		text, keyboard := buildInlineEpisodePickerPage(platformName, trackID, qualityValue, requesterID, episodes, page)
+		if text == "" || keyboard == nil {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "选集加载失败", ShowAlert: true})
+			return
+		}
+		params := &telego.EditMessageTextParams{InlineMessageID: query.InlineMessageID, Text: text, ReplyMarkup: keyboard}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+	case "p":
+		selectedTrackID := buildBilibiliVideoTrackID(trackID, page)
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, selectedTrackID, qualityValue)
+	default:
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+	}
+}
+
+func buildInlineEpisodePickerPage(platformName, trackID, qualityValue string, requesterID int64, episodes []platform.Episode, page int) (string, *telego.InlineKeyboardMarkup) {
+	if len(episodes) == 0 {
+		return "", nil
+	}
+	if page <= 0 {
+		page = 1
+	}
+	totalPages := int(math.Ceil(float64(len(episodes)) / float64(episodePageSize)))
+	if totalPages <= 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * episodePageSize
+	end := start + episodePageSize
+	if end > len(episodes) {
+		end = len(episodes)
+	}
+	visible := episodes[start:end]
+	textLines := make([]string, 0, len(visible)+2)
+	textLines = append(textLines, "请选择要发送的分P：")
+	for _, ep := range visible {
+		title := strings.TrimSpace(ep.Title)
+		if title == "" {
+			title = fmt.Sprintf("P%d", ep.Index)
+		}
+		textLines = append(textLines, fmt.Sprintf("%d. %s", ep.Index, title))
+	}
+	textLines = append(textLines, fmt.Sprintf("第 %d/%d 页", page, totalPages))
+
+	rows := make([][]telego.InlineKeyboardButton, 0, 6)
+	currentRow := make([]telego.InlineKeyboardButton, 0, 4)
+	for _, ep := range visible {
+		cb := buildInlineEpisodeSelectCallbackData(platformName, trackID, qualityValue, requesterID, ep.Index)
+		if cb == "" {
+			continue
+		}
+		currentRow = append(currentRow, telego.InlineKeyboardButton{Text: fmt.Sprintf("%d", ep.Index), CallbackData: cb})
+		if len(currentRow) == 4 {
+			rows = append(rows, currentRow)
+			currentRow = make([]telego.InlineKeyboardButton, 0, 4)
+		}
+	}
+	if len(currentRow) > 0 {
+		rows = append(rows, currentRow)
+	}
+	nav := make([]telego.InlineKeyboardButton, 0, 2)
+	if page > 1 {
+		if cb := buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, page-1); cb != "" {
+			nav = append(nav, telego.InlineKeyboardButton{Text: "⬅️", CallbackData: cb})
+		}
+	}
+	if page < totalPages {
+		if cb := buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, page+1); cb != "" {
+			nav = append(nav, telego.InlineKeyboardButton{Text: "➡️", CallbackData: cb})
+		}
+	}
+	if len(nav) > 0 {
+		rows = append(rows, nav)
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return strings.Join(textLines, "\n"), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func (h *CallbackMusicHandler) resolveInlineRandomTrack(ctx context.Context) (platformName, trackID, qualityValue string, ok bool) {
@@ -236,7 +635,7 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 			if strings.TrimSpace(songInfo.ThumbFileID) != "" {
 				media.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
 			}
-			replyMarkup := buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+			replyMarkup := buildForwardKeyboardWithEpisodes(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID, qualityOverride, userID)
 			params := &telego.EditMessageMediaParams{
 				InlineMessageID: inlineMessageID,
 				Media:           media,

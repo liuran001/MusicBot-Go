@@ -214,11 +214,11 @@ func TestSearchHandler_buildSearchPage_Pagination(t *testing.T) {
 	if len(navRow) != 2 {
 		t.Errorf("buildSearchPage page 1: nav row has %d buttons, want 2", len(navRow))
 	}
-	if navRow[0].Text != "关闭" {
-		t.Errorf("buildSearchPage page 1: first nav button = %q, want %q", navRow[0].Text, "关闭")
+	if navRow[0].Text != "❌ 关闭" {
+		t.Errorf("buildSearchPage page 1: first nav button = %q, want %q", navRow[0].Text, "❌ 关闭")
 	}
-	if navRow[1].Text != "下一页" {
-		t.Errorf("buildSearchPage page 1: second nav button = %q, want %q", navRow[1].Text, "下一页")
+	if navRow[1].Text != "➡️ 下一页" {
+		t.Errorf("buildSearchPage page 1: second nav button = %q, want %q", navRow[1].Text, "➡️ 下一页")
 	}
 
 	pageText2, keyboard2 := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 2, nil)
@@ -229,11 +229,11 @@ func TestSearchHandler_buildSearchPage_Pagination(t *testing.T) {
 	if len(navRow2) != 2 {
 		t.Errorf("buildSearchPage page 2: nav row has %d buttons, want 2", len(navRow2))
 	}
-	if navRow2[0].Text != "上一页" {
-		t.Errorf("buildSearchPage page 2: first nav button = %q, want %q", navRow2[0].Text, "上一页")
+	if navRow2[0].Text != "⬅️ 上一页" {
+		t.Errorf("buildSearchPage page 2: first nav button = %q, want %q", navRow2[0].Text, "⬅️ 上一页")
 	}
-	if navRow2[1].Text != "下一页" {
-		t.Errorf("buildSearchPage page 2: second nav button = %q, want %q", navRow2[1].Text, "下一页")
+	if navRow2[1].Text != "➡️ 下一页" {
+		t.Errorf("buildSearchPage page 2: second nav button = %q, want %q", navRow2[1].Text, "➡️ 下一页")
 	}
 
 	pageText3, keyboard3 := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 3, nil)
@@ -244,11 +244,11 @@ func TestSearchHandler_buildSearchPage_Pagination(t *testing.T) {
 	if len(navRow3) != 2 {
 		t.Errorf("buildSearchPage page 3: nav row has %d buttons, want 2", len(navRow3))
 	}
-	if navRow3[0].Text != "上一页" {
-		t.Errorf("buildSearchPage page 3: first nav button = %q, want %q", navRow3[0].Text, "上一页")
+	if navRow3[0].Text != "⬅️ 上一页" {
+		t.Errorf("buildSearchPage page 3: first nav button = %q, want %q", navRow3[0].Text, "⬅️ 上一页")
 	}
-	if navRow3[1].Text != "回到首页" {
-		t.Errorf("buildSearchPage page 3: second nav button = %q, want %q", navRow3[1].Text, "回到首页")
+	if navRow3[1].Text != "🏠 回到主页" {
+		t.Errorf("buildSearchPage page 3: second nav button = %q, want %q", navRow3[1].Text, "🏠 回到主页")
 	}
 }
 
@@ -270,8 +270,8 @@ func TestSearchHandler_buildSearchPage_SinglePage(t *testing.T) {
 	if len(closeRow) != 1 {
 		t.Errorf("buildSearchPage single page: close row has %d buttons, want 1", len(closeRow))
 	}
-	if closeRow[0].Text != "关闭" {
-		t.Errorf("buildSearchPage single page: close button = %q, want %q", closeRow[0].Text, "关闭")
+	if closeRow[0].Text != "❌ 关闭" {
+		t.Errorf("buildSearchPage single page: close button = %q, want %q", closeRow[0].Text, "❌ 关闭")
 	}
 }
 

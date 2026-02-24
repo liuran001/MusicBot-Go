@@ -548,22 +548,22 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	if pageCount > 1 {
 		navRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page == 1 {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
 		} else if page == pageCount {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "回到首页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: "🏠 回到主页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)})
 			rows = append(rows, navRow)
 		} else {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
-			homeRow := []telego.InlineKeyboardButton{{Text: "回到首页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)}}
+			homeRow := []telego.InlineKeyboardButton{{Text: "🏠 回到主页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)}}
 			rows = append(rows, homeRow)
 		}
 	} else if page == 1 {
-		rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
+		rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
 
 	if switchRow := h.buildPlatformSwitchRow(platformName, requesterID, messageID, unavailable); len(switchRow) > 0 {
@@ -575,7 +575,7 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 
 func (h *SearchHandler) buildNoResultsPage(state *searchState, messageID int) (string, *telego.InlineKeyboardMarkup) {
 	if state == nil {
-		keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, 0)}}}}
+		keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, 0)}}}}
 		return noResults, keyboard
 	}
 	text := noResults
@@ -586,7 +586,7 @@ func (h *SearchHandler) buildNoResultsPage(state *searchState, messageID int) (s
 	if switchRow := h.buildPlatformSwitchRow(state.platform, state.requesterID, messageID, state.unavailable); len(switchRow) > 0 {
 		rows = append(rows, switchRow)
 	}
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
 	return text, &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
@@ -602,7 +602,7 @@ func (h *SearchHandler) buildPlatformSwitchRow(currentPlatform string, requester
 		}
 		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), platformDisplayName(h.PlatformManager, name))
 		if name == currentPlatform {
-			text = "✅ " + text
+			text = "✅ " + platformSearchShortName(name)
 		}
 		row = append(row, telego.InlineKeyboardButton{
 			Text:         text,
@@ -613,6 +613,23 @@ func (h *SearchHandler) buildPlatformSwitchRow(currentPlatform string, requester
 		return nil
 	}
 	return row
+}
+
+func platformSearchShortName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "bilibili":
+		return "B站"
+	case "netease":
+		return "网易云"
+	case "qqmusic":
+		return "Q音"
+	default:
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return "平台"
+		}
+		return trimmed
+	}
 }
 
 func (h *SearchHandler) searchPlatforms() []string {
