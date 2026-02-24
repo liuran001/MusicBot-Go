@@ -204,7 +204,7 @@ func (b *BilibiliPlatform) Metadata() platform.Meta {
 		Name:          "bilibili",
 		DisplayName:   "哔哩哔哩",
 		Emoji:         "📺",
-		Aliases:       []string{"bilibili", "b站", "bili"},
+		Aliases:       []string{"bilibili", "b站", "bili", "哔哩哔哩"},
 		AllowGroupURL: true,
 	}
 }

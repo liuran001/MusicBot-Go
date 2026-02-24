@@ -77,7 +77,7 @@ func (q *QQMusicPlatform) Metadata() platform.Meta {
 		Name:          "qqmusic",
 		DisplayName:   "QQ音乐",
 		Emoji:         "🎶",
-		Aliases:       []string{"qqmusic", "qq", "tencent", "QQ音乐", "qq音乐"},
+		Aliases:       []string{"qqmusic", "qq", "tencent", "QQ音乐", "qq音乐", "q音"},
 		AllowGroupURL: true,
 	}
 }
