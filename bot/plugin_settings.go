@@ -13,14 +13,15 @@ type PluginSettingOption struct {
 }
 
 type PluginSettingDefinition struct {
-	Plugin       string
-	Key          string
-	Title        string
-	Description  string
-	DefaultUser  string
-	DefaultGroup string
-	Options      []PluginSettingOption
-	Order        int
+	Plugin                string
+	Key                   string
+	Title                 string
+	Description           string
+	DefaultUser           string
+	DefaultGroup          string
+	Options               []PluginSettingOption
+	RequireAutoLinkDetect bool
+	Order                 int
 }
 
 func (d PluginSettingDefinition) Validate(value string) bool {

@@ -15,13 +15,14 @@ const (
 
 func ParseModeDefinition() botpkg.PluginSettingDefinition {
 	return botpkg.PluginSettingDefinition{
-		Plugin:       "bilibili",
-		Key:          ParseModeKey,
-		Title:        "B站链接自动解析",
-		Description:  "控制哔哩哔哩链接自动解析行为",
-		DefaultUser:  ParseModeOn,
-		DefaultGroup: ParseModeMusicKichiku,
-		Order:        100,
+		Plugin:                "bilibili",
+		Key:                   ParseModeKey,
+		Title:                 "B站链接自动解析",
+		Description:           "控制哔哩哔哩链接自动解析行为",
+		DefaultUser:           ParseModeOn,
+		DefaultGroup:          ParseModeMusicKichiku,
+		RequireAutoLinkDetect: true,
+		Order:                 100,
 		Options: []botpkg.PluginSettingOption{
 			{Value: ParseModeOn, Label: "开"},
 			{Value: ParseModeMusicKichiku, Label: "仅音乐/鬼畜区"},
