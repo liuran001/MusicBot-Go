@@ -74,6 +74,19 @@ func (m *DefaultManager) Register(platform Platform) {
 	}
 }
 
+// Reset clears all registered providers and metadata.
+func (m *DefaultManager) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.providers = make(map[string][]Platform)
+	m.composites = make(map[string]Platform)
+	m.meta = make(map[string]Meta)
+	m.aliases = make(map[string]string)
+	if m.registry != nil {
+		m.registry.Reset()
+	}
+}
+
 // Get retrieves a platform by name.
 // If multiple providers are registered for the same name, returns a composite
 // platform that tries providers in registration order with automatic fallback.

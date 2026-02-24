@@ -8,7 +8,7 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-// ReloadHandler handles /reload command for dynamic plugins.
+// ReloadHandler handles /reload command for runtime config/plugins reload.
 type ReloadHandler struct {
 	Reload      func(ctx context.Context) error
 	RateLimiter *telegram.RateLimiter
@@ -57,7 +57,7 @@ func (h *ReloadHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 
 	params := &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   "✅ 动态插件已重载",
+		Text:   "✅ 配置与插件已重载",
 	}
 	if h.RateLimiter != nil {
 		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)

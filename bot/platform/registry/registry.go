@@ -95,6 +95,14 @@ func (r *Registry) MatchURL(url string) (string, Platform, bool) {
 	return "", nil, false
 }
 
+// Reset clears all registered platforms.
+func (r *Registry) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.platforms = make(map[string]Platform)
+	r.ordered = r.ordered[:0]
+}
+
 // Default is the global default registry instance.
 // Platforms can register themselves by calling Default.Register() in their init() functions.
 var Default = New()
