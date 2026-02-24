@@ -816,6 +816,11 @@ var inlineMessageLockStore = struct {
 	locks map[string]*inlineMessageLockEntry
 }{locks: make(map[string]*inlineMessageLockEntry)}
 
+var callbackInFlightStore = struct {
+	mu      sync.Mutex
+	entries map[string]time.Time
+}{entries: make(map[string]time.Time)}
+
 func withInlineMessageLock(inlineMessageID string, fn func()) {
 	if fn == nil {
 		return
@@ -847,6 +852,42 @@ func withInlineMessageLock(inlineMessageID string, fn func()) {
 	}()
 
 	fn()
+}
+
+func tryAcquireCallbackInFlight(key string, ttl time.Duration) (release func(), ok bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return func() {}, true
+	}
+	if ttl <= 0 {
+		ttl = 3 * time.Second
+	}
+	now := time.Now()
+	until := now.Add(ttl)
+
+	callbackInFlightStore.mu.Lock()
+	for k, exp := range callbackInFlightStore.entries {
+		if !exp.After(now) {
+			delete(callbackInFlightStore.entries, k)
+		}
+	}
+	if exp, exists := callbackInFlightStore.entries[key]; exists && exp.After(now) {
+		callbackInFlightStore.mu.Unlock()
+		return nil, false
+	}
+	callbackInFlightStore.entries[key] = until
+	callbackInFlightStore.mu.Unlock()
+
+	released := false
+	return func() {
+		callbackInFlightStore.mu.Lock()
+		defer callbackInFlightStore.mu.Unlock()
+		if released {
+			return
+		}
+		released = true
+		delete(callbackInFlightStore.entries, key)
+	}, true
 }
 
 func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {

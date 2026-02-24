@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -131,6 +132,13 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	if query.InlineMessageID == "" {
 		return
 	}
+	inlineGuardKey := fmt.Sprintf("music-i:%s", strings.TrimSpace(query.InlineMessageID))
+	releaseInlineGuard, acquired := tryAcquireCallbackInFlight(inlineGuardKey, 30*time.Second)
+	if !acquired {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		return
+	}
+	defer releaseInlineGuard()
 	if len(args) >= 4 && strings.TrimSpace(args[1]) == "iep" {
 		h.handleInlineEpisodeCallback(ctx, b, query, args)
 		return
@@ -147,7 +155,7 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 			return
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
-		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityValue)
+		h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityValue)
 		return
 	}
 	if len(args) < 5 {
@@ -174,7 +182,20 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 		return
 	}
 
-	go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
+	h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
+}
+
+func (h *CallbackMusicHandler) runInlineDownloadFlowGuarded(ctx context.Context, b *telego.Bot, inlineMessageID string, userID int64, userName, platformName, trackID, qualityOverride string) bool {
+	guardKey := fmt.Sprintf("music-flow:%s", strings.TrimSpace(inlineMessageID))
+	release, ok := tryAcquireCallbackInFlight(guardKey, 45*time.Second)
+	if !ok {
+		return false
+	}
+	go func() {
+		defer release()
+		h.runInlineDownloadFlow(ctx, b, inlineMessageID, userID, userName, platformName, trackID, qualityOverride)
+	}()
+	return true
 }
 
 func (h *CallbackMusicHandler) tryPresentInlineEpisodePicker(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, platformName, trackID, qualityValue string, requesterID int64) bool {
@@ -327,10 +348,19 @@ func buildEpisodePickerPage(platformName, trackID, qualityValue string, requeste
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
+		extraRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page > 1 {
 			if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, 1); cb != "" {
-				rows = append(rows, []telego.InlineKeyboardButton{{Text: "🏠 回到主页", CallbackData: cb}})
+				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: "🏠 回到主页", CallbackData: cb})
 			}
+		}
+		if page < totalPages {
+			if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, totalPages); cb != "" {
+				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: "⏭️ 最后一页", CallbackData: cb})
+			}
+		}
+		if len(extraRow) > 0 {
+			rows = append(rows, extraRow)
 		}
 	}
 
@@ -452,6 +482,13 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 	if msg == nil {
 		return
 	}
+	epGuardKey := fmt.Sprintf("music-ep:%d:%d", msg.Chat.ID, msg.MessageID)
+	releaseEpGuard, acquired := tryAcquireCallbackInFlight(epGuardKey, 8*time.Second)
+	if !acquired {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		return
+	}
+	defer releaseEpGuard()
 	if msg.Chat.Type != "private" && !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, requesterID) {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
 		return
@@ -551,6 +588,13 @@ func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, 
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
 		return
 	}
+	iepGuardKey := fmt.Sprintf("music-iep:%s", strings.TrimSpace(query.InlineMessageID))
+	releaseIepGuard, acquired := tryAcquireCallbackInFlight(iepGuardKey, 8*time.Second)
+	if !acquired {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		return
+	}
+	defer releaseIepGuard()
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "c":
 		params := &telego.EditMessageTextParams{InlineMessageID: query.InlineMessageID, Text: "已关闭选集"}
@@ -582,7 +626,7 @@ func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, 
 	case "p":
 		selectedTrackID := buildBilibiliVideoTrackID(trackID, page)
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
-		go h.runInlineDownloadFlow(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, selectedTrackID, qualityValue)
+		h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, selectedTrackID, qualityValue)
 	default:
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
 	}
@@ -653,17 +697,23 @@ func buildInlineEpisodePickerPage(platformName, trackID, qualityValue string, re
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
+		extraRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page > 1 {
 			if cb := buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, 1); cb != "" {
-				rows = append(rows, []telego.InlineKeyboardButton{{Text: "🏠 回到主页", CallbackData: cb}})
+				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: "🏠 回到主页", CallbackData: cb})
 			}
+		}
+		if page < totalPages {
+			if cb := buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, totalPages); cb != "" {
+				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: "⏭️ 最后一页", CallbackData: cb})
+			}
+		}
+		if len(extraRow) > 0 {
+			rows = append(rows, extraRow)
 		}
 	}
 	if len(rows) == 0 {
 		return "", nil
-	}
-	if closeCB := buildInlineEpisodeCloseCallbackData(platformName, trackID, qualityValue, requesterID); closeCB != "" {
-		rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: closeCB}})
 	}
 	return strings.Join(textLines, "\n"), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }

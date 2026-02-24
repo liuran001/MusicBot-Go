@@ -385,6 +385,13 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 		return
 	}
+	guardKey := fmt.Sprintf("search:%d:%d", msg.Chat.ID, msg.MessageID)
+	releaseGuard, acquired := tryAcquireCallbackInFlight(guardKey, 8*time.Second)
+	if !acquired {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		return
+	}
+	defer releaseGuard()
 	if action == "platform" {
 		if len(parts) < 5 {
 			return
