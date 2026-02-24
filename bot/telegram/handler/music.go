@@ -1799,7 +1799,11 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		Duration:        songInfo.Duration,
 		ReplyParameters: buildReplyParams(message),
 	}
-	params.ReplyMarkup = buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+	requesterID := int64(0)
+	if message != nil && message.From != nil {
+		requesterID = message.From.ID
+	}
+	params.ReplyMarkup = buildForwardKeyboardWithEpisodes(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID, "", requesterID)
 
 	if songInfo.ThumbFileID != "" {
 		params.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}

@@ -100,6 +100,9 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 	if h == nil || h.Music == nil || b == nil || chosen == nil {
 		return
 	}
+	if h.tryPresentChosenInlineEpisodePicker(ctx, b, chosen, platformName, trackID, qualityValue) {
+		return
+	}
 	withInlineMessageLock(chosen.InlineMessageID, func() {
 		lastInlineText := ""
 		setInlineText := func(text string, markup *telego.InlineKeyboardMarkup) {
@@ -150,7 +153,7 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 			if strings.TrimSpace(songInfo.ThumbFileID) != "" {
 				media.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
 			}
-			replyMarkup := buildForwardKeyboardWithEpisodes(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID, qualityValue, chosen.From.ID)
+			replyMarkup := buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
 			params := &telego.EditMessageMediaParams{
 				InlineMessageID: chosen.InlineMessageID,
 				Media:           media,
@@ -212,6 +215,42 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 			}
 		}
 	})
+}
+
+func (h *ChosenInlineMusicHandler) tryPresentChosenInlineEpisodePicker(ctx context.Context, b *telego.Bot, chosen *telego.ChosenInlineResult, platformName, trackID, qualityValue string) bool {
+	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || chosen == nil || strings.TrimSpace(chosen.InlineMessageID) == "" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+		return false
+	}
+	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
+	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
+		return false
+	}
+	plat := h.Music.PlatformManager.Get(strings.TrimSpace(platformName))
+	if plat == nil {
+		return false
+	}
+	provider, ok := plat.(platform.EpisodeProvider)
+	if !ok {
+		return false
+	}
+	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
+	if err != nil || len(episodes) <= 1 {
+		return false
+	}
+	text, keyboard := buildInlineEpisodePickerPage(platformName, baseTrackID, qualityValue, chosen.From.ID, episodes, 1)
+	if strings.TrimSpace(text) == "" || keyboard == nil {
+		return false
+	}
+	params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: text, ParseMode: telego.ModeMarkdownV2, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}, ReplyMarkup: keyboard}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageText(ctx, params)
+	}
+	return true
 }
 
 func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b *telego.Bot, chosen *telego.ChosenInlineResult, platformName, collectionID, qualityValue string) {

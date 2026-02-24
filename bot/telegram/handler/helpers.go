@@ -777,6 +777,10 @@ func buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue strin
 	return buildInlineEpisodeCallbackData("n", platformName, trackID, qualityValue, requesterID, page)
 }
 
+func buildInlineEpisodeCloseCallbackData(platformName, trackID, qualityValue string, requesterID int64) string {
+	return buildInlineEpisodeCallbackData("c", platformName, trackID, qualityValue, requesterID, 1)
+}
+
 func buildInlineEpisodeCallbackData(action, platformName, trackID, qualityValue string, requesterID int64, page int) string {
 	action = strings.TrimSpace(strings.ToLower(action))
 	platformName = strings.TrimSpace(platformName)
