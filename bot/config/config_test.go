@@ -138,7 +138,7 @@ BotDebug = true
 Database = test.db
 LogLevel = debug
 DownloadTimeout = 120
-ReverseProxy = proxy.example.com
+DownloadProxy = proxy.example.com
 CheckMD5 = false
 `
 

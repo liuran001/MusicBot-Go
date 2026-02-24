@@ -283,9 +283,11 @@ func (a *App) Start(ctx context.Context) error {
 		cacheDir = "./cache"
 	}
 
+	proxyAddr := strings.TrimSpace(a.Config.GetString("DownloadProxy"))
+
 	downloadService := download.NewDownloadService(download.DownloadServiceOptions{
 		Timeout:              time.Duration(a.Config.GetInt("DownloadTimeout")) * time.Second,
-		ReverseProxy:         a.Config.GetString("ReverseProxy"),
+		Proxy:                proxyAddr,
 		CheckMD5:             a.Config.GetBool("CheckMD5"),
 		MaxRetries:           a.Config.GetInt("DownloadMaxRetries"),
 		EnableMultipart:      a.Config.GetBool("EnableMultipartDownload"),

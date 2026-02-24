@@ -76,8 +76,8 @@ func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admin
 		text += "`/recognize` \\- 听歌识曲 \\(回复一条语音消息\\)\n"
 	}
 	text += "`/settings` \\- 默认音质/搜索平台设置\n\n" +
-		"搜索平台支持参数: " + aliasText + "\n" +
-		"音质参数支持: `low` / `high` / `lossless` / `hires`\n\n" +
+		"平台参数: " + aliasText + "\n" +
+		"音质参数: `low` / `high` / `lossless` / `hires`\n\n" +
 		"支持平台: " + platformText + "\n" +
 		"示例:\n" +
 		"`/music https://music.163.com/song/1859603835`\n" +
