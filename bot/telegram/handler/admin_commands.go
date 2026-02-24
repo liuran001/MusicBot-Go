@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -18,6 +19,8 @@ type AdminCommandHandler struct {
 	RateLimiter *telegram.RateLimiter
 	Commands    []admincmd.Command
 }
+
+var sensitiveKVPattern = regexp.MustCompile(`(?i)\b(cookie|sessdata|music_u|refresh_token|ac_time_value|psrf_qqaccess_token|qqmusic_key|auth_token|access_token)\b\s*[:=]\s*([^\s;,\n]+)`)
 
 func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.Message == nil || update.Message.From == nil {
@@ -49,6 +52,7 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 	if result == "" {
 		result = "执行完成"
 	}
+	result = sanitizeSensitiveText(result)
 	h.sendText(ctx, b, message.Chat.ID, message.MessageID, result)
 }
 
@@ -225,5 +229,25 @@ func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 	if message == "" {
 		message = "续期完成"
 	}
+	message = sanitizeSensitiveText(message)
 	return fmt.Sprintf("✅ %s: %s", platformName, message), nil
+}
+
+func sanitizeSensitiveText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return text
+	}
+	return sensitiveKVPattern.ReplaceAllStringFunc(text, func(match string) string {
+		parts := strings.SplitN(match, "=", 2)
+		sep := "="
+		if len(parts) < 2 {
+			parts = strings.SplitN(match, ":", 2)
+			sep = ":"
+		}
+		if len(parts) < 2 {
+			return "[REDACTED]"
+		}
+		return strings.TrimSpace(parts[0]) + sep + " ***"
+	})
 }
