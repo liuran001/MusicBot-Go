@@ -76,7 +76,7 @@ func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admin
 		text += "`/recognize` \\- 听歌识曲 \\(回复一条语音消息\\)\n"
 	}
 	text += "`/settings` \\- 默认音质/搜索平台设置\n\n" +
-		"平台参数: " + aliasText + "\n" +
+		"平台参数:\n" + aliasText + "\n" +
 		"音质参数: `low` / `high` / `lossless` / `hires`\n\n" +
 		"支持平台: " + platformText + "\n" +
 		"示例:\n" +
@@ -128,32 +128,60 @@ func buildAliasHint(manager platform.Manager) string {
 	if len(metaList) == 0 {
 		return ""
 	}
-	aliasSet := make(map[string]struct{})
-	for _, meta := range metaList {
-		aliases := meta.Aliases
-		if len(aliases) == 0 && strings.TrimSpace(meta.Name) != "" {
-			aliases = []string{meta.Name}
+	sort.Slice(metaList, func(i, j int) bool {
+		left := strings.TrimSpace(metaList[i].DisplayName)
+		if left == "" {
+			left = strings.TrimSpace(metaList[i].Name)
 		}
+		right := strings.TrimSpace(metaList[j].DisplayName)
+		if right == "" {
+			right = strings.TrimSpace(metaList[j].Name)
+		}
+		if left == right {
+			return strings.TrimSpace(metaList[i].Name) < strings.TrimSpace(metaList[j].Name)
+		}
+		return left < right
+	})
+	lines := make([]string, 0, len(metaList))
+	for _, meta := range metaList {
+		platformName := strings.TrimSpace(meta.Name)
+		if platformName == "" {
+			continue
+		}
+		aliases := meta.Aliases
+		if len(aliases) == 0 {
+			aliases = []string{platformName}
+		}
+		aliasSet := make(map[string]struct{})
+		aliasItems := make([]string, 0, len(aliases))
 		for _, alias := range aliases {
 			key := platform.NormalizeAliasToken(alias)
 			if key == "" {
 				continue
 			}
+			if _, ok := aliasSet[key]; ok {
+				continue
+			}
 			aliasSet[key] = struct{}{}
+			aliasItems = append(aliasItems, key)
 		}
+		if len(aliasItems) == 0 {
+			continue
+		}
+		sort.Strings(aliasItems)
+		for i := range aliasItems {
+			aliasItems[i] = "`" + mdV2Replacer.Replace(aliasItems[i]) + "`"
+		}
+		display := strings.TrimSpace(meta.DisplayName)
+		if display == "" {
+			display = platformName
+		}
+		lines = append(lines, "• "+mdV2Replacer.Replace(display)+": "+strings.Join(aliasItems, " / "))
 	}
-	if len(aliasSet) == 0 {
+	if len(lines) == 0 {
 		return ""
 	}
-	aliases := make([]string, 0, len(aliasSet))
-	for alias := range aliasSet {
-		aliases = append(aliases, alias)
-	}
-	sort.Strings(aliases)
-	for i, alias := range aliases {
-		aliases[i] = "`" + mdV2Replacer.Replace(alias) + "`"
-	}
-	return strings.Join(aliases, " / ")
+	return strings.Join(lines, "\n")
 }
 
 func buildPlatformList(manager platform.Manager) string {
