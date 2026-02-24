@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -480,65 +479,86 @@ func pickBestSubtitleURL(items []VideoSubtitleItem) string {
 		return ""
 	}
 
-	type subtitleCandidate struct {
-		url   string
-		score int
-		lan   string
-	}
-
-	candidates := make([]subtitleCandidate, 0, len(items)*2)
+	// Priority policy:
+	// 1) non-AI Chinese subtitles
+	// 2) non-AI other language subtitles
+	// 3) AI subtitles fallback
+	// If the best priority has multiple different candidates, do not guess.
+	tier0 := make([]string, 0)
+	tier1 := make([]string, 0)
+	tier2 := make([]string, 0)
 	for _, item := range items {
-		score := subtitleLanguagePriority(item.Lan, item.LanDoc)
-		if item.AiType != 0 {
-			score += 5
+		u := strings.TrimSpace(item.SubtitleURL)
+		if u == "" {
+			u = strings.TrimSpace(item.SubtitleURLV2)
+		}
+		if u == "" {
+			continue
+		}
+		if strings.HasPrefix(u, "//") {
+			u = "https:" + u
 		}
 
-		for _, raw := range []string{item.SubtitleURL, item.SubtitleURLV2} {
-			u := strings.TrimSpace(raw)
-			if u == "" {
-				continue
-			}
-			if strings.HasPrefix(u, "//") {
-				u = "https:" + u
-			}
-			candidates = append(candidates, subtitleCandidate{
-				url:   u,
-				score: score,
-				lan:   strings.ToLower(strings.TrimSpace(item.Lan)),
-			})
+		if item.AiType != 0 {
+			tier2 = append(tier2, u)
+			continue
+		}
+
+		if isChineseSubtitle(item.Lan, item.LanDoc) {
+			tier0 = append(tier0, u)
+		} else {
+			tier1 = append(tier1, u)
 		}
 	}
 
-	if len(candidates) == 0 {
+	if selected := pickUniqueSubtitleCandidate(tier0); selected != "" {
+		return selected
+	}
+	if len(tier0) > 0 {
 		return ""
 	}
 
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].score != candidates[j].score {
-			return candidates[i].score < candidates[j].score
-		}
-		if candidates[i].lan != candidates[j].lan {
-			return candidates[i].lan < candidates[j].lan
-		}
-		return candidates[i].url < candidates[j].url
-	})
+	if selected := pickUniqueSubtitleCandidate(tier1); selected != "" {
+		return selected
+	}
+	if len(tier1) > 0 {
+		return ""
+	}
 
-	return candidates[0].url
+	return pickUniqueSubtitleCandidate(tier2)
 }
 
-func subtitleLanguagePriority(lan, lanDoc string) int {
+func pickUniqueSubtitleCandidate(urls []string) string {
+	if len(urls) == 0 {
+		return ""
+	}
+	unique := make(map[string]struct{}, len(urls))
+	for _, u := range urls {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		unique[u] = struct{}{}
+	}
+	if len(unique) != 1 {
+		return ""
+	}
+	for u := range unique {
+		return u
+	}
+	return ""
+}
+
+func isChineseSubtitle(lan, lanDoc string) bool {
 	lanNorm := strings.ToLower(strings.TrimSpace(lan))
 	lanDocNorm := strings.ToLower(strings.TrimSpace(lanDoc))
 
 	switch {
 	case lanNorm == "zh-cn" || lanNorm == "zh-hans" || lanNorm == "zh":
-		return 0
-	case strings.HasPrefix(lanNorm, "zh"):
-		return 1
+		return true
 	case strings.Contains(lanDocNorm, "中文") || strings.Contains(lanDocNorm, "汉") || strings.Contains(lanDocNorm, "漢"):
-		return 2
+		return true
 	default:
-		return 10
+		return false
 	}
 }
 
@@ -852,6 +872,16 @@ func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) 
 		}
 
 		if selected := pickBestSubtitleURL(result.Data.Subtitle.Subtitles); selected != "" {
+			if isAI := isAISubtitleSelection(result.Data.Subtitle.Subtitles, selected); isAI {
+				stable, stableURL := c.confirmAISubtitleURLStable(ctx, ep.URL, selected)
+				if !stable {
+					if c.logger != nil {
+						c.logger.Debug("bilibili: unstable ai subtitle candidate rejected", "bvid", bvid, "cid", cid, "endpoint", ep.Name)
+					}
+					continue
+				}
+				return stableURL, nil
+			}
 			return selected, nil
 		}
 	}
@@ -861,6 +891,110 @@ func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) 
 	}
 
 	return "", nil
+}
+
+func (c *Client) confirmAISubtitleURLStable(ctx context.Context, endpointURL, selected string) (bool, string) {
+	selectedIdentity := subtitleURLIdentity(selected)
+	if selectedIdentity == "" {
+		return false, ""
+	}
+	const probes = 3
+	for i := 0; i < probes; i++ {
+		result, err := c.fetchVideoSubtitleResponse(ctx, endpointURL)
+		if err != nil || result.Data == nil || len(result.Data.Subtitle.Subtitles) == 0 {
+			return false, ""
+		}
+
+		next := pickBestSubtitleURL(result.Data.Subtitle.Subtitles)
+		if next == "" {
+			return false, ""
+		}
+
+		if !isAISubtitleSelection(result.Data.Subtitle.Subtitles, next) {
+			return false, ""
+		}
+
+		nextIdentity := subtitleURLIdentity(next)
+		if nextIdentity == "" || nextIdentity != selectedIdentity {
+			return false, ""
+		}
+	}
+
+	return true, selected
+}
+
+func (c *Client) fetchVideoSubtitleResponse(ctx context.Context, endpointURL string) (*VideoSubtitleResponse, error) {
+	var result VideoSubtitleResponse
+	err := c.execute(ctx, func() error {
+		req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, endpointURL, nil)
+		if err != nil {
+			return err
+		}
+
+		c.setHeaders(req)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("bilibili: unexpected status code %d: %s", resp.StatusCode, string(body))
+		}
+
+		if err := json.Unmarshal(body, &result); err != nil {
+			return fmt.Errorf("bilibili: decode subtitle list: %w", err)
+		}
+
+		if result.Code != 0 {
+			return fmt.Errorf("bilibili: API error code %d: %s", result.Code, result.Message)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func isAISubtitleSelection(items []VideoSubtitleItem, selected string) bool {
+	selectedIdentity := subtitleURLIdentity(selected)
+	if selectedIdentity == "" {
+		return false
+	}
+	for _, item := range items {
+		for _, u := range []string{item.SubtitleURL, item.SubtitleURLV2} {
+			if subtitleURLIdentity(u) == selectedIdentity {
+				return item.AiType != 0
+			}
+		}
+	}
+	return false
+}
+
+func subtitleURLIdentity(raw string) string {
+	u := strings.TrimSpace(raw)
+	if u == "" {
+		return ""
+	}
+	if strings.HasPrefix(u, "//") {
+		u = "https:" + u
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return ""
+	}
+	if parsed.Host == "" {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(parsed.Host + parsed.EscapedPath()))
 }
 
 // GetVideoSubtitleLines fetches subtitle body lines from subtitle URL.
