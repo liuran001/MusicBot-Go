@@ -654,27 +654,7 @@ func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.Inline
 }
 
 func buildForwardKeyboardWithEpisodes(trackURL, platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
-	base := buildForwardKeyboard(trackURL, platformName, trackID)
-	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
-		return base
-	}
-	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
-	if hasExplicitPage || baseTrackID == "" {
-		return base
-	}
-	callbackData := buildInlineEpisodeShowCallbackData("bilibili", baseTrackID, qualityValue, requesterID, 1)
-	if callbackData == "" {
-		return base
-	}
-	if base == nil {
-		return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-			{Text: "展示选集", CallbackData: callbackData},
-		}}}
-	}
-	rows := make([][]telego.InlineKeyboardButton, 0, len(base.InlineKeyboard)+1)
-	rows = append(rows, base.InlineKeyboard...)
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "展示选集", CallbackData: callbackData}})
-	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return buildForwardKeyboard(trackURL, platformName, trackID)
 }
 
 func buildInlineSendKeyboard(platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {

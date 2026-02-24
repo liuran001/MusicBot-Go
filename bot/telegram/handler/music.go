@@ -1446,6 +1446,11 @@ func (h *MusicHandler) embedTrackTags(ctx context.Context, plat platform.Platfor
 		return
 	}
 	if err := h.ID3Service.EmbedTags(filePath, tagData, embedPicPath); err != nil && h.Logger != nil {
+		errText := strings.ToLower(strings.TrimSpace(err.Error()))
+		if strings.Contains(errText, "unsupported ftyp") || strings.Contains(errText, "unsupported audio format for tags") {
+			h.Logger.Warn("skip unsupported tag embedding", "platform", plat.Name(), "trackID", trackID, "error", err)
+			return
+		}
 		h.Logger.Error("failed to embed tags", "platform", plat.Name(), "trackID", trackID, "error", err)
 	}
 }

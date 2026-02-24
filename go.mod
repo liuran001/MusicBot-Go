@@ -5,10 +5,7 @@ go 1.26.0
 require (
 	github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936
 	github.com/XiaoMengXinX/Music163Api-Go v0.1.30
-	github.com/bogem/id3v2 v1.2.0
 	github.com/glebarez/sqlite v1.11.0
-	github.com/go-flac/flacpicture v0.3.0
-	github.com/go-flac/flacvorbis v0.2.0
 	github.com/go-flac/go-flac v1.0.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/mymmrac/telego v1.5.0
@@ -17,6 +14,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/traefik/yaegi v0.16.1
+	go.senan.xyz/taglib v0.11.1
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
 	gopkg.in/ini.v1 v1.67.1
@@ -24,8 +22,8 @@ require (
 )
 
 require (
-	github.com/Sorrow446/go-mp4tag v0.0.0-20240130220823-68ce31d53e37 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/bogem/id3v2 v1.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -34,6 +32,8 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
+	github.com/go-flac/flacpicture v0.3.0 // indirect
+	github.com/go-flac/flacvorbis v0.2.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grbit/go-json v0.11.0 // indirect
@@ -53,6 +53,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/tetratelabs/wazero v1.10.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.69.0 // indirect

@@ -1,5 +1,3 @@
-github.com/Sorrow446/go-mp4tag v0.0.0-20240130220823-68ce31d53e37 h1:6X6U2D53ITfDGiyGN+sOVm/iFveFHrFRS7icGJ+u88M=
-github.com/Sorrow446/go-mp4tag v0.0.0-20240130220823-68ce31d53e37/go.mod h1:l5rVvaRUrCot83416D6xggKCeFZQAXcv02tnJslG26s=
 github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936 h1:to5zIst65bM0aYtqsUU97yE6kuHKUB078F2z+G4ZQH4=
 github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936/go.mod h1:L6oR/uZwUSBO7o57qbul/zwUuuKpP4EVnFKmTBscvLY=
 github.com/XiaoMengXinX/Music163Api-Go v0.1.30 h1:MqRItDFtX1J0JTlFtwN2RwjsYMA7/g/+cTjcOJXy19s=
@@ -110,6 +108,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/subosito/gotenv v1.6.0 h1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8=
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
+github.com/tetratelabs/wazero v1.10.1 h1:2DugeJf6VVk58KTPszlNfeeN8AhhpwcZqkJj2wwFuH8=
+github.com/tetratelabs/wazero v1.10.1/go.mod h1:DRm5twOQ5Gr1AoEdSi0CLjDQF1J9ZAuyqFIjl1KKfQU=
 github.com/traefik/yaegi v0.16.1 h1:f1De3DVJqIDKmnasUF6MwmWv1dSEEat0wcpXhD2On3E=
 github.com/traefik/yaegi v0.16.1/go.mod h1:4eVhbPb3LnD2VigQjhYbEJ69vDRFdT2HQNrXx8eEwUY=
 github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=
@@ -122,6 +122,8 @@ github.com/valyala/fastjson v1.6.7 h1:ZE4tRy0CIkh+qDc5McjatheGX2czdn8slQjomexVpB
 github.com/valyala/fastjson v1.6.7/go.mod h1:CLCAqky6SMuOcxStkYQvblddUtoRxhYMGLrsQns1aXY=
 github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
 github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3iGxZ18UQApw/E=
+go.senan.xyz/taglib v0.11.1 h1:S3mO5e3HRRG0Ehw1jLUodYbAJK8TtqdOoNgqkC0D3uU=
+go.senan.xyz/taglib v0.11.1/go.mod h1:qyTl978MnGeZ/ny4d/t0ErLXxysA+39X4+SNSCk56Zs=
 go.uber.org/mock v0.6.0 h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=
 go.uber.org/mock v0.6.0/go.mod h1:KiVJ4BqZJaMj4svdfmHM0AUx4NJYO8ZNpPnZn1Z+BBU=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
