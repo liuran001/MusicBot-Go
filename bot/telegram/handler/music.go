@@ -511,6 +511,9 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	quality := h.resolveRequestedQuality(ctx, message, userID, qualityOverride)
 
 	qualityStr := quality.String()
+	if handled, err := h.tryPresentDirectBilibiliEpisodes(ctx, b, message, platformName, trackID, qualityStr); handled {
+		return err
+	}
 
 	if cachedInfo, sent, err := h.trySendCachedTrack(ctx, b, status, message, platformName, trackID, qualityStr, false, getCached, handleInvalidCachedFileID); err != nil {
 		songInfo = cachedInfo
@@ -610,6 +613,61 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	return nil
+}
+
+func (h *MusicHandler) tryPresentDirectBilibiliEpisodes(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID, qualityValue string) (bool, error) {
+	if h == nil || h.PlatformManager == nil || b == nil || message == nil {
+		return false, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+		return false, nil
+	}
+	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
+	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
+		return false, nil
+	}
+	plat := h.PlatformManager.Get("bilibili")
+	if plat == nil {
+		return false, nil
+	}
+	provider, ok := plat.(platform.EpisodeProvider)
+	if !ok {
+		return false, nil
+	}
+	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
+	if err != nil || len(episodes) <= 1 {
+		return false, nil
+	}
+	requesterID := int64(0)
+	if message.From != nil {
+		requesterID = message.From.ID
+	}
+	text, keyboard := buildEpisodePickerPage("bilibili", baseTrackID, qualityValue, requesterID, episodes, 1, "")
+	if strings.TrimSpace(text) == "" || keyboard == nil {
+		return false, nil
+	}
+	params := &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   text,
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+		ParseMode:          telego.ModeMarkdownV2,
+		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
+		ReplyMarkup:        keyboard,
+	}
+	if message.MessageThreadID != 0 {
+		params.MessageThreadID = message.MessageThreadID
+	}
+	if h.RateLimiter != nil {
+		_, err = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, err = b.SendMessage(ctx, params)
+	}
+	if err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func (h *MusicHandler) resolveRequestedQuality(ctx context.Context, message *telego.Message, userID int64, qualityOverride string) platform.Quality {
