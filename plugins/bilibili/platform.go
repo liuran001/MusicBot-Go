@@ -3,9 +3,11 @@ package bilibili
 import (
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +39,7 @@ func (b *BilibiliPlatform) SupportsDownload() bool {
 
 // SupportsSearch indicates whether this platform supports searching for tracks.
 func (b *BilibiliPlatform) SupportsSearch() bool {
-	return false // Search requires complex WBI signing, omitted for now
+	return true
 }
 
 // SupportsLyrics indicates whether this platform supports fetching lyrics.
@@ -99,7 +101,7 @@ func (b *BilibiliPlatform) CheckCookie(ctx context.Context) (platform.CookieChec
 func (b *BilibiliPlatform) Capabilities() platform.Capabilities {
 	return platform.Capabilities{
 		Download:    true,
-		Search:      false,
+		Search:      true,
 		Lyrics:      true,
 		Recognition: false,
 		HiRes:       false,
@@ -690,7 +692,151 @@ func formatLRCTimestamp(d time.Duration) string {
 // Other unsupported interfaces
 
 func (b *BilibiliPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
-	return nil, platform.NewUnsupportedError("bilibili", "search")
+	keyword := strings.TrimSpace(query)
+	if keyword == "" {
+		return []platform.Track{}, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	results := make([]platform.Track, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	collect := func(searchKeyword string) error {
+		for page := 1; page <= 5 && len(results) < limit; page++ {
+			items, err := b.client.SearchVideo(ctx, searchKeyword, page)
+			if err != nil {
+				if page == 1 {
+					return err
+				}
+				break
+			}
+			if len(items) == 0 {
+				break
+			}
+
+			for _, item := range items {
+				track, ok := b.searchItemToTrack(item)
+				if !ok {
+					continue
+				}
+				if _, exists := seen[track.ID]; exists {
+					continue
+				}
+				seen[track.ID] = struct{}{}
+				results = append(results, track)
+				if len(results) >= limit {
+					break
+				}
+			}
+		}
+		return nil
+	}
+
+	if err := collect(keyword); err != nil {
+		return nil, err
+	}
+
+	if len(results) < 5 && !strings.Contains(strings.ToLower(keyword), "音乐") {
+		_ = collect(keyword + " 音乐")
+	}
+
+	return results, nil
+}
+
+func (b *BilibiliPlatform) searchItemToTrack(item VideoSearchItem) (platform.Track, bool) {
+	categoryID, _ := strconv.Atoi(strings.TrimSpace(item.TypeID))
+	categoryName := strings.TrimSpace(item.TypeName)
+	if !isMusicOrKichikuCategoryID(categoryID) && !isMusicOrKichikuCategoryName(categoryName) {
+		return platform.Track{}, false
+	}
+
+	id := strings.TrimSpace(item.BVID)
+	if id == "" && item.AID > 0 {
+		id = fmt.Sprintf("av%d", item.AID)
+	}
+	if id == "" {
+		return platform.Track{}, false
+	}
+
+	title := cleanSearchTitle(item.Title)
+	if title == "" {
+		title = strings.TrimSpace(item.BVID)
+	}
+	artistName := strings.TrimSpace(item.Author)
+	if artistName == "" {
+		artistName = "未知UP主"
+	}
+
+	trackURL := strings.TrimSpace(item.ArcURL)
+	if trackURL == "" {
+		if strings.TrimSpace(item.BVID) != "" {
+			trackURL = fmt.Sprintf("https://www.bilibili.com/video/%s", strings.TrimSpace(item.BVID))
+		} else {
+			trackURL = fmt.Sprintf("https://www.bilibili.com/video/av%d", item.AID)
+		}
+	}
+
+	return platform.Track{
+		ID:       id,
+		Platform: "bilibili",
+		Title:    title,
+		Artists: []platform.Artist{{
+			ID:       strconv.Itoa(item.Mid),
+			Platform: "bilibili",
+			Name:     artistName,
+			URL:      fmt.Sprintf("https://space.bilibili.com/%d", item.Mid),
+		}},
+		Duration: parseBilibiliSearchDuration(item.Duration),
+		CoverURL: normalizeBilibiliCoverURL(item.Pic),
+		URL:      trackURL,
+	}, true
+}
+
+var searchTagRegexp = regexp.MustCompile(`<[^>]+>`)
+
+func cleanSearchTitle(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	text = searchTagRegexp.ReplaceAllString(text, "")
+	text = html.UnescapeString(text)
+	return strings.TrimSpace(text)
+}
+
+func parseBilibiliSearchDuration(raw string) time.Duration {
+	parts := strings.Split(strings.TrimSpace(raw), ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0
+	}
+
+	toInt := func(v string) int {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			return 0
+		}
+		return n
+	}
+
+	if len(parts) == 2 {
+		m := toInt(parts[0])
+		s := toInt(parts[1])
+		return time.Duration(m*60+s) * time.Second
+	}
+
+	h := toInt(parts[0])
+	m := toInt(parts[1])
+	s := toInt(parts[2])
+	return time.Duration(h*3600+m*60+s) * time.Second
+}
+
+func normalizeBilibiliCoverURL(raw string) string {
+	cover := strings.TrimSpace(raw)
+	if strings.HasPrefix(cover, "//") {
+		return "https:" + cover
+	}
+	return cover
 }
 
 func (b *BilibiliPlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*platform.Track, error) {
