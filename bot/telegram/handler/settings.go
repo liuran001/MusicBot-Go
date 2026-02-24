@@ -120,6 +120,9 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	sb.WriteString(fmt.Sprintf("🔗 会话内链接自动识别: %s\n", autoLinkDetectText))
 
 	for _, def := range h.sortedPluginSettingDefinitions() {
+		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
+			continue
+		}
 		value := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
 		sb.WriteString(fmt.Sprintf("🔌 %s: %s\n", def.Title, def.LabelOf(value)))
 	}
@@ -168,7 +171,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 
 			text := displayName
 			if p == platformValue {
-				text = "✓ " + text
+				text = "✅ " + platformSearchShortName(p)
 			}
 
 			platformButtons = append(platformButtons, telego.InlineKeyboardButton{
@@ -213,6 +216,9 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 		},
 	})
 	for _, def := range h.sortedPluginSettingDefinitions() {
+		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
+			continue
+		}
 		if len(def.Options) == 0 {
 			continue
 		}
@@ -334,10 +340,17 @@ func (h *SettingsHandler) toggleValue(enabled bool) string {
 	return "on"
 }
 
+func (h *SettingsHandler) shouldShowPluginSetting(def botpkg.PluginSettingDefinition, autoLinkDetectEnabled bool) bool {
+	if def.RequireAutoLinkDetect {
+		return autoLinkDetectEnabled
+	}
+	return true
+}
+
 func (h *SettingsHandler) formatQualityButton(quality string, isSelected bool) string {
 	name := h.getQualityDisplayName(quality)
 	if isSelected {
-		return fmt.Sprintf("✓ %s", name)
+		return fmt.Sprintf("✅ %s", name)
 	}
 	return name
 }
