@@ -42,6 +42,7 @@ type searchState struct {
 	currentPage      int
 	updatedAt        time.Time
 	tracksByPlatform map[string][]platform.Track
+	hasMoreByPlat    map[string]bool
 	unavailable      map[string]bool
 }
 
@@ -59,6 +60,27 @@ func (s *searchState) setTracks(platformName string, tracks []platform.Track) {
 	copied := make([]platform.Track, len(tracks))
 	copy(copied, tracks)
 	s.tracksByPlatform[name] = copied
+}
+
+func (s *searchState) setHasMore(platformName string, hasMore bool) {
+	if s == nil {
+		return
+	}
+	name := strings.TrimSpace(platformName)
+	if name == "" {
+		return
+	}
+	if s.hasMoreByPlat == nil {
+		s.hasMoreByPlat = make(map[string]bool)
+	}
+	s.hasMoreByPlat[name] = hasMore
+}
+
+func (s *searchState) hasMore(platformName string) bool {
+	if s == nil || s.hasMoreByPlat == nil {
+		return false
+	}
+	return s.hasMoreByPlat[strings.TrimSpace(platformName)]
 }
 
 func (s *searchState) getTracks(platformName string) ([]platform.Track, bool) {
@@ -189,7 +211,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 	primaryPlatform := platformName
 
-	tracks, platformName, usedFallback, err := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.searchLimit, true)
+	tracks, platformName, usedFallback, err := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
 		errorText := userVisibleSearchError(err, "搜索服务暂时不可用")
@@ -261,7 +283,9 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	if strings.TrimSpace(qualityOverride) != "" {
 		qualityValue = qualityOverride
 	}
-	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable)
+	initialLimit := h.initialSearchLimit(platformName)
+	hasMore := len(tracks) >= initialLimit && initialLimit < searchLimit
+	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit)
 	textMessage.WriteString(pageText)
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -288,6 +312,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		unavailable: unavailable,
 	}
 	state.setTracks(platformName, tracks)
+	state.setHasMore(platformName, hasMore)
 	h.storeSearchState(msgResult.MessageID, state)
 }
 
@@ -391,12 +416,28 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	}
 	limit := state.limit
 	pageSize := h.Search.pageSize()
+	requiredLimit := page * pageSize
+	if requiredLimit < pageSize {
+		requiredLimit = pageSize
+	}
 	if limit <= 0 {
-		limit = page * pageSize
+		limit = requiredLimit
+	}
+	if requiredLimit > limit {
+		requiredLimit = limit
 	}
 	tracks, ok := state.getTracks(state.platform)
-	if !ok {
-		tracks, err = plat.Search(ctx, state.keyword, limit)
+	hasMore := state.hasMore(state.platform)
+	needFetch := !ok || len(tracks) < requiredLimit
+	if needFetch {
+		requestLimit := requiredLimit
+		if requestLimit < pageSize {
+			requestLimit = pageSize
+		}
+		if requestLimit > limit {
+			requestLimit = limit
+		}
+		tracks, err = plat.Search(ctx, state.keyword, requestLimit)
 		if err != nil {
 			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: "搜索失败，请稍后重试"}
 			if h.RateLimiter != nil {
@@ -419,10 +460,15 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 			return
 		}
 		state.setTracks(state.platform, tracks)
+		hasMore = len(tracks) >= requestLimit && requestLimit < limit
+		state.setHasMore(state.platform, hasMore)
+	}
+	if !needFetch {
+		hasMore = state.hasMore(state.platform)
 	}
 	manager := h.Search.PlatformManager
 	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
-	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable)
+	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit)
 	text := textHeader + pageText
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -451,6 +497,11 @@ func (h *SearchHandler) searchLimit(platformName string) int {
 		return neteaseSearchLimit
 	}
 	return defaultSearchLimit
+}
+
+func (h *SearchHandler) initialSearchLimit(platformName string) int {
+	_ = platformName
+	return h.pageSize()
 }
 
 func (h *SearchHandler) pageSize() int {
@@ -486,7 +537,7 @@ func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *tele
 	return qualityValue
 }
 
-func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool) (string, *telego.InlineKeyboardMarkup) {
+func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int) (string, *telego.InlineKeyboardMarkup) {
 	pageSize := h.pageSize()
 	if page < 1 {
 		page = 1
@@ -494,6 +545,18 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	pageCount := 1
 	if len(tracks) > 0 {
 		pageCount = (len(tracks)-1)/pageSize + 1
+	}
+	displayPageCount := pageCount
+	if hasMore {
+		if totalLimit <= 0 {
+			totalLimit = len(tracks)
+		}
+		if totalLimit > 0 {
+			limitPages := (totalLimit + pageSize - 1) / pageSize
+			if limitPages > displayPageCount {
+				displayPageCount = limitPages
+			}
+		}
 	}
 	if page > pageCount {
 		page = pageCount
@@ -510,8 +573,8 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	if strings.TrimSpace(keyword) != "" {
 		textMessage.WriteString(fmt.Sprintf("关键词: %s\n", mdV2Replacer.Replace(keyword)))
 	}
-	if pageCount > 1 {
-		textMessage.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, pageCount))
+	if pageCount > 1 || hasMore {
+		textMessage.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, displayPageCount))
 	} else {
 		textMessage.WriteString("\n")
 	}
@@ -545,13 +608,13 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	if len(buttons) > 0 {
 		rows = append(rows, buttons)
 	}
-	if pageCount > 1 {
+	if pageCount > 1 || hasMore {
 		navRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page == 1 {
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)})
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
-		} else if page == pageCount {
+		} else if page >= pageCount && !hasMore {
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
 			navRow = append(navRow, telego.InlineKeyboardButton{Text: "🏠 回到主页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)})
 			rows = append(rows, navRow)

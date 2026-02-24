@@ -1,7 +1,10 @@
 package bilibili
 
 import (
+	"net/url"
 	"regexp"
+	"strconv"
+	"strings"
 )
 
 // URLMatcher extracts track IDs from Bilibili URLs.
@@ -9,6 +12,7 @@ type URLMatcher struct {
 	audioPattern *regexp.Regexp
 	videoPattern *regexp.Regexp
 	b23Pattern   *regexp.Regexp
+	pPattern     *regexp.Regexp
 }
 
 // NewURLMatcher creates a new Bilibili URLMatcher.
@@ -22,6 +26,7 @@ func NewURLMatcher() *URLMatcher {
 
 		// Match pure b23.tv short links like b23.tv/F78kbY
 		b23Pattern: regexp.MustCompile(`(?i)b23\.tv/([a-zA-Z0-9]+)`),
+		pPattern:   regexp.MustCompile(`(?i)[?&]p=(\d+)`),
 	}
 }
 
@@ -29,7 +34,11 @@ func NewURLMatcher() *URLMatcher {
 func (m *URLMatcher) MatchURL(url string) (string, bool) {
 	// First check explicit video formats as they might be within short domains
 	if matches := m.videoPattern.FindStringSubmatch(url); len(matches) > 1 {
-		return matches[1], true
+		videoID := strings.TrimSpace(matches[1])
+		if page := m.extractPage(url); page > 1 {
+			return videoID + "_p" + strconv.Itoa(page), true
+		}
+		return videoID, true
 	}
 
 	if matches := m.audioPattern.FindStringSubmatch(url); len(matches) > 1 {
@@ -43,6 +52,25 @@ func (m *URLMatcher) MatchURL(url string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func (m *URLMatcher) extractPage(raw string) int {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err == nil && parsed != nil {
+		if value := strings.TrimSpace(parsed.Query().Get("p")); value != "" {
+			if parsedPage, parseErr := strconv.Atoi(value); parseErr == nil && parsedPage > 0 {
+				return parsedPage
+			}
+		}
+	}
+	if m != nil && m.pPattern != nil {
+		if matches := m.pPattern.FindStringSubmatch(raw); len(matches) > 1 {
+			if parsedPage, parseErr := strconv.Atoi(strings.TrimSpace(matches[1])); parseErr == nil && parsedPage > 0 {
+				return parsedPage
+			}
+		}
+	}
+	return 0
 }
 
 // Support Text Matching (e.g. "au123456" or "BV1GJ411x7h7" or "b23.tv/ysjTEMn")

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"sort"
@@ -89,11 +90,25 @@ func selectedBilibiliPage(videoInfo *VideoInfoData, requestedPage int) (page Vid
 // BilibiliPlatform implements the Platform interface for Bilibili Audio & Video.
 type BilibiliPlatform struct {
 	client *Client
+	mu     sync.Mutex
+	cache  map[string]*bilibiliSearchSession
+}
+
+type bilibiliSearchSession struct {
+	keyword          string
+	musicKeyword     string
+	results          []platform.Track
+	seen             map[string]struct{}
+	primaryNextPage  int
+	primaryDone      bool
+	fallbackNextPage int
+	fallbackDone     bool
+	updatedAt        time.Time
 }
 
 // NewPlatform creates a new BilibiliPlatform instance.
 func NewPlatform(client *Client) *BilibiliPlatform {
-	return &BilibiliPlatform{client: client}
+	return &BilibiliPlatform{client: client, cache: make(map[string]*bilibiliSearchSession)}
 }
 
 // Name returns the platform identifier.
@@ -627,14 +642,23 @@ func (b *BilibiliPlatform) ListEpisodes(ctx context.Context, trackID string) ([]
 		return nil, platform.NewNotFoundError("bilibili", "track", trackID)
 	}
 	videoURL := fmt.Sprintf("https://www.bilibili.com/video/%s", strings.TrimSpace(videoInfo.Bvid))
+	creatorURL := ""
+	if videoInfo.Owner.Mid > 0 {
+		creatorURL = fmt.Sprintf("https://space.bilibili.com/%d", videoInfo.Owner.Mid)
+	}
 	if len(videoInfo.Pages) == 0 {
 		duration := time.Duration(videoInfo.Duration) * time.Second
 		return []platform.Episode{{
-			Index:    1,
-			Title:    "P1",
-			TrackID:  buildBilibiliVideoTrackID(videoInfo.Bvid, 1),
-			URL:      videoURL,
-			Duration: duration,
+			Index:       1,
+			Title:       "P1",
+			TrackID:     buildBilibiliVideoTrackID(videoInfo.Bvid, 1),
+			URL:         fmt.Sprintf("%s?p=1", videoURL),
+			Duration:    duration,
+			VideoTitle:  strings.TrimSpace(videoInfo.Title),
+			VideoURL:    videoURL,
+			CreatorName: strings.TrimSpace(videoInfo.Owner.Name),
+			CreatorURL:  creatorURL,
+			Description: strings.TrimSpace(videoInfo.Desc),
 		}}, nil
 	}
 	episodes := make([]platform.Episode, 0, len(videoInfo.Pages))
@@ -647,20 +671,22 @@ func (b *BilibiliPlatform) ListEpisodes(ctx context.Context, trackID string) ([]
 		if title == "" {
 			title = fmt.Sprintf("P%d", number)
 		}
-		url := videoURL
-		if number > 1 {
-			url = fmt.Sprintf("%s?p=%d", videoURL, number)
-		}
+		url := fmt.Sprintf("%s?p=%d", videoURL, number)
 		d := 0 * time.Second
 		if page.Duration > 0 {
 			d = time.Duration(page.Duration) * time.Second
 		}
 		episodes = append(episodes, platform.Episode{
-			Index:    number,
-			Title:    title,
-			TrackID:  buildBilibiliVideoTrackID(videoInfo.Bvid, number),
-			URL:      url,
-			Duration: d,
+			Index:       number,
+			Title:       title,
+			TrackID:     buildBilibiliVideoTrackID(videoInfo.Bvid, number),
+			URL:         url,
+			Duration:    d,
+			VideoTitle:  strings.TrimSpace(videoInfo.Title),
+			VideoURL:    videoURL,
+			CreatorName: strings.TrimSpace(videoInfo.Owner.Name),
+			CreatorURL:  creatorURL,
+			Description: strings.TrimSpace(videoInfo.Desc),
 		})
 	}
 	return episodes, nil
@@ -861,48 +887,185 @@ func (b *BilibiliPlatform) Search(ctx context.Context, query string, limit int) 
 		limit = 10
 	}
 
-	results := make([]platform.Track, 0, limit)
-	seen := make(map[string]struct{}, limit)
-	collect := func(searchKeyword string) error {
-		for page := 1; page <= 5 && len(results) < limit; page++ {
-			items, err := b.client.SearchVideo(ctx, searchKeyword, page)
-			if err != nil {
-				if page == 1 {
-					return err
-				}
-				break
-			}
-			if len(items) == 0 {
-				break
-			}
-
-			for _, item := range items {
-				track, ok := b.searchItemToTrack(item)
-				if !ok {
-					continue
-				}
-				if _, exists := seen[track.ID]; exists {
-					continue
-				}
-				seen[track.ID] = struct{}{}
-				results = append(results, track)
-				if len(results) >= limit {
-					break
-				}
-			}
-		}
-		return nil
-	}
-
-	if err := collect(keyword); err != nil {
+	session := b.getOrCreateSearchSession(keyword)
+	if err := b.expandSession(ctx, session, limit); err != nil && len(session.results) == 0 {
 		return nil, err
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	session.updatedAt = time.Now()
+	if len(session.results) == 0 {
+		return []platform.Track{}, nil
+	}
+	if limit > len(session.results) {
+		limit = len(session.results)
+	}
+	results := make([]platform.Track, limit)
+	copy(results, session.results[:limit])
+	return results, nil
+}
 
-	if len(results) < 5 && !strings.Contains(strings.ToLower(keyword), "音乐") {
-		_ = collect(keyword + " 音乐")
+const (
+	bilibiliSearchMaxPagesPerPhase = 10
+	bilibiliSearchSessionTTL       = 10 * time.Minute
+	bilibiliSearchSessionMaxSize   = 256
+)
+
+func (b *BilibiliPlatform) getOrCreateSearchSession(keyword string) *bilibiliSearchSession {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cleanupSearchSessionsLocked()
+	if b.cache == nil {
+		b.cache = make(map[string]*bilibiliSearchSession)
+	}
+	if session, ok := b.cache[keyword]; ok && session != nil {
+		session.updatedAt = time.Now()
+		return session
+	}
+	session := &bilibiliSearchSession{
+		keyword:          keyword,
+		musicKeyword:     strings.TrimSpace(keyword + " 音乐"),
+		results:          make([]platform.Track, 0, 64),
+		seen:             make(map[string]struct{}, 128),
+		primaryNextPage:  1,
+		fallbackNextPage: 1,
+		fallbackDone:     strings.Contains(strings.ToLower(keyword), "音乐"),
+		updatedAt:        time.Now(),
+	}
+	b.cache[keyword] = session
+	return session
+}
+
+func (b *BilibiliPlatform) cleanupSearchSessionsLocked() {
+	if b.cache == nil {
+		return
+	}
+	cutoff := time.Now().Add(-bilibiliSearchSessionTTL)
+	for key, session := range b.cache {
+		if session == nil || session.updatedAt.Before(cutoff) {
+			delete(b.cache, key)
+		}
+	}
+	for len(b.cache) > bilibiliSearchSessionMaxSize {
+		var oldestKey string
+		oldestAt := time.Now()
+		first := true
+		for key, session := range b.cache {
+			updated := time.Time{}
+			if session != nil {
+				updated = session.updatedAt
+			}
+			if first || updated.Before(oldestAt) {
+				first = false
+				oldestKey = key
+				oldestAt = updated
+			}
+		}
+		delete(b.cache, oldestKey)
+	}
+}
+
+func (b *BilibiliPlatform) expandSession(ctx context.Context, session *bilibiliSearchSession, target int) error {
+	if session == nil {
+		return errors.New("nil bilibili search session")
+	}
+	if target <= 0 {
+		target = 1
+	}
+	b.mu.Lock()
+	if len(session.results) >= target || (session.primaryDone && session.fallbackDone) {
+		session.updatedAt = time.Now()
+		b.mu.Unlock()
+		return nil
+	}
+	b.mu.Unlock()
+
+	var firstErr error
+	for {
+		b.mu.Lock()
+		if len(session.results) >= target || (session.primaryDone && session.fallbackDone) {
+			session.updatedAt = time.Now()
+			b.mu.Unlock()
+			break
+		}
+		useFallback := session.primaryDone && !session.fallbackDone && !strings.Contains(strings.ToLower(session.keyword), "音乐")
+		phaseKeyword := session.keyword
+		page := session.primaryNextPage
+		if useFallback {
+			phaseKeyword = session.musicKeyword
+			page = session.fallbackNextPage
+		}
+		if page <= 0 {
+			page = 1
+		}
+		if page > bilibiliSearchMaxPagesPerPhase {
+			if useFallback {
+				session.fallbackDone = true
+			} else {
+				session.primaryDone = true
+			}
+			b.mu.Unlock()
+			continue
+		}
+		b.mu.Unlock()
+
+		items, err := b.client.SearchVideo(ctx, phaseKeyword, page)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			b.mu.Lock()
+			if useFallback {
+				session.fallbackDone = true
+			} else {
+				session.primaryDone = true
+			}
+			session.updatedAt = time.Now()
+			b.mu.Unlock()
+			continue
+		}
+
+		b.mu.Lock()
+		if len(items) == 0 {
+			if useFallback {
+				session.fallbackDone = true
+			} else {
+				session.primaryDone = true
+			}
+			session.updatedAt = time.Now()
+			b.mu.Unlock()
+			continue
+		}
+		for _, item := range items {
+			track, ok := b.searchItemToTrack(item)
+			if !ok {
+				continue
+			}
+			if _, exists := session.seen[track.ID]; exists {
+				continue
+			}
+			session.seen[track.ID] = struct{}{}
+			session.results = append(session.results, track)
+			if len(session.results) >= target {
+				break
+			}
+		}
+		if useFallback {
+			session.fallbackNextPage = page + 1
+			if session.fallbackNextPage > bilibiliSearchMaxPagesPerPhase {
+				session.fallbackDone = true
+			}
+		} else {
+			session.primaryNextPage = page + 1
+			if session.primaryNextPage > bilibiliSearchMaxPagesPerPhase {
+				session.primaryDone = true
+			}
+		}
+		session.updatedAt = time.Now()
+		b.mu.Unlock()
 	}
 
-	return results, nil
+	return firstErr
 }
 
 func (b *BilibiliPlatform) searchItemToTrack(item VideoSearchItem) (platform.Track, bool) {

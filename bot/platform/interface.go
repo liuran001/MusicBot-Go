@@ -131,11 +131,16 @@ type AutoParseDecider interface {
 // Episode represents a selectable sub-item for a playable resource
 // (e.g. B站多P中的某一P)。
 type Episode struct {
-	Index    int           `json:"index"`
-	Title    string        `json:"title"`
-	TrackID  string        `json:"track_id"`
-	URL      string        `json:"url,omitempty"`
-	Duration time.Duration `json:"duration,omitempty"`
+	Index       int           `json:"index"`
+	Title       string        `json:"title"`
+	TrackID     string        `json:"track_id"`
+	URL         string        `json:"url,omitempty"`
+	Duration    time.Duration `json:"duration,omitempty"`
+	VideoTitle  string        `json:"video_title,omitempty"`
+	VideoURL    string        `json:"video_url,omitempty"`
+	CreatorName string        `json:"creator_name,omitempty"`
+	CreatorURL  string        `json:"creator_url,omitempty"`
+	Description string        `json:"description,omitempty"`
 }
 
 // EpisodeProvider defines an optional interface for platforms that support
