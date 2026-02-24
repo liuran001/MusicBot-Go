@@ -68,8 +68,18 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 	if c.cookie == "" {
 		return
 	}
+	if !c.autoRenew.enabled {
+		if c.logger != nil {
+			c.logger.Debug("bilibili: auto refresh disabled by config")
+		}
+		return
+	}
 
-	ticker := time.NewTicker(6 * time.Hour)
+	interval := c.autoRenew.interval
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	ticker := time.NewTicker(interval)
 	go func() {
 		defer ticker.Stop()
 		for {
@@ -92,6 +102,17 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 			c.logger.Error("bilibili: initial check cookie failed", "err", err)
 		}
 	}()
+}
+
+// ManualRenew executes cookie refresh immediately and returns a human readable result.
+func (c *Client) ManualRenew(ctx context.Context) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("bilibili client unavailable")
+	}
+	if err := c.CheckAndRefreshCookie(ctx); err != nil {
+		return "", err
+	}
+	return "B站 Cookie 续期完成（如无需刷新会跳过）", nil
 }
 
 // CheckAndRefreshCookie checks if the cookie needs refreshing, and does so if necessary.
@@ -287,7 +308,14 @@ func (c *Client) mergeCookies(oldCookie string, newCookies []*http.Cookie, newAc
 
 // saveCookieToConfig saves the updated cookie and refresh token back to the user's config.ini preserving structure
 func (c *Client) saveCookieToConfig(cookieStr string, refreshTokenStr string) error {
-	cfg, err := ini.Load("config.ini")
+	if !c.autoRenew.persist {
+		return nil
+	}
+	path := strings.TrimSpace(c.autoRenew.path)
+	if path == "" {
+		path = "config.ini"
+	}
+	cfg, err := ini.Load(path)
 	if err != nil {
 		return err
 	}
@@ -309,5 +337,5 @@ func (c *Client) saveCookieToConfig(cookieStr string, refreshTokenStr string) er
 		sec.Key("refresh_token").SetValue(refreshTokenStr)
 	}
 
-	return cfg.SaveTo("config.ini")
+	return cfg.SaveTo(path)
 }

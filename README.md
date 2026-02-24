@@ -3,8 +3,9 @@
 一个支持多平台音乐下载/分享的 Telegram Bot。
 
 **当前支持平台**:
-- 网易云音乐 (NetEase Cloud Music)
-- QQ音乐 (QQ Music)
+- 网易云音乐
+- QQ音乐
+- 哔哩哔哩
 
 > **原始项目**: [XiaoMengXinX/Music163bot-Go](https://github.com/XiaoMengXinX/Music163bot-Go)  
 > 本项目基于原项目进行了重构，采用插件化架构以支持多音乐平台。
@@ -157,9 +158,9 @@ go build -o MusicBot-Go
 想要为新的音乐平台开发插件? 可选两种方式：
 
 1) 静态插件（需要重新编译）
-- 参考 `plugins/netease` 的实现方式
+- 参阅 `plugins/README.md`
 
-2) 动态脚本插件（无需重新编译）
+1) 动态脚本插件（无需重新编译）
 - 将插件源码放在 `plugins/scripts/<name>`
 - 在 `config.ini` 添加 `[plugins.<name>]` 配置
 - 可通过 `PluginScriptDir` 修改脚本目录（默认 `./plugins/scripts`）

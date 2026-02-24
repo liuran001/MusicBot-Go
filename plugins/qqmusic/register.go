@@ -1,11 +1,9 @@
 package qqmusic
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	platformplugins "github.com/liuran001/MusicBot-Go/bot/platform/plugins"
@@ -32,22 +30,12 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	if intervalSec > 0 {
 		interval = time.Duration(intervalSec) * time.Second
 	}
-	autoRenewPersist := cfg.GetPluginBool("qqmusic", "auto_renew_persist_enabled")
+	autoRenewPersist := true
+	if raw := cfg.GetPluginString("qqmusic", "auto_renew_persist_enabled"); raw != "" {
+		autoRenewPersist = cfg.GetPluginBool("qqmusic", "auto_renew_persist_enabled")
+	}
 	autoRenewPersistPath := cfg.GetPluginString("qqmusic", "auto_renew_persist_path")
 	client := NewClient(cookie, time.Duration(timeoutSec)*time.Second, logger, autoRenewEnabled, interval, autoRenewPersist, autoRenewPersistPath)
 	platform := NewPlatform(client)
-	commands := []admincmd.Command{
-		{
-			Name:        "qqmusic_renew",
-			Description: "QQ音乐手动续期 Cookie",
-			Handler: func(ctx context.Context, args string) (string, error) {
-				_, err := platform.ManualRenew(ctx)
-				if err != nil {
-					return "", err
-				}
-				return "QQ音乐 Cookie 续期成功", nil
-			},
-		},
-	}
-	return &platformplugins.Contribution{Platform: platform, Commands: commands}, nil
+	return &platformplugins.Contribution{Platform: platform}, nil
 }

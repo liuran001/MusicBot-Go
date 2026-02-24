@@ -182,6 +182,13 @@ func (b *BilibiliPlatform) CheckCookie(ctx context.Context) (platform.CookieChec
 	return platform.CookieCheckResult{OK: true, Message: fmt.Sprintf("音轨 id=%d 可用: %.2fMB", targetAudioID, float64(size)/1024/1024)}, nil
 }
 
+func (b *BilibiliPlatform) ManualRenew(ctx context.Context) (string, error) {
+	if b == nil || b.client == nil {
+		return "", fmt.Errorf("bilibili client unavailable")
+	}
+	return b.client.ManualRenew(ctx)
+}
+
 func (b *BilibiliPlatform) Capabilities() platform.Capabilities {
 	return platform.Capabilities{
 		Download:    true,

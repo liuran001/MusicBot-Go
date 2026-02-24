@@ -29,6 +29,14 @@ type Client struct {
 	cookie       string
 	refreshToken string
 	cookieMutex  sync.RWMutex
+	autoRenew    bilibiliAutoRenewConfig
+}
+
+type bilibiliAutoRenewConfig struct {
+	enabled  bool
+	interval time.Duration
+	persist  bool
+	path     string
 }
 
 // AudioSongInfoRequestParams for requesting Audio song info
@@ -204,7 +212,7 @@ type SubtitleBodyResponse struct {
 }
 
 // New returns an instance of Bilibili client.
-func New(logger bot.Logger, cookie string, refreshToken string) *Client {
+func New(logger bot.Logger, cookie string, refreshToken string, autoRenewEnabled bool, autoRenewInterval time.Duration, autoRenewPersist bool, autoRenewPersistPath string) *Client {
 	c := &Client{
 		httpClient:   retryablehttp.NewClient(),
 		maxRetries:   3,
@@ -213,6 +221,12 @@ func New(logger bot.Logger, cookie string, refreshToken string) *Client {
 		logger:       logger,
 		cookie:       cookie,
 		refreshToken: refreshToken,
+		autoRenew: bilibiliAutoRenewConfig{
+			enabled:  autoRenewEnabled,
+			interval: autoRenewInterval,
+			persist:  autoRenewPersist,
+			path:     strings.TrimSpace(autoRenewPersistPath),
+		},
 	}
 
 	c.httpClient.RetryMax = c.maxRetries
