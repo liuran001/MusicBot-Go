@@ -56,7 +56,10 @@ func (q *QQMusicPlatform) ManualRenew(ctx context.Context) (string, error) {
 	if q == nil || q.client == nil {
 		return "", fmt.Errorf("qqmusic client unavailable")
 	}
-	return q.client.ManualRenew(ctx)
+	if _, err := q.client.ManualRenew(ctx); err != nil {
+		return "", err
+	}
+	return "续期成功", nil
 }
 
 func (q *QQMusicPlatform) Capabilities() platform.Capabilities {

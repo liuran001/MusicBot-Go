@@ -232,7 +232,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		adminHelp := h.AdminCommands
 		if isAdmin {
 			adminHelp = append([]admincmd.Command{
-				{Name: "reload", Description: "重载动态插件"},
+				{Name: "reload", Description: "重载配置与插件"},
 				{Name: "rmcache", Description: "清除缓存（/rmcache <平台>|all）"},
 			}, adminHelp...)
 		}
