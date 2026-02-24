@@ -257,6 +257,10 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || chosen == nil {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(platformName), "bilibili") && strings.HasPrefix(strings.TrimSpace(collectionID), "ep:") {
+		h.handleChosenEpisodeCollection(ctx, b, chosen, platformName, strings.TrimPrefix(strings.TrimSpace(collectionID), "ep:"), qualityValue)
+		return
+	}
 	plat := h.Music.PlatformManager.Get(platformName)
 	if plat == nil {
 		return
@@ -319,6 +323,44 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		ReplyMarkup:        markup,
 		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageText(ctx, params)
+	}
+}
+
+func (h *ChosenInlineMusicHandler) handleChosenEpisodeCollection(ctx context.Context, b *telego.Bot, chosen *telego.ChosenInlineResult, platformName, baseTrackID, qualityValue string) {
+	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || chosen == nil {
+		return
+	}
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	if baseTrackID == "" {
+		return
+	}
+	plat := h.Music.PlatformManager.Get(strings.TrimSpace(platformName))
+	if plat == nil {
+		return
+	}
+	provider, ok := plat.(platform.EpisodeProvider)
+	if !ok {
+		return
+	}
+	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
+	if err != nil || len(episodes) == 0 {
+		params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: noResults}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
+		return
+	}
+	text, keyboard := buildInlineEpisodePickerPage(platformName, baseTrackID, qualityValue, chosen.From.ID, episodes, 1)
+	if strings.TrimSpace(text) == "" || keyboard == nil {
+		return
+	}
+	params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: text, ParseMode: telego.ModeMarkdownV2, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}, ReplyMarkup: keyboard}
 	if h.RateLimiter != nil {
 		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 	} else {

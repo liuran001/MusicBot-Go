@@ -65,7 +65,7 @@ func (h *InlineSearchHandler) Handle(ctx context.Context, b *telego.Bot, update 
 			return
 		}
 		if platformName, trackID, matched := h.tryResolveDirectTrack(ctx, baseText, platformSuffix); matched {
-			h.inlineCachedOrCommand(ctx, b, query, platformName, trackID, qualityOverride)
+			h.inlineCachedOrCommand(ctx, b, query, platformName, trackID, qualityOverride, requestedPage, baseText)
 			return
 		}
 		h.inlineSearch(ctx, b, query, baseText, platformSuffix, qualityOverride, requestedPage, invalidPageFallbackKeyword)
@@ -779,7 +779,7 @@ func qualityDisplayName(quality string) string {
 	}
 }
 
-func (h *InlineSearchHandler) inlineCachedOrCommand(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, platformName, trackID, qualityOverride string) bool {
+func (h *InlineSearchHandler) inlineCachedOrCommand(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, platformName, trackID, qualityOverride string, requestedPage int, originalQuery string) bool {
 	if strings.TrimSpace(platformName) == "" || strings.TrimSpace(trackID) == "" {
 		return false
 	}
@@ -787,11 +787,118 @@ func (h *InlineSearchHandler) inlineCachedOrCommand(ctx context.Context, b *tele
 	if strings.TrimSpace(qualityOverride) != "" {
 		qualityValue = strings.TrimSpace(qualityOverride)
 	}
+	if h.tryInlineDirectBilibiliEpisodes(ctx, b, query, platformName, trackID, qualityValue, requestedPage, originalQuery) {
+		return true
+	}
 	if info := h.findCachedSong(ctx, platformName, trackID, qualityValue); info != nil {
 		h.inlineCached(ctx, b, query, info, platformName, qualityValue)
 		return true
 	}
 	h.inlineCommand(ctx, b, query, platformName, trackID, qualityOverride)
+	return true
+}
+
+func (h *InlineSearchHandler) tryInlineDirectBilibiliEpisodes(ctx context.Context, b *telego.Bot, query *telego.InlineQuery, platformName, trackID, qualityValue string, requestedPage int, originalQuery string) bool {
+	if h == nil || b == nil || query == nil || h.PlatformManager == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+		return false
+	}
+	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
+	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
+		return false
+	}
+	plat := h.PlatformManager.Get("bilibili")
+	if plat == nil {
+		return false
+	}
+	provider, ok := plat.(platform.EpisodeProvider)
+	if !ok {
+		return false
+	}
+	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
+	if err != nil || len(episodes) <= 1 {
+		return false
+	}
+
+	pageSize := h.inlinePageSize()
+	if pageSize <= 0 {
+		pageSize = 30
+	}
+	pageCount := (len(episodes)-1)/pageSize + 1
+	page := requestedPage
+	if page <= 0 || page > pageCount {
+		page = 1
+	}
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if end > len(episodes) {
+		end = len(episodes)
+	}
+
+	results := make([]telego.InlineQueryResult, 0, (end-start)+2)
+	first := episodes[0]
+	headerTitle := strings.TrimSpace(first.VideoTitle)
+	if headerTitle == "" {
+		headerTitle = strings.TrimSpace(first.Title)
+	}
+	headerDesc := strings.TrimSpace(first.CreatorName)
+	if headerDesc == "" {
+		headerDesc = "点击下方分P发送"
+	}
+	results = append(results, &telego.InlineQueryResultArticle{
+		Type:                telego.ResultTypeArticle,
+		ID:                  buildInlineCollectionResultID("bilibili", "ep:"+baseTrackID, qualityValue),
+		Title:               fallbackString(headerTitle, baseTrackID),
+		Description:         headerDesc,
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: "正在获取选集..."},
+		ReplyMarkup: func() *telego.InlineKeyboardMarkup {
+			if cb := buildInlineEpisodeShowCallbackData("bilibili", baseTrackID, qualityValue, query.From.ID, 1); cb != "" {
+				return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
+					{Text: inlineTapToSend, CallbackData: cb},
+				}}}
+			}
+			return nil
+		}(),
+	})
+
+	for i := start; i < end; i++ {
+		ep := episodes[i]
+		displayIndex := ep.Index
+		title := strings.TrimSpace(ep.Title)
+		if title == "" {
+			title = fmt.Sprintf("P%d", ep.Index)
+		}
+		results = append(results, &telego.InlineQueryResultArticle{
+			Type:                telego.ResultTypeArticle,
+			ID:                  buildInlinePendingResultID("bilibili", ep.TrackID, qualityValue),
+			Title:               fmt.Sprintf("%d. %s", displayIndex, title),
+			Description:         strings.TrimSpace(first.CreatorName),
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+			ReplyMarkup:         buildInlineSendKeyboard("bilibili", ep.TrackID, qualityValue, query.From.ID),
+		})
+	}
+
+	if pageCount > 1 {
+		hintQuery := strings.TrimSpace(originalQuery)
+		if hintQuery == "" {
+			hintQuery = strings.TrimSpace(baseTrackID)
+		}
+		hintQuery = fmt.Sprintf("%s %d", hintQuery, page+1)
+		title := fmt.Sprintf("第 %d 页 / 共 %d 页", page, pageCount)
+		desc := fmt.Sprintf("在链接后加数字翻页，如：%s", hintQuery)
+		results = append(results, &telego.InlineQueryResultArticle{
+			Type:                telego.ResultTypeArticle,
+			ID:                  inlineStableID("bili_ep_page", fmt.Sprintf("%s|%d|%d", baseTrackID, page, pageCount)),
+			Title:               title,
+			Description:         desc,
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: desc},
+		})
+	}
+
+	results = append(results, buildInlineSearchHeader(h, "bilibili", qualityValue))
+	_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{InlineQueryID: query.ID, IsPersonal: true, CacheTime: 1, Results: results})
 	return true
 }
 
