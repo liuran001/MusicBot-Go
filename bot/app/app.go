@@ -413,7 +413,7 @@ func (a *App) Start(ctx context.Context) error {
 		Commands:    adminCommands,
 	}
 	searchCallback := &handler.SearchCallbackHandler{Search: searchHandler, RateLimiter: rateLimiter}
-	reloadHandler := &handler.ReloadHandler{Reload: a.ReloadDynamicPlugins, RateLimiter: rateLimiter, Logger: a.Logger, AdminIDs: a.AdminIDs}
+	reloadHandler := &handler.ReloadHandler{Reload: a.ReloadAll, RateLimiter: rateLimiter, Logger: a.Logger, AdminIDs: a.AdminIDs}
 
 	enableRecognize := a.Config.GetBool("EnableRecognize")
 
@@ -550,11 +550,8 @@ func BuildWhitelistCommand(wl *handler.Whitelist) admincmd.Command {
 	}
 }
 
-// ReloadDynamicPlugins reloads script-based plugins from disk.
-func (a *App) ReloadDynamicPlugins(ctx context.Context) error {
-	if a.DynPlugins == nil {
-		return fmt.Errorf("dynamic plugins not configured")
-	}
+// ReloadAll reloads config and reinitializes all platform plugins at runtime.
+func (a *App) ReloadAll(ctx context.Context) error {
 	if strings.TrimSpace(a.ConfigPath) == "" {
 		return fmt.Errorf("config path missing")
 	}
@@ -564,7 +561,77 @@ func (a *App) ReloadDynamicPlugins(ctx context.Context) error {
 	}
 	a.Config = conf
 	refreshAdminIDs(a.AdminIDs, conf.GetString("BotAdmin"))
-	return a.DynPlugins.Reload(ctx, conf, a.PlatformManager)
+
+	if dm, ok := a.PlatformManager.(*platform.DefaultManager); ok {
+		dm.Reset()
+	} else {
+		return fmt.Errorf("platform manager does not support reset")
+	}
+
+	dynManager := a.DynPlugins
+	if dynManager == nil {
+		dynManager = dynplugin.NewManager(a.Logger)
+		a.DynPlugins = dynManager
+	}
+	pluginTagProviders := make(map[string]id3.ID3TagProvider)
+	adminCommands := make([]admincmd.Command, 0)
+	pluginSettingDefinitions := make([]botpkg.PluginSettingDefinition, 0)
+	var recognizeService recognize.Service
+
+	pluginNames := conf.PluginNames()
+	if len(pluginNames) == 0 {
+		pluginNames = platformplugins.Names()
+	}
+	for _, name := range pluginNames {
+		enabled := true
+		if pluginCfg, ok := conf.GetPluginConfig(name); ok {
+			if _, hasKey := pluginCfg["enabled"]; hasKey {
+				enabled = conf.GetPluginBool(name, "enabled")
+			}
+		}
+		if !enabled {
+			if a.Logger != nil {
+				a.Logger.Info("plugin disabled by config", "plugin", name)
+			}
+			continue
+		}
+		factory, ok := platformplugins.Get(name)
+		if !ok {
+			continue
+		}
+		contrib, err := factory(conf, a.Logger)
+		if err != nil {
+			if a.Logger != nil {
+				a.Logger.Error("plugin init failed", "plugin", name, "error", err)
+			}
+			continue
+		}
+		registerContribution(a.PlatformManager, pluginTagProviders, &recognizeService, &adminCommands, &pluginSettingDefinitions, contrib, a.Logger)
+	}
+
+	if err := dynManager.Reload(ctx, conf, a.PlatformManager); err != nil {
+		if a.Logger != nil {
+			a.Logger.Warn("dynamic plugin reload failed", "error", err)
+		}
+	}
+	a.TagProviders = pluginTagProviders
+	a.AdminCommands = adminCommands
+	a.PluginSettingDefinitions = pluginSettingDefinitions
+	if recognizeService != nil {
+		if a.RecognizeService != nil {
+			_ = a.RecognizeService.Stop()
+		}
+		a.RecognizeService = recognizeService
+		if err := a.RecognizeService.Start(ctx); err != nil && a.Logger != nil {
+			a.Logger.Warn("failed to start recognition service after reload", "error", err)
+		}
+	}
+	return nil
+}
+
+// ReloadDynamicPlugins reloads script-based plugins from disk.
+func (a *App) ReloadDynamicPlugins(ctx context.Context) error {
+	return a.ReloadAll(ctx)
 }
 
 func parseAdminIDs(raw string) map[int64]struct{} {
