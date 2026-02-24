@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -30,6 +32,51 @@ type parsedMusicCallback struct {
 }
 
 const episodePageSize = 8
+
+var episodeSearchBackStore = struct {
+	mu   sync.Mutex
+	data map[string]string
+}{data: make(map[string]string)}
+
+var searchPagePattern = regexp.MustCompile(`第\s*(\d+)\s*/\s*(\d+)\s*页`)
+
+func episodeBackKey(chatID int64, messageID int) string {
+	return fmt.Sprintf("%d:%d", chatID, messageID)
+}
+
+func setEpisodeSearchBackCallback(chatID int64, messageID int, callbackData string) {
+	key := episodeBackKey(chatID, messageID)
+	episodeSearchBackStore.mu.Lock()
+	defer episodeSearchBackStore.mu.Unlock()
+	if strings.TrimSpace(callbackData) == "" {
+		delete(episodeSearchBackStore.data, key)
+		return
+	}
+	episodeSearchBackStore.data[key] = callbackData
+}
+
+func getEpisodeSearchBackCallback(chatID int64, messageID int) string {
+	key := episodeBackKey(chatID, messageID)
+	episodeSearchBackStore.mu.Lock()
+	defer episodeSearchBackStore.mu.Unlock()
+	return episodeSearchBackStore.data[key]
+}
+
+func extractSearchCurrentPage(text string) (int, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || !strings.Contains(trimmed, "搜索结果") {
+		return 0, false
+	}
+	matches := searchPagePattern.FindStringSubmatch(trimmed)
+	if len(matches) < 2 {
+		return 0, false
+	}
+	page, err := strconv.Atoi(strings.TrimSpace(matches[1]))
+	if err != nil || page <= 0 {
+		return 0, false
+	}
+	return page, true
+}
 
 func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.CallbackQuery == nil {
@@ -246,7 +293,9 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	if reqID == 0 {
 		reqID = operatorID
 	}
-	text, keyboard := buildEpisodePickerPage("bilibili", baseTrackID, qualityOverride, reqID, episodes, 1)
+	backCallback := fmt.Sprintf("search %d home %d", listMsg.MessageID, reqID)
+	setEpisodeSearchBackCallback(listMsg.Chat.ID, listMsg.MessageID, backCallback)
+	text, keyboard := buildEpisodePickerPage("bilibili", baseTrackID, qualityOverride, reqID, episodes, 1, backCallback)
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false
 	}
@@ -281,7 +330,7 @@ func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, platformName, 
 	return provider.ListEpisodes(ctx, strings.TrimSpace(trackID))
 }
 
-func buildEpisodePickerPage(platformName, trackID, qualityValue string, requesterID int64, episodes []platform.Episode, page int) (string, *telego.InlineKeyboardMarkup) {
+func buildEpisodePickerPage(platformName, trackID, qualityValue string, requesterID int64, episodes []platform.Episode, page int, backCallback string) (string, *telego.InlineKeyboardMarkup) {
 	if len(episodes) == 0 {
 		return "", nil
 	}
@@ -368,7 +417,12 @@ func buildEpisodePickerPage(platformName, trackID, qualityValue string, requeste
 		return "", nil
 	}
 	if closeCB := buildEpisodeCloseCallbackData(platformName, trackID, qualityValue, requesterID); closeCB != "" {
-		rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: closeCB}})
+		bottom := make([]telego.InlineKeyboardButton, 0, 2)
+		if strings.TrimSpace(backCallback) != "" {
+			bottom = append(bottom, telego.InlineKeyboardButton{Text: "↩️ 返回搜索结果", CallbackData: backCallback})
+		}
+		bottom = append(bottom, telego.InlineKeyboardButton{Text: "❌ 关闭", CallbackData: closeCB})
+		rows = append(rows, bottom)
 	}
 	return strings.Join(textLines, "\n"), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -513,7 +567,8 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "选集加载失败", ShowAlert: true})
 			return
 		}
-		text, keyboard := buildEpisodePickerPage(platformName, trackID, qualityValue, requesterID, episodes, page)
+		backCallback := getEpisodeSearchBackCallback(msg.Chat.ID, msg.MessageID)
+		text, keyboard := buildEpisodePickerPage(platformName, trackID, qualityValue, requesterID, episodes, page, backCallback)
 		if text == "" || keyboard == nil {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "选集加载失败", ShowAlert: true})
 			return

@@ -407,7 +407,8 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	if page < 1 {
 		page = 1
 	}
-	if action != "platform" && state.currentPage == page {
+	isSearchPageMessage := strings.Contains(strings.TrimSpace(msg.Text), "搜索结果")
+	if action != "platform" && state.currentPage == page && isSearchPageMessage {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", page)})
 		return
 	}
