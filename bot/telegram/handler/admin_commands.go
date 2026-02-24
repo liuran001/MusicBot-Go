@@ -86,8 +86,8 @@ func BuildCheckCookieCommand(manager platform.Manager) admincmd.Command {
 
 func BuildCookieRenewCommand(manager platform.Manager) admincmd.Command {
 	return admincmd.Command{
-		Name:        "ckrenew",
-		Description: "手动续期 Cookie（/ckrenew <platform>，留空续全部）",
+		Name:        "renewck",
+		Description: "手动续期 Cookie（/renewck <platform>，留空续全部）",
 		Handler: func(ctx context.Context, args string) (string, error) {
 			return renewCookies(ctx, manager, args)
 		},
