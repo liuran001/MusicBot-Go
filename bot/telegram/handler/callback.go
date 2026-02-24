@@ -585,7 +585,7 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 		if msg.ReplyToMessage != nil {
 			msgToUse = msg.ReplyToMessage
 		}
-		selectedTrackID := buildBilibiliVideoTrackID(trackID, page)
+		selectedTrackID := buildExplicitBilibiliVideoTrackID(trackID, page)
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
 		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, selectedTrackID, qualityValue)
@@ -679,7 +679,7 @@ func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, 
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 	case "p":
-		selectedTrackID := buildBilibiliVideoTrackID(trackID, page)
+		selectedTrackID := buildExplicitBilibiliVideoTrackID(trackID, page)
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, selectedTrackID, qualityValue)
 	default:

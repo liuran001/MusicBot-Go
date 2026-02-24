@@ -765,6 +765,17 @@ func buildBilibiliVideoTrackID(baseID string, page int) string {
 	return fmt.Sprintf("%s_p%d", baseID, page)
 }
 
+func buildExplicitBilibiliVideoTrackID(baseID string, page int) string {
+	baseID = strings.TrimSpace(baseID)
+	if baseID == "" {
+		return ""
+	}
+	if page <= 0 {
+		page = 1
+	}
+	return fmt.Sprintf("%s_p%d", baseID, page)
+}
+
 func buildInlineEpisodeShowCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
 	return buildInlineEpisodeCallbackData("s", platformName, trackID, qualityValue, requesterID, page)
 }
