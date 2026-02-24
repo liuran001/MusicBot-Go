@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/config"
@@ -24,8 +25,19 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 
 	cookie := strings.Trim(cfg.GetPluginString("bilibili", "cookie"), "`\"'")
 	refreshToken := strings.Trim(cfg.GetPluginString("bilibili", "refresh_token"), "`\"'")
+	autoRenewEnabled := cfg.GetPluginBool("bilibili", "auto_renew_enabled")
+	intervalSec := cfg.GetPluginInt("bilibili", "auto_renew_interval_sec")
+	var interval time.Duration
+	if intervalSec > 0 {
+		interval = time.Duration(intervalSec) * time.Second
+	}
+	autoRenewPersist := true
+	if raw := cfg.GetPluginString("bilibili", "auto_renew_persist_enabled"); raw != "" {
+		autoRenewPersist = cfg.GetPluginBool("bilibili", "auto_renew_persist_enabled")
+	}
+	autoRenewPersistPath := cfg.GetPluginString("bilibili", "auto_renew_persist_path")
 
-	client := New(logger, cookie, refreshToken)
+	client := New(logger, cookie, refreshToken, autoRenewEnabled, interval, autoRenewPersist, autoRenewPersistPath)
 	client.StartAutoRefreshDaemon(context.Background())
 	platform := NewPlatform(client)
 

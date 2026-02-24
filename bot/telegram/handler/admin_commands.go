@@ -84,6 +84,16 @@ func BuildCheckCookieCommand(manager platform.Manager) admincmd.Command {
 	}
 }
 
+func BuildCookieRenewCommand(manager platform.Manager) admincmd.Command {
+	return admincmd.Command{
+		Name:        "ckrenew",
+		Description: "手动续期 Cookie（/ckrenew <platform>，留空续全部）",
+		Handler: func(ctx context.Context, args string) (string, error) {
+			return renewCookies(ctx, manager, args)
+		},
+	}
+}
+
 func checkCookies(ctx context.Context, manager platform.Manager, args string) (string, error) {
 	if manager == nil {
 		return "平台管理器未初始化", nil
@@ -122,6 +132,47 @@ func checkCookies(ctx context.Context, manager platform.Manager, args string) (s
 	return strings.Join(lines, "\n"), nil
 }
 
+func renewCookies(ctx context.Context, manager platform.Manager, args string) (string, error) {
+	if manager == nil {
+		return "平台管理器未初始化", nil
+	}
+	args = strings.TrimSpace(args)
+	if args != "" {
+		platformName := resolveCookiePlatform(manager, args)
+		if platformName == "" {
+			return fmt.Sprintf("未识别的平台: %s", args), nil
+		}
+		line, err := renewCookieForPlatform(ctx, manager, platformName)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(line) == "" {
+			return fmt.Sprintf("%s 不支持 Cookie 续期", platformName), nil
+		}
+		return line, nil
+	}
+
+	names := manager.List()
+	if len(names) == 0 {
+		return "没有可用的平台", nil
+	}
+	sort.Strings(names)
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		line, err := renewCookieForPlatform(ctx, manager, name)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return "没有支持 Cookie 续期的平台", nil
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
 func resolveCookiePlatform(manager platform.Manager, raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || manager == nil {
@@ -155,4 +206,24 @@ func checkCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 		message = "未知"
 	}
 	return fmt.Sprintf("%s %s: %s", status, platformName, message), nil
+}
+
+func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platformName string) (string, error) {
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return "", nil
+	}
+	renewer, ok := plat.(platform.CookieRenewer)
+	if !ok {
+		return "", nil
+	}
+	message, err := renewer.ManualRenew(ctx)
+	if err != nil {
+		return "", err
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "续期完成"
+	}
+	return fmt.Sprintf("✅ %s: %s", platformName, message), nil
 }
