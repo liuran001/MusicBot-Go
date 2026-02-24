@@ -24,6 +24,27 @@ MusicBot-Go 使用基于接口的插件系统，允许轻松扩展对不同音�
 
 对于不支持的功能，方法应返回 `platform.ErrUnsupported`。
 
+### 插件独立设置（推荐）
+
+主项目现在提供了**通用插件设置接口**，插件可以独立定义自己的设置项，不需要在主项目里为每个插件单独加数据库字段。
+
+- 插件在 `register.go` 通过 `Contribution.SettingDefinitions` 注册设置定义。
+- 设置值统一存储在数据库 `plugin_settings` 表（按作用域 user/group 隔离）。
+- `/settings` 面板会自动渲染这些设置项。
+
+可用类型定义见：`bot/plugin_settings.go`
+
+- `PluginSettingDefinition`
+- `PluginSettingOption`
+- `PluginScopeUser` / `PluginScopeGroup`
+
+仓储接口见：`bot/interfaces.go`
+
+- `GetPluginSetting(...)`
+- `SetPluginSetting(...)`
+
+> 设计建议：插件“行为开关/模式”优先走插件设置，不要再向 `UserSettings/GroupSettings` 增加平台专用字段。
+
 ---
 
 ## 快速开始
@@ -153,6 +174,22 @@ func (p *SpotifyPlatform) GetPlaylist(ctx context.Context, playlistID string) (*
 #### 可选接口
 - `URLMatcher`: 解析平台 URL。
 - `TextMatcher`: 解析短链/纯 ID 文本（例如分享短链）。
+- `AutoParseDecider`: 插件自定义“是否允许自动解析”。
+
+`AutoParseDecider` 定义见 `bot/platform/interface.go`：
+
+```go
+type AutoParseDecider interface {
+    AutoParseSettingKey() string
+    ShouldAutoParse(ctx context.Context, trackID string, mode string) (bool, error)
+}
+```
+
+典型用法：
+
+1. 在插件里定义设置项（如 `parse_mode=on/off/...`）并注册。
+2. 在平台实现 `AutoParseDecider`，根据 `mode` + 平台元数据判定是否自动解析。
+3. 主项目会在自动解析链路里统一调用该接口。
 
 ---
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestWithRetryStopsOnSuccess(t *testing.T) {
-	client := New("", nil)
+	client := New("", true, nil)
 	client.maxRetries = 2
 	client.minBackoff = time.Millisecond
 	client.maxBackoff = time.Millisecond
@@ -30,7 +30,7 @@ func TestWithRetryStopsOnSuccess(t *testing.T) {
 }
 
 func TestWithRetryRespectsContext(t *testing.T) {
-	client := New("", nil)
+	client := New("", true, nil)
 	client.maxRetries = 5
 	client.minBackoff = time.Millisecond
 	client.maxBackoff = time.Millisecond

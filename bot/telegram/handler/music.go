@@ -100,6 +100,7 @@ type MusicHandler struct {
 	DownloadQueueWaitLimit int
 
 	EnableQueueObservability bool
+	PluginSettingDefinitions []botpkg.PluginSettingDefinition
 }
 
 type downloadQueueEntry struct {
@@ -201,11 +202,12 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		args := commandArguments(message.Text)
 		if strings.TrimSpace(args) == "settings" {
 			settingsHandler := &SettingsHandler{
-				Repo:            h.Repo,
-				PlatformManager: h.PlatformManager,
-				RateLimiter:     h.RateLimiter,
-				DefaultPlatform: h.DefaultPlatform,
-				DefaultQuality:  h.DefaultQuality,
+				Repo:                     h.Repo,
+				PlatformManager:          h.PlatformManager,
+				RateLimiter:              h.RateLimiter,
+				DefaultPlatform:          h.DefaultPlatform,
+				DefaultQuality:           h.DefaultQuality,
+				PluginSettingDefinitions: h.PluginSettingDefinitions,
 			}
 			settingsHandler.Handle(ctx, b, update)
 			return
@@ -336,9 +338,75 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	if !isAutoLinkDetectEnabled(ctx, h.Repo, message) {
 		return
 	}
+	if !h.isPlatformAutoParseAllowed(ctx, message, platformName, trackID) {
+		return
+	}
 	qualityOverride := extractQualityOverride(message, h.PlatformManager)
 
 	h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
+}
+
+func (h *MusicHandler) isPlatformAutoParseAllowed(ctx context.Context, message *telego.Message, platformName, trackID string) bool {
+	if h == nil || h.PlatformManager == nil {
+		return true
+	}
+	platformName = strings.TrimSpace(platformName)
+	if platformName == "" {
+		return true
+	}
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil {
+		return true
+	}
+	decider, ok := plat.(platform.AutoParseDecider)
+	if !ok {
+		return true
+	}
+	settingKey := strings.TrimSpace(decider.AutoParseSettingKey())
+	if settingKey == "" {
+		return true
+	}
+
+	scopeType := botpkg.PluginScopeUser
+	scopeID := int64(0)
+	if message != nil && message.Chat.Type != "private" {
+		scopeType = botpkg.PluginScopeGroup
+		scopeID = message.Chat.ID
+	} else if message != nil && message.From != nil {
+		scopeID = message.From.ID
+	}
+
+	mode := ""
+	if h.Repo != nil && scopeID != 0 {
+		stored, err := h.Repo.GetPluginSetting(ctx, scopeType, scopeID, platformName, settingKey)
+		if err == nil {
+			mode = strings.TrimSpace(stored)
+		}
+	}
+	if mode == "" {
+		if def, ok := h.findPluginSettingDefinition(platformName, settingKey); ok {
+			mode = def.DefaultForScope(scopeType)
+		}
+	}
+	allowed, err := decider.ShouldAutoParse(ctx, trackID, mode)
+	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Warn("platform auto-parse decision failed", "platform", platformName, "trackID", trackID, "error", err)
+		}
+		return false
+	}
+	return allowed
+}
+
+func (h *MusicHandler) findPluginSettingDefinition(plugin string, key string) (botpkg.PluginSettingDefinition, bool) {
+	plugin = strings.TrimSpace(plugin)
+	key = strings.TrimSpace(key)
+	for _, def := range h.PluginSettingDefinitions {
+		if strings.TrimSpace(def.Plugin) == plugin && strings.TrimSpace(def.Key) == key {
+			return def, true
+		}
+	}
+	return botpkg.PluginSettingDefinition{}, false
 }
 
 func (h *MusicHandler) dispatch(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID string, qualityOverride string) {

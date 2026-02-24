@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/db"
@@ -27,20 +28,21 @@ import (
 
 // App wires all application dependencies.
 type App struct {
-	Config           *config.Config
-	ConfigPath       string
-	Logger           *logpkg.Logger
-	DB               *db.Repository
-	Pool             *worker.Pool
-	PlatformManager  platform.Manager
-	DynPlugins       *dynplugin.Manager
-	AdminIDs         map[int64]struct{}
-	AdminCommands    []admincmd.Command
-	Telegram         *telegram.Bot
-	RecognizeService recognize.Service
-	TagProviders     map[string]id3.ID3TagProvider
-	Build            BuildInfo
-	botHandler       *th.BotHandler
+	Config                   *config.Config
+	ConfigPath               string
+	Logger                   *logpkg.Logger
+	DB                       *db.Repository
+	Pool                     *worker.Pool
+	PlatformManager          platform.Manager
+	DynPlugins               *dynplugin.Manager
+	AdminIDs                 map[int64]struct{}
+	AdminCommands            []admincmd.Command
+	Telegram                 *telegram.Bot
+	RecognizeService         recognize.Service
+	TagProviders             map[string]id3.ID3TagProvider
+	PluginSettingDefinitions []botpkg.PluginSettingDefinition
+	Build                    BuildInfo
+	botHandler               *th.BotHandler
 }
 
 func registerContribution(
@@ -48,6 +50,7 @@ func registerContribution(
 	pluginTagProviders map[string]id3.ID3TagProvider,
 	recognizeService *recognize.Service,
 	adminCommands *[]admincmd.Command,
+	pluginSettingDefinitions *[]botpkg.PluginSettingDefinition,
 	contrib *platformplugins.Contribution,
 	log *logpkg.Logger,
 ) {
@@ -79,6 +82,10 @@ func registerContribution(
 	if adminCommands != nil && len(contrib.Commands) > 0 {
 		*adminCommands = append(*adminCommands, contrib.Commands...)
 	}
+
+	if pluginSettingDefinitions != nil && len(contrib.SettingDefinitions) > 0 {
+		*pluginSettingDefinitions = append(*pluginSettingDefinitions, contrib.SettingDefinitions...)
+	}
 }
 
 // BuildInfo provides build-time metadata.
@@ -103,7 +110,7 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 	}
 
 	pool := initWorkerPool(conf, log)
-	platformManager, dynManager, adminIDs, pluginTagProviders, adminCommands, recognizeService := initPluginRuntime(ctx, conf, log)
+	platformManager, dynManager, adminIDs, pluginTagProviders, adminCommands, pluginSettingDefinitions, recognizeService := initPluginRuntime(ctx, conf, log)
 
 	tele, err := initTelegramBot(conf, log)
 	if err != nil {
@@ -111,19 +118,20 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 	}
 
 	return &App{
-		Config:           conf,
-		ConfigPath:       configPath,
-		Logger:           log,
-		DB:               repo,
-		Pool:             pool,
-		PlatformManager:  platformManager,
-		DynPlugins:       dynManager,
-		AdminIDs:         adminIDs,
-		AdminCommands:    adminCommands,
-		Telegram:         tele,
-		RecognizeService: recognizeService,
-		TagProviders:     pluginTagProviders,
-		Build:            build,
+		Config:                   conf,
+		ConfigPath:               configPath,
+		Logger:                   log,
+		DB:                       repo,
+		Pool:                     pool,
+		PlatformManager:          platformManager,
+		DynPlugins:               dynManager,
+		AdminIDs:                 adminIDs,
+		AdminCommands:            adminCommands,
+		Telegram:                 tele,
+		RecognizeService:         recognizeService,
+		TagProviders:             pluginTagProviders,
+		PluginSettingDefinitions: pluginSettingDefinitions,
+		Build:                    build,
 	}, nil
 }
 
@@ -181,6 +189,7 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 	adminIDs map[int64]struct{},
 	pluginTagProviders map[string]id3.ID3TagProvider,
 	adminCommands []admincmd.Command,
+	pluginSettingDefinitions []botpkg.PluginSettingDefinition,
 	recognizeService recognize.Service,
 ) {
 	platformManager = platform.NewManager()
@@ -188,6 +197,7 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 	adminIDs = parseAdminIDs(conf.GetString("BotAdmin"))
 	pluginTagProviders = make(map[string]id3.ID3TagProvider)
 	adminCommands = make([]admincmd.Command, 0)
+	pluginSettingDefinitions = make([]botpkg.PluginSettingDefinition, 0)
 
 	pluginNames := conf.PluginNames()
 	if len(pluginNames) == 0 {
@@ -219,7 +229,7 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 			}
 			continue
 		}
-		registerContribution(platformManager, pluginTagProviders, &recognizeService, &adminCommands, contrib, log)
+		registerContribution(platformManager, pluginTagProviders, &recognizeService, &adminCommands, &pluginSettingDefinitions, contrib, log)
 	}
 
 	if err := dynManager.Load(ctx, conf, platformManager); err != nil {
@@ -381,15 +391,17 @@ func (a *App) Start(ctx context.Context) error {
 		Playlist:                 playlistHandler,
 		RecognizeEnabled:         a.Config.GetBool("EnableRecognize"),
 		EnableQueueObservability: a.Config.GetBool("BotDebug"),
+		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
 	musicHandler.StartWorker(ctx)
 
 	settingsHandler := &handler.SettingsHandler{
-		Repo:            a.DB,
-		PlatformManager: a.PlatformManager,
-		RateLimiter:     rateLimiter,
-		DefaultPlatform: defaultPlatform,
-		DefaultQuality:  defaultQuality,
+		Repo:                     a.DB,
+		PlatformManager:          a.PlatformManager,
+		RateLimiter:              rateLimiter,
+		DefaultPlatform:          defaultPlatform,
+		DefaultQuality:           defaultQuality,
+		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
 	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
 	adminHandler := &handler.AdminCommandHandler{

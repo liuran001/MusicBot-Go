@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
@@ -15,11 +16,12 @@ import (
 
 // Contribution describes the components a plugin can provide.
 type Contribution struct {
-	Platform   platform.Platform
-	Platforms  []platform.Platform
-	ID3        id3.ID3TagProvider
-	Recognizer recognize.Service
-	Commands   []admincmd.Command
+	Platform           platform.Platform
+	Platforms          []platform.Platform
+	ID3                id3.ID3TagProvider
+	Recognizer         recognize.Service
+	Commands           []admincmd.Command
+	SettingDefinitions []bot.PluginSettingDefinition
 }
 
 // Factory creates a plugin contribution based on config and logger.

@@ -166,3 +166,16 @@ type GroupSettingsModel struct {
 func (GroupSettingsModel) TableName() string {
 	return "group_settings"
 }
+
+type PluginSettingModel struct {
+	gorm.Model
+	ScopeType    string `gorm:"uniqueIndex:idx_plugin_scope_key,priority:1;not null"`
+	ScopeID      int64  `gorm:"uniqueIndex:idx_plugin_scope_key,priority:2;not null"`
+	Plugin       string `gorm:"uniqueIndex:idx_plugin_scope_key,priority:3;not null"`
+	SettingKey   string `gorm:"uniqueIndex:idx_plugin_scope_key,priority:4;not null"`
+	SettingValue string `gorm:"type:text;not null"`
+}
+
+func (PluginSettingModel) TableName() string {
+	return "plugin_settings"
+}
