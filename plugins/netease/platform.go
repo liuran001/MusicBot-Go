@@ -63,7 +63,7 @@ func (n *NeteasePlatform) CheckCookie(ctx context.Context) (platform.CookieCheck
 	if info == nil || strings.TrimSpace(info.URL) == "" || info.Size <= 0 {
 		return platform.CookieCheckResult{OK: false, Message: "Hi-Res 下载链接为空或文件大小为 0"}, nil
 	}
-	return platform.CookieCheckResult{OK: true, Message: "Hi-Res 可用"}, nil
+	return platform.CookieCheckResult{OK: true, Message: fmt.Sprintf("Hi-Res 可用: %.2fMB", float64(info.Size)/1024/1024)}, nil
 }
 
 func (n *NeteasePlatform) Capabilities() platform.Capabilities {

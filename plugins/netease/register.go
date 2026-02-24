@@ -22,7 +22,13 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	if musicU == "" {
 		musicU = cfg.GetString("MUSIC_U")
 	}
-	client := New(musicU, logger)
+	spoofIP := true
+	if pluginCfg, ok := cfg.GetPluginConfig("netease"); ok {
+		if _, exists := pluginCfg["spoof_ip"]; exists {
+			spoofIP = cfg.GetPluginBool("netease", "spoof_ip")
+		}
+	}
+	client := New(musicU, spoofIP, logger)
 	disableRadar := true
 	if pluginCfg, ok := cfg.GetPluginConfig("netease"); ok {
 		if _, exists := pluginCfg["disable_radar"]; exists {

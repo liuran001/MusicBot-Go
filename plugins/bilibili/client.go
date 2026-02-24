@@ -85,14 +85,21 @@ type AudioStreamUrlResponse struct {
 
 // VideoInfoData contains metadata for a video
 type VideoInfoData struct {
-	Bvid     string `json:"bvid"`
-	Aid      int    `json:"aid"`
-	Cid      int    `json:"cid"`
-	Title    string `json:"title"`
-	Pic      string `json:"pic"`
-	Desc     string `json:"desc"`
-	Duration int    `json:"duration"`
-	Owner    struct {
+	Bvid      string `json:"bvid"`
+	Aid       int    `json:"aid"`
+	Cid       int    `json:"cid"`
+	Tid       int    `json:"tid"`
+	Tname     string `json:"tname"`
+	TypeName  string `json:"type_name"`
+	TidV2     int    `json:"tid_v2"`
+	TnameV2   string `json:"tname_v2"`
+	PidV2     int    `json:"pid_v2"`
+	PidNameV2 string `json:"pid_name_v2"`
+	Title     string `json:"title"`
+	Pic       string `json:"pic"`
+	Desc      string `json:"desc"`
+	Duration  int    `json:"duration"`
+	Owner     struct {
 		Mid  int    `json:"mid"`
 		Name string `json:"name"`
 		Face string `json:"face"`
@@ -133,6 +140,35 @@ type VideoPlayUrlResponse struct {
 	Code    int               `json:"code"`
 	Message string            `json:"message"`
 	Data    *VideoPlayUrlData `json:"data"`
+}
+
+type VideoSubtitleItem struct {
+	SubtitleURL   string `json:"subtitle_url"`
+	SubtitleURLV2 string `json:"subtitle_url_v2"`
+	Lan           string `json:"lan"`
+	LanDoc        string `json:"lan_doc"`
+}
+
+type VideoSubtitleData struct {
+	Subtitle struct {
+		Subtitles []VideoSubtitleItem `json:"subtitles"`
+	} `json:"subtitle"`
+}
+
+type VideoSubtitleResponse struct {
+	Code    int                `json:"code"`
+	Message string             `json:"message"`
+	Data    *VideoSubtitleData `json:"data"`
+}
+
+type SubtitleBodyLine struct {
+	From    float64 `json:"from"`
+	To      float64 `json:"to"`
+	Content string  `json:"content"`
+}
+
+type SubtitleBodyResponse struct {
+	Body []SubtitleBodyLine `json:"body"`
 }
 
 // New returns an instance of Bilibili client.
@@ -490,6 +526,165 @@ func (c *Client) GetVideoPlayUrl(ctx context.Context, bvid string, cid int) ([]V
 	}
 
 	return allAudio, nil
+}
+
+// GetVideoSubtitleURL fetches an available subtitle URL for a video.
+func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) (string, error) {
+	if c.logger != nil {
+		c.cookieMutex.RLock()
+		cookieLen := len(c.cookie)
+		hasSESSDATA := strings.Contains(c.cookie, "SESSDATA=")
+		c.cookieMutex.RUnlock()
+
+		c.logger.Debug("bilibili: fetching video subtitle list", "bvid", bvid, "cid", cid, "cookie_len", cookieLen, "cookie_has_sessdata", hasSESSDATA)
+	}
+
+	type subtitleEndpoint struct {
+		Name string
+		URL  string
+	}
+
+	endpoints := []subtitleEndpoint{
+		{
+			Name: "player.wbi.v2",
+			URL:  fmt.Sprintf("https://api.bilibili.com/x/player/wbi/v2?bvid=%s&cid=%d", bvid, cid),
+		},
+		{
+			Name: "player.v2",
+			URL:  fmt.Sprintf("https://api.bilibili.com/x/player/v2?bvid=%s&cid=%d", bvid, cid),
+		},
+	}
+
+	var lastErr error
+	hasSuccessResponse := false
+
+	for _, ep := range endpoints {
+		var result VideoSubtitleResponse
+		err := c.execute(ctx, func() error {
+			req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, ep.URL, nil)
+			if err != nil {
+				return err
+			}
+
+			c.setHeaders(req)
+
+			resp, err := c.httpClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("bilibili: unexpected status code %d: %s", resp.StatusCode, string(body))
+			}
+
+			if err := json.Unmarshal(body, &result); err != nil {
+				return fmt.Errorf("bilibili: decode subtitle list: %w", err)
+			}
+
+			if result.Code != 0 {
+				return fmt.Errorf("bilibili: API error code %d: %s", result.Code, result.Message)
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			lastErr = err
+			if c.logger != nil {
+				c.logger.Debug("bilibili: subtitle list fetch failed", "bvid", bvid, "cid", cid, "endpoint", ep.Name, "err", err)
+			}
+			continue
+		}
+
+		hasSuccessResponse = true
+
+		subtitleCount := 0
+		if result.Data != nil {
+			subtitleCount = len(result.Data.Subtitle.Subtitles)
+		}
+		if c.logger != nil {
+			c.logger.Debug("bilibili: subtitle list fetched", "bvid", bvid, "cid", cid, "endpoint", ep.Name, "api_code", result.Code, "subtitle_count", subtitleCount)
+		}
+
+		if subtitleCount == 0 {
+			continue
+		}
+
+		for _, item := range result.Data.Subtitle.Subtitles {
+			candidates := []string{item.SubtitleURL, item.SubtitleURLV2}
+			for _, candidate := range candidates {
+				urlValue := strings.TrimSpace(candidate)
+				if urlValue == "" {
+					continue
+				}
+				if strings.HasPrefix(urlValue, "//") {
+					urlValue = "https:" + urlValue
+				}
+				return urlValue, nil
+			}
+		}
+	}
+
+	if !hasSuccessResponse && lastErr != nil {
+		return "", lastErr
+	}
+
+	return "", nil
+}
+
+// GetVideoSubtitleLines fetches subtitle body lines from subtitle URL.
+func (c *Client) GetVideoSubtitleLines(ctx context.Context, subtitleURL string) ([]SubtitleBodyLine, error) {
+	subtitleURL = strings.TrimSpace(subtitleURL)
+	if subtitleURL == "" {
+		return nil, errors.New("bilibili: empty subtitle url")
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("bilibili: fetching subtitle body", "url", subtitleURL)
+	}
+
+	var result SubtitleBodyResponse
+	err := c.execute(ctx, func() error {
+		req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, subtitleURL, nil)
+		if err != nil {
+			return err
+		}
+
+		c.setHeaders(req)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("bilibili: unexpected status code %d fetching subtitle body", resp.StatusCode)
+		}
+
+		if err := json.Unmarshal(body, &result); err != nil {
+			return fmt.Errorf("bilibili: decode subtitle body: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Body, nil
 }
 
 func (c *Client) execute(ctx context.Context, fn func() error) error {

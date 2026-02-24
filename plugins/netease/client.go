@@ -2,9 +2,11 @@ package netease
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -19,13 +21,21 @@ import (
 
 // Client provides resilient NetEase API calls.
 type Client struct {
-	data       utils.RequestData
+	baseData   utils.RequestData
+	spoofIP    bool
 	retry      *retryablehttp.Client
 	breaker    *gobreaker.CircuitBreaker
 	maxRetries int
 	minBackoff time.Duration
 	maxBackoff time.Duration
 	logger     bot.Logger
+}
+
+var mainlandIPPrefixes = [][2]uint8{
+	{113, 0}, {113, 64}, {113, 128}, {114, 214},
+	{118, 122}, {119, 112}, {211, 161}, {221, 238},
+	{116, 224}, {222, 128}, {183, 128}, {116, 128},
+	{101, 226}, {61, 128},
 }
 
 type neteaseAlbumDetail struct {
@@ -53,7 +63,7 @@ type neteaseAlbumMetadata struct {
 }
 
 // New creates a NetEase client with retry and circuit breaker.
-func New(musicU string, logger bot.Logger) *Client {
+func New(musicU string, spoofIP bool, logger bot.Logger) *Client {
 	client := retryablehttp.NewClient()
 	client.RetryMax = 3
 	client.RetryWaitMin = 200 * time.Millisecond
@@ -83,7 +93,8 @@ func New(musicU string, logger bot.Logger) *Client {
 	}
 
 	return &Client{
-		data:       data,
+		baseData:   data,
+		spoofIP:    spoofIP,
 		retry:      client,
 		breaker:    gobreaker.NewCircuitBreaker(settings),
 		maxRetries: client.RetryMax,
@@ -101,7 +112,7 @@ func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*bot.SongDetai
 
 	var result bot.SongDetail
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongDetail(c.data, []int{musicID})
+		data, err := api.GetSongDetail(c.requestData(), []int{musicID})
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetSongDetail failed", "music_id", musicID, "error", err)
@@ -130,7 +141,7 @@ func (c *Client) GetSongDetailBatch(ctx context.Context, musicIDs []int) (*bot.S
 	}
 	var result bot.SongDetail
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongDetail(c.data, musicIDs)
+		data, err := api.GetSongDetail(c.requestData(), musicIDs)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetSongDetail batch failed", "count", len(musicIDs), "error", err)
@@ -153,7 +164,7 @@ func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*bot.Pl
 	}
 	var result bot.PlaylistDetail
 	err := c.execute(ctx, func() error {
-		data, err := api.GetPlaylistDetail(c.data, playlistID)
+		data, err := api.GetPlaylistDetail(c.requestData(), playlistID)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetPlaylistDetail failed", "playlist_id", playlistID, "error", err)
@@ -177,7 +188,7 @@ func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*neteaseAlbum
 
 	var result neteaseAlbumDetail
 	err := c.execute(ctx, func() error {
-		data, err := api.GetAlbumDetail(c.data, albumID)
+		data, err := api.GetAlbumDetail(c.requestData(), albumID)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetAlbumDetail failed", "album_id", albumID, "error", err)
@@ -209,7 +220,7 @@ func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*neteaseAlbum
 func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*bot.SongURL, error) {
 	var result bot.SongURL
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongURL(c.data, api.SongURLConfig{Ids: []int{musicID}, Level: quality})
+		data, err := api.GetSongURL(c.requestData(), api.SongURLConfig{Ids: []int{musicID}, Level: quality})
 		if err != nil {
 			return err
 		}
@@ -226,7 +237,7 @@ func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*
 func (c *Client) Search(ctx context.Context, keyword string, limit int) (*bot.SearchResult, error) {
 	var result bot.SearchResult
 	err := c.execute(ctx, func() error {
-		data, err := api.SearchSong(c.data, api.SearchSongConfig{Keyword: keyword, Limit: limit})
+		data, err := api.SearchSong(c.requestData(), api.SearchSongConfig{Keyword: keyword, Limit: limit})
 		if err != nil {
 			return err
 		}
@@ -243,7 +254,7 @@ func (c *Client) Search(ctx context.Context, keyword string, limit int) (*bot.Se
 func (c *Client) GetLyric(ctx context.Context, musicID int) (*bot.Lyric, error) {
 	var result bot.Lyric
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongLyric(c.data, musicID)
+		data, err := api.GetSongLyric(c.requestData(), musicID)
 		if err != nil {
 			return err
 		}
@@ -300,4 +311,69 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 		lastErr = errors.New("netease: retry failed")
 	}
 	return lastErr
+}
+
+func (c *Client) requestData() utils.RequestData {
+	data := c.baseData
+
+	headers := make(utils.Headers, 0, len(c.baseData.Headers)+4)
+	headers = append(headers, c.baseData.Headers...)
+
+	if c.spoofIP {
+		if ip, err := randomMainlandIPv4(); err == nil {
+			headers = append(headers,
+				struct {
+					Name  string
+					Value string
+				}{Name: "X-Real-IP", Value: ip},
+				struct {
+					Name  string
+					Value string
+				}{Name: "X-Forwarded-For", Value: ip},
+				struct {
+					Name  string
+					Value string
+				}{Name: "HTTP_X_FORWARDED_FOR", Value: ip},
+				struct {
+					Name  string
+					Value string
+				}{Name: "CLIENT-IP", Value: ip},
+			)
+		} else if c.logger != nil {
+			c.logger.Warn("failed to generate random spoof ip", "error", err)
+		}
+	}
+
+	data.Headers = headers
+	return data
+}
+
+func randomMainlandIPv4() (string, error) {
+	prefixIdx, err := cryptoRandInt(len(mainlandIPPrefixes))
+	if err != nil {
+		return "", err
+	}
+	prefix := mainlandIPPrefixes[prefixIdx]
+
+	third, err := cryptoRandInt(254)
+	if err != nil {
+		return "", err
+	}
+	fourth, err := cryptoRandInt(254)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%d.%d.%d.%d", prefix[0], prefix[1], third+1, fourth+1), nil
+}
+
+func cryptoRandInt(max int) (int, error) {
+	if max <= 0 {
+		return 0, fmt.Errorf("invalid max: %d", max)
+	}
+	n, err := crand.Int(crand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0, err
+	}
+	return int(n.Int64()), nil
 }

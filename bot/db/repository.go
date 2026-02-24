@@ -62,10 +62,13 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	if err := db.AutoMigrate(&SongInfoModel{}, &UserSettingsModel{}, &BotStatModel{}); err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&GroupSettingsModel{}); err != nil {
+	if err := db.AutoMigrate(&GroupSettingsModel{}, &PluginSettingModel{}); err != nil {
 		return nil, err
 	}
 	if err := migrateSettingsAutoLinkDetect(db); err != nil {
+		return nil, err
+	}
+	if err := migratePluginSettingsFromLegacyBilibiliParse(db); err != nil {
 		return nil, err
 	}
 
@@ -199,6 +202,44 @@ func migrateSettingsAutoLinkDetect(db *gorm.DB) error {
 	if !groupColumnExists {
 		if err := db.Exec("ALTER TABLE group_settings ADD COLUMN auto_link_detect NUMERIC NOT NULL DEFAULT 1").Error; err != nil {
 			return fmt.Errorf("add group_settings.auto_link_detect column: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func migratePluginSettingsFromLegacyBilibiliParse(db *gorm.DB) error {
+	var userColumnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('user_settings') WHERE name='bilibili_parse_mode'").Scan(&userColumnExists).Error; err != nil {
+		return fmt.Errorf("check legacy user bilibili_parse_mode column: %w", err)
+	}
+	if userColumnExists {
+		if err := db.Exec(`
+			INSERT INTO plugin_settings (scope_type, scope_id, plugin, setting_key, setting_value, created_at, updated_at)
+			SELECT 'user', user_id, 'bilibili', 'parse_mode', bilibili_parse_mode, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			FROM user_settings
+			WHERE bilibili_parse_mode IS NOT NULL AND TRIM(bilibili_parse_mode) != ''
+			ON CONFLICT(scope_type, scope_id, plugin, setting_key)
+			DO UPDATE SET setting_value=excluded.setting_value, updated_at=CURRENT_TIMESTAMP
+		`).Error; err != nil {
+			return fmt.Errorf("migrate legacy user bilibili_parse_mode to plugin_settings: %w", err)
+		}
+	}
+
+	var groupColumnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('group_settings') WHERE name='bilibili_parse_mode'").Scan(&groupColumnExists).Error; err != nil {
+		return fmt.Errorf("check legacy group bilibili_parse_mode column: %w", err)
+	}
+	if groupColumnExists {
+		if err := db.Exec(`
+			INSERT INTO plugin_settings (scope_type, scope_id, plugin, setting_key, setting_value, created_at, updated_at)
+			SELECT 'group', chat_id, 'bilibili', 'parse_mode', bilibili_parse_mode, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			FROM group_settings
+			WHERE bilibili_parse_mode IS NOT NULL AND TRIM(bilibili_parse_mode) != ''
+			ON CONFLICT(scope_type, scope_id, plugin, setting_key)
+			DO UPDATE SET setting_value=excluded.setting_value, updated_at=CURRENT_TIMESTAMP
+		`).Error; err != nil {
+			return fmt.Errorf("migrate legacy group bilibili_parse_mode to plugin_settings: %w", err)
 		}
 	}
 
@@ -697,6 +738,43 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
 	}
 	return r.db.WithContext(ctx).Save(&model).Error
+}
+
+// GetPluginSetting returns plugin setting value by scope/plugin/key.
+func (r *Repository) GetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string) (string, error) {
+	var model PluginSettingModel
+	err := r.db.WithContext(ctx).
+		Where("scope_type = ? AND scope_id = ? AND plugin = ? AND setting_key = ?", scopeType, scopeID, plugin, key).
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return model.SettingValue, nil
+}
+
+// SetPluginSetting upserts plugin setting value by scope/plugin/key.
+func (r *Repository) SetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string, value string) error {
+	model := PluginSettingModel{
+		ScopeType:    strings.TrimSpace(scopeType),
+		ScopeID:      scopeID,
+		Plugin:       strings.TrimSpace(plugin),
+		SettingKey:   strings.TrimSpace(key),
+		SettingValue: strings.TrimSpace(value),
+	}
+	if model.ScopeType == "" || model.ScopeID == 0 || model.Plugin == "" || model.SettingKey == "" {
+		return fmt.Errorf("invalid plugin setting key")
+	}
+
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "scope_type"}, {Name: "scope_id"}, {Name: "plugin"}, {Name: "setting_key"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"setting_value": model.SettingValue,
+			"updated_at":    time.Now(),
+		}),
+	}).Create(&model).Error
 }
 
 // Close closes the database connection.

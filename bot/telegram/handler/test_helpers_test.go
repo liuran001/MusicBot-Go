@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,22 +14,24 @@ import (
 
 // stubSongRepository implements botpkg.SongRepository with in-memory maps for testing.
 type stubSongRepository struct {
-	mu            sync.RWMutex
-	songs         map[int]*botpkg.SongInfo        // by MusicID
-	platformSongs map[string]*botpkg.SongInfo     // by "platform:trackID:quality"
-	fileSongs     map[string]*botpkg.SongInfo     // by FileID
-	userSettings  map[int64]*botpkg.UserSettings  // by UserID
-	groupSettings map[int64]*botpkg.GroupSettings // by ChatID
-	sendCount     int64
+	mu             sync.RWMutex
+	songs          map[int]*botpkg.SongInfo        // by MusicID
+	platformSongs  map[string]*botpkg.SongInfo     // by "platform:trackID:quality"
+	fileSongs      map[string]*botpkg.SongInfo     // by FileID
+	userSettings   map[int64]*botpkg.UserSettings  // by UserID
+	groupSettings  map[int64]*botpkg.GroupSettings // by ChatID
+	pluginSettings map[string]string
+	sendCount      int64
 }
 
 func newStubRepo() *stubSongRepository {
 	return &stubSongRepository{
-		songs:         make(map[int]*botpkg.SongInfo),
-		platformSongs: make(map[string]*botpkg.SongInfo),
-		fileSongs:     make(map[string]*botpkg.SongInfo),
-		userSettings:  make(map[int64]*botpkg.UserSettings),
-		groupSettings: make(map[int64]*botpkg.GroupSettings),
+		songs:          make(map[int]*botpkg.SongInfo),
+		platformSongs:  make(map[string]*botpkg.SongInfo),
+		fileSongs:      make(map[string]*botpkg.SongInfo),
+		userSettings:   make(map[int64]*botpkg.UserSettings),
+		groupSettings:  make(map[int64]*botpkg.GroupSettings),
+		pluginSettings: make(map[string]string),
 	}
 }
 
@@ -291,6 +294,23 @@ func (r *stubSongRepository) UpdateGroupSettings(ctx context.Context, settings *
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.groupSettings[settings.ChatID] = settings
+	return nil
+}
+
+func (r *stubSongRepository) GetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	v, ok := r.pluginSettings[scopeType+":"+plugin+":"+key+":"+strconv.FormatInt(scopeID, 10)]
+	if !ok {
+		return "", nil
+	}
+	return v, nil
+}
+
+func (r *stubSongRepository) SetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string, value string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pluginSettings[scopeType+":"+plugin+":"+key+":"+strconv.FormatInt(scopeID, 10)] = value
 	return nil
 }
 

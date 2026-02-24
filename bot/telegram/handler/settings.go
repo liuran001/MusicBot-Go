@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -12,11 +13,12 @@ import (
 )
 
 type SettingsHandler struct {
-	Repo            botpkg.SongRepository
-	PlatformManager platform.Manager
-	RateLimiter     *telegram.RateLimiter
-	DefaultPlatform string
-	DefaultQuality  string
+	Repo                     botpkg.SongRepository
+	PlatformManager          platform.Manager
+	RateLimiter              *telegram.RateLimiter
+	DefaultPlatform          string
+	DefaultQuality           string
+	PluginSettingDefinitions []botpkg.PluginSettingDefinition
 }
 
 func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -62,8 +64,8 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *tel
 	platforms := h.PlatformManager.List()
 
 	chatType := string(message.Chat.Type)
-	text := h.buildSettingsText(chatType, settings, groupSettings, platforms)
-	keyboard := h.buildSettingsKeyboard(chatType, settings, groupSettings, platforms)
+	text := h.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
+	keyboard := h.buildSettingsKeyboard(ctx, chatType, settings, groupSettings, platforms)
 
 	params := &telego.SendMessageParams{
 		ChatID:      telego.ChatID{ID: message.Chat.ID},
@@ -77,7 +79,7 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *tel
 	}
 }
 
-func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) string {
+func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("⚙️ 设置中心\n\n")
@@ -115,7 +117,13 @@ func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.Us
 		autoLinkDetectText = "开启"
 	}
 	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删除列表消息: %s\n", autoDeleteText))
-	sb.WriteString(fmt.Sprintf("🔗 会话内链接自动识别: %s\n\n", autoLinkDetectText))
+	sb.WriteString(fmt.Sprintf("🔗 会话内链接自动识别: %s\n", autoLinkDetectText))
+
+	for _, def := range h.sortedPluginSettingDefinitions() {
+		value := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
+		sb.WriteString(fmt.Sprintf("🔌 %s: %s\n", def.Title, def.LabelOf(value)))
+	}
+	sb.WriteString("\n")
 
 	if len(platforms) > 1 {
 		sb.WriteString("💡 可用平台: ")
@@ -132,7 +140,7 @@ func (h *SettingsHandler) buildSettingsText(chatType string, settings *botpkg.Us
 	return sb.String()
 }
 
-func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) *telego.InlineKeyboardMarkup {
+func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) *telego.InlineKeyboardMarkup {
 	var rows [][]telego.InlineKeyboardButton
 	platformValue := h.DefaultPlatform
 	qualityValue := h.DefaultQuality
@@ -155,11 +163,10 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 	if len(platforms) > 1 {
 		var platformButtons []telego.InlineKeyboardButton
 		for _, p := range platforms {
-			emoji := h.getPlatformEmoji(p)
 			displayName := h.getPlatformDisplayName(p)
 			callbackData := fmt.Sprintf("settings platform %s", p)
 
-			text := fmt.Sprintf("%s %s", emoji, displayName)
+			text := displayName
 			if p == platformValue {
 				text = "✓ " + text
 			}
@@ -170,13 +177,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 			})
 		}
 
-		for i := 0; i < len(platformButtons); i += 2 {
-			if i+1 < len(platformButtons) {
-				rows = append(rows, []telego.InlineKeyboardButton{platformButtons[i], platformButtons[i+1]})
-			} else {
-				rows = append(rows, []telego.InlineKeyboardButton{platformButtons[i]})
-			}
-		}
+		rows = append(rows, platformButtons)
 	}
 
 	qualityButtons := []telego.InlineKeyboardButton{
@@ -188,10 +189,6 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 			Text:         h.formatQualityButton("high", qualityValue == "high"),
 			CallbackData: "settings quality high",
 		},
-	}
-	rows = append(rows, qualityButtons)
-
-	qualityButtons2 := []telego.InlineKeyboardButton{
 		{
 			Text:         h.formatQualityButton("lossless", qualityValue == "lossless"),
 			CallbackData: "settings quality lossless",
@@ -201,21 +198,30 @@ func (h *SettingsHandler) buildSettingsKeyboard(chatType string, settings *botpk
 			CallbackData: "settings quality hires",
 		},
 	}
-	rows = append(rows, qualityButtons2)
+	rows = append(rows, qualityButtons)
+
 	autoDeleteEnabled := h.resolveAutoDeleteList(chatType, settings, groupSettings)
+	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
 	rows = append(rows, []telego.InlineKeyboardButton{
 		{
 			Text:         h.formatToggleButton("自动删列表", autoDeleteEnabled),
 			CallbackData: fmt.Sprintf("settings autodelete %s", h.toggleValue(autoDeleteEnabled)),
 		},
-	})
-	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
-	rows = append(rows, []telego.InlineKeyboardButton{
 		{
 			Text:         h.formatToggleButton("自动识别链接", autoLinkDetectEnabled),
 			CallbackData: fmt.Sprintf("settings autolink %s", h.toggleValue(autoLinkDetectEnabled)),
 		},
 	})
+	for _, def := range h.sortedPluginSettingDefinitions() {
+		if len(def.Options) == 0 {
+			continue
+		}
+		current := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
+		rows = append(rows, []telego.InlineKeyboardButton{{
+			Text:         fmt.Sprintf("%s: %s", def.Title, def.LabelOf(current)),
+			CallbackData: fmt.Sprintf("settings pcycle %s %s", def.Plugin, def.Key),
+		}})
+	}
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -255,6 +261,72 @@ func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string 
 	return fmt.Sprintf("%s: %s", label, state)
 }
 
+func (h *SettingsHandler) sortedPluginSettingDefinitions() []botpkg.PluginSettingDefinition {
+	defs := make([]botpkg.PluginSettingDefinition, 0, len(h.PluginSettingDefinitions))
+	seen := make(map[string]struct{}, len(h.PluginSettingDefinitions))
+	for _, def := range h.PluginSettingDefinitions {
+		pluginName := strings.TrimSpace(def.Plugin)
+		key := strings.TrimSpace(def.Key)
+		if pluginName == "" || key == "" {
+			continue
+		}
+		id := pluginName + ":" + key
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		defs = append(defs, def)
+	}
+	sort.SliceStable(defs, func(i, j int) bool {
+		if defs[i].Order != defs[j].Order {
+			return defs[i].Order < defs[j].Order
+		}
+		if defs[i].Plugin != defs[j].Plugin {
+			return defs[i].Plugin < defs[j].Plugin
+		}
+		return defs[i].Key < defs[j].Key
+	})
+	return defs
+}
+
+func (h *SettingsHandler) findPluginSettingDefinition(plugin string, key string) (botpkg.PluginSettingDefinition, bool) {
+	plugin = strings.TrimSpace(plugin)
+	key = strings.TrimSpace(key)
+	for _, def := range h.sortedPluginSettingDefinitions() {
+		if strings.TrimSpace(def.Plugin) == plugin && strings.TrimSpace(def.Key) == key {
+			return def, true
+		}
+	}
+	return botpkg.PluginSettingDefinition{}, false
+}
+
+func (h *SettingsHandler) resolvePluginSettingValue(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, def botpkg.PluginSettingDefinition) string {
+	scopeType := botpkg.PluginScopeUser
+	scopeID := int64(0)
+	if chatType != "private" {
+		scopeType = botpkg.PluginScopeGroup
+		if groupSettings != nil {
+			scopeID = groupSettings.ChatID
+		}
+	} else if settings != nil {
+		scopeID = settings.UserID
+	}
+
+	value := ""
+	if h.Repo != nil && scopeID != 0 {
+		if stored, err := h.Repo.GetPluginSetting(ctx, scopeType, scopeID, def.Plugin, def.Key); err == nil {
+			value = strings.TrimSpace(stored)
+		}
+	}
+	if value == "" {
+		value = def.DefaultForScope(scopeType)
+	}
+	if !def.Validate(value) {
+		value = def.DefaultForScope(scopeType)
+	}
+	return value
+}
+
 func (h *SettingsHandler) toggleValue(enabled bool) string {
 	if enabled {
 		return "off"
@@ -263,12 +335,11 @@ func (h *SettingsHandler) toggleValue(enabled bool) string {
 }
 
 func (h *SettingsHandler) formatQualityButton(quality string, isSelected bool) string {
-	emoji := h.getQualityEmoji(quality)
 	name := h.getQualityDisplayName(quality)
 	if isSelected {
-		return fmt.Sprintf("✓ %s %s", emoji, name)
+		return fmt.Sprintf("✓ %s", name)
 	}
-	return fmt.Sprintf("%s %s", emoji, name)
+	return name
 }
 
 func (h *SettingsHandler) getPlatformEmoji(platform string) string {
@@ -477,11 +548,26 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				responseText = "✅ 已关闭会话内链接自动识别"
 			}
 		}
-	}
-
-	if changed {
+	case "pset":
+		if len(args) < 5 {
+			break
+		}
+		pluginName := strings.TrimSpace(args[2])
+		pluginKey := strings.TrimSpace(args[3])
+		pluginValue := strings.TrimSpace(args[4])
+		def, ok := h.SettingsHandler.findPluginSettingDefinition(pluginName, pluginKey)
+		if !ok || !def.Validate(pluginValue) {
+			break
+		}
+		scopeType := botpkg.PluginScopeUser
+		scopeID := userID
 		if msg != nil && msg.Chat.Type != "private" {
-			if err := h.Repo.UpdateGroupSettings(ctx, groupSettings); err != nil {
+			scopeType = botpkg.PluginScopeGroup
+			scopeID = msg.Chat.ID
+		}
+		stored, _ := h.Repo.GetPluginSetting(ctx, scopeType, scopeID, pluginName, pluginKey)
+		if strings.TrimSpace(stored) != pluginValue {
+			if err := h.Repo.SetPluginSetting(ctx, scopeType, scopeID, pluginName, pluginKey, pluginValue); err != nil {
 				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 					CallbackQueryID: query.ID,
 					Text:            "❌ 保存设置失败",
@@ -489,13 +575,67 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				})
 				return
 			}
-		} else if err := h.Repo.UpdateUserSettings(ctx, settings); err != nil {
+			changed = true
+			responseText = fmt.Sprintf("✅ %s 已设置为: %s", def.Title, def.LabelOf(pluginValue))
+		}
+	case "pcycle":
+		if len(args) < 4 {
+			break
+		}
+		pluginName := strings.TrimSpace(args[2])
+		pluginKey := strings.TrimSpace(args[3])
+		def, ok := h.SettingsHandler.findPluginSettingDefinition(pluginName, pluginKey)
+		if !ok || len(def.Options) == 0 {
+			break
+		}
+		scopeType := botpkg.PluginScopeUser
+		scopeID := userID
+		if msg != nil && msg.Chat.Type != "private" {
+			scopeType = botpkg.PluginScopeGroup
+			scopeID = msg.Chat.ID
+		}
+		current := h.SettingsHandler.resolvePluginSettingValue(ctx, string(msg.Chat.Type), settings, groupSettings, def)
+		next := ""
+		for i, opt := range def.Options {
+			if strings.TrimSpace(opt.Value) == strings.TrimSpace(current) {
+				next = def.Options[(i+1)%len(def.Options)].Value
+				break
+			}
+		}
+		if next == "" {
+			next = def.Options[0].Value
+		}
+		if err := h.Repo.SetPluginSetting(ctx, scopeType, scopeID, pluginName, pluginKey, next); err != nil {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
 				Text:            "❌ 保存设置失败",
 				ShowAlert:       true,
 			})
 			return
+		}
+		changed = true
+		responseText = fmt.Sprintf("✅ %s 已设置为: %s", def.Title, def.LabelOf(next))
+	}
+
+	if changed {
+		if settingType != "pset" {
+			if msg != nil && msg.Chat.Type != "private" {
+				if err := h.Repo.UpdateGroupSettings(ctx, groupSettings); err != nil {
+					_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+						CallbackQueryID: query.ID,
+						Text:            "❌ 保存设置失败",
+						ShowAlert:       true,
+					})
+					return
+				}
+			} else if err := h.Repo.UpdateUserSettings(ctx, settings); err != nil {
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+					CallbackQueryID: query.ID,
+					Text:            "❌ 保存设置失败",
+					ShowAlert:       true,
+				})
+				return
+			}
 		}
 
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
@@ -506,8 +646,8 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		if msg != nil {
 			platforms := h.PlatformManager.List()
 			chatType := string(msg.Chat.Type)
-			text := h.SettingsHandler.buildSettingsText(chatType, settings, groupSettings, platforms)
-			keyboard := h.SettingsHandler.buildSettingsKeyboard(chatType, settings, groupSettings, platforms)
+			text := h.SettingsHandler.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
+			keyboard := h.SettingsHandler.buildSettingsKeyboard(ctx, chatType, settings, groupSettings, platforms)
 
 			params := &telego.EditMessageTextParams{
 				ChatID:      telego.ChatID{ID: msg.Chat.ID},

@@ -112,6 +112,21 @@ type TextMatcher interface {
 	MatchText(text string) (trackID string, matched bool)
 }
 
+// TrackCategoryResolver defines an optional interface for platforms that can
+// resolve a track/video category (e.g. Bilibili partition) by track ID.
+type TrackCategoryResolver interface {
+	ResolveTrackCategory(ctx context.Context, trackID string) (category string, categoryID int, err error)
+}
+
+// AutoParseDecider defines an optional interface for platforms that need
+// plugin-specific logic to decide whether a detected link should be auto-parsed.
+type AutoParseDecider interface {
+	// AutoParseSettingKey returns the plugin setting key used for auto-parse mode.
+	AutoParseSettingKey() string
+	// ShouldAutoParse returns whether this track should be auto-parsed under mode.
+	ShouldAutoParse(ctx context.Context, trackID string, mode string) (bool, error)
+}
+
 // Manager provides a registry for multiple platform implementations.
 // This allows the bot to work with multiple music platforms simultaneously.
 type Manager interface {
