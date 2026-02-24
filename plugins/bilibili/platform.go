@@ -609,6 +609,15 @@ func (b *BilibiliPlatform) GetLyrics(ctx context.Context, trackID string) (*plat
 		return nil, platform.NewNotFoundError("bilibili", "track", trackID)
 	}
 
+	if lyricStr, lyricErr := b.client.GetAudioSongLyric(ctx, musicID); lyricErr == nil {
+		if strings.TrimSpace(lyricStr) != "" {
+			return &platform.Lyrics{
+				Plain:       lyricStr,
+				Timestamped: platform.ParseLRCTimestampedLines(lyricStr),
+			}, nil
+		}
+	}
+
 	songInfo, err := b.client.GetAudioSongInfo(ctx, musicID)
 	if err != nil {
 		return nil, fmt.Errorf("bilibili: failed to fetch song info for lyric: %w", err)
