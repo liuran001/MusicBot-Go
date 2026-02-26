@@ -415,6 +415,34 @@ func SendAudioWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, par
 	return result, nil
 }
 
+func SendDocumentWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.SendDocumentParams) (*telego.Message, error) {
+	var result *telego.Message
+	var lastErr error
+
+	chatID := extractChatID(params.ChatID)
+	err := WithRetry(ctx, rl, chatID, func() error {
+		msg, err := b.SendDocument(ctx, params)
+		if err != nil {
+			lastErr = err
+			return err
+		}
+		result = msg
+		return nil
+	})
+
+	if err != nil {
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
+		}
+		if rl != nil {
+			rl.logError("SendDocument failed", "chat_id", chatID, "error", retErr)
+		}
+		return result, retErr
+	}
+	return result, nil
+}
+
 func EditMessageMediaWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageMediaParams) (*telego.Message, error) {
 	var result *telego.Message
 	var lastErr error
