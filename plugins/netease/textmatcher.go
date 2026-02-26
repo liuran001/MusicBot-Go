@@ -11,15 +11,8 @@ import (
 )
 
 var (
-	regProgramQ = regexp.MustCompile(`(.*)program\?id=`)
-	regProgramP = regexp.MustCompile(`(.*)program/`)
-	regDjQuery  = regexp.MustCompile(`(.*)dj\?id=`)
-	regDjPath   = regexp.MustCompile(`(.*)dj/`)
-	regSlash    = regexp.MustCompile(`/(.*)`)
-	regAmp      = regexp.MustCompile(`&(.*)`)
-	regQuestion = regexp.MustCompile(`\?(.*)`)
-	regInt      = regexp.MustCompile(`\d+`)
-	regURL      = regexp.MustCompile(`(http|https)://[\w\-_]+(\.[\w\-_]+)+([\w\-.,@?^=%&:/~+#]*[\w\-@?^=%&/~+#])?`)
+	regURL              = regexp.MustCompile(`(http|https)://[\w\-_]+(\.[\w\-_]+)+([\w\-.,@?^=%&:/~+#]*[\w\-@?^=%&/~+#])?`)
+	regProgramIDExtract = regexp.MustCompile(`(?:program|dj)(?:\?id=|/)(\d+)`)
 )
 
 // MatchText attempts to extract a track ID from arbitrary text input.
@@ -91,20 +84,12 @@ func parseMusicID(text string) int {
 
 func parseProgramID(text string) int {
 	messageText := normalizeText(text)
-	programID, _ := strconv.Atoi(linkTestProgram(messageText))
-	return programID
-}
-
-func linkTestProgram(text string) string {
-	return extractInt(regSlash.ReplaceAllString(regAmp.ReplaceAllString(regQuestion.ReplaceAllString(regDjPath.ReplaceAllString(regDjQuery.ReplaceAllString(regProgramP.ReplaceAllString(regProgramQ.ReplaceAllString(text, ""), ""), ""), ""), ""), ""), ""))
-}
-
-func extractInt(text string) string {
-	matchArr := regInt.FindStringSubmatch(text)
-	if len(matchArr) == 0 {
-		return ""
+	matches := regProgramIDExtract.FindStringSubmatch(messageText)
+	if len(matches) > 1 {
+		id, _ := strconv.Atoi(matches[1])
+		return id
 	}
-	return matchArr[0]
+	return 0
 }
 
 func isDigits(text string) bool {
