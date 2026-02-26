@@ -23,10 +23,18 @@ func TestRepositoryCRUD(t *testing.T) {
 	_ = file.Close()
 	defer os.Remove(path)
 
+	file2, err := os.CreateTemp("", "music163bot-data-*.db")
+	if err != nil {
+		t.Fatalf("create temp data db: %v", err)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	defer os.Remove(dataPath)
+
 	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
 
-	repo, err := NewSQLiteRepository(path, gormLogger)
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -135,7 +143,15 @@ func TestRepositoryCreateAfterSoftDeleteByTrackQuality(t *testing.T) {
 	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
 
-	repo, err := NewSQLiteRepository(path, gormLogger)
+	file2, err2 := os.CreateTemp("", "music163bot-data-*.db")
+	if err2 != nil {
+		t.Fatalf("create temp data db: %v", err2)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	defer os.Remove(dataPath)
+
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -186,7 +202,7 @@ func TestRepositoryCreateAfterSoftDeleteByTrackQuality(t *testing.T) {
 	}
 
 	var softDeletedCount int64
-	if err := repo.db.Unscoped().
+	if err := repo.cacheDB.Unscoped().
 		Model(&SongInfoModel{}).
 		Where("platform = ? AND track_id = ? AND quality = ? AND deleted_at IS NOT NULL", song.Platform, song.TrackID, song.Quality).
 		Count(&softDeletedCount).Error; err != nil {
@@ -210,7 +226,15 @@ func TestRepositoryDeleteAllByPlatform(t *testing.T) {
 	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
 
-	repo, err := NewSQLiteRepository(path, gormLogger)
+	file2, err2 := os.CreateTemp("", "music163bot-data-*.db")
+	if err2 != nil {
+		t.Fatalf("create temp data db: %v", err2)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	defer os.Remove(dataPath)
+
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -254,7 +278,15 @@ func TestRepositoryGetUserSettingsConcurrentCreate(t *testing.T) {
 	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
 
-	repo, err := NewSQLiteRepository(path, gormLogger)
+	file2, err2 := os.CreateTemp("", "music163bot-data-*.db")
+	if err2 != nil {
+		t.Fatalf("create temp data db: %v", err2)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	defer os.Remove(dataPath)
+
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}

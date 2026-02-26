@@ -143,6 +143,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("DownloadTimeout", 60)
 	v.SetDefault("CheckMD5", true)
 	v.SetDefault("Database", "cache.db")
+	v.SetDefault("DataDatabase", "data.db")
 	v.SetDefault("DBMaxOpenConns", 1)
 	v.SetDefault("DBMaxIdleConns", 1)
 	v.SetDefault("DBConnMaxLifetimeSec", 3600)
