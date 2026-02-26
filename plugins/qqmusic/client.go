@@ -27,22 +27,21 @@ const (
 )
 
 type Client struct {
-	httpClient *http.Client
-	headers    http.Header
-	cookie     string
-	logger     bot.Logger
-	mu         sync.RWMutex
-	autoRenew  autoRenewConfig
+	httpClient  *http.Client
+	headers     http.Header
+	cookie      string
+	logger      bot.Logger
+	mu          sync.RWMutex
+	autoRenew   autoRenewConfig
+	persistFunc func(map[string]string) error
 }
 
 type autoRenewConfig struct {
 	enabled  bool
 	interval time.Duration
-	persist  bool
-	path     string
 }
 
-func NewClient(cookie string, timeout time.Duration, logger bot.Logger, autoRenewEnabled bool, autoRenewInterval time.Duration, autoRenewPersist bool, autoRenewPersistPath string) *Client {
+func NewClient(cookie string, timeout time.Duration, logger bot.Logger, autoRenewEnabled bool, autoRenewInterval time.Duration, persist func(map[string]string) error) *Client {
 	headers := http.Header{}
 	headers.Set("User-Agent", "QQMusic/14090508 (android 12)")
 	headers.Set("Referer", "https://y.qq.com/")
@@ -58,9 +57,8 @@ func NewClient(cookie string, timeout time.Duration, logger bot.Logger, autoRene
 		autoRenew: autoRenewConfig{
 			enabled:  autoRenewEnabled,
 			interval: autoRenewInterval,
-			persist:  autoRenewPersist,
-			path:     strings.TrimSpace(autoRenewPersistPath),
 		},
+		persistFunc: persist,
 	}
 	if client.autoRenew.enabled {
 		client.startAutoRenew()

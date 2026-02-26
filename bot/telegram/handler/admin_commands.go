@@ -162,10 +162,13 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 	}
 	sort.Strings(names)
 	lines := make([]string, 0, len(names))
+	failures := 0
 	for _, name := range names {
 		line, err := renewCookieForPlatform(ctx, manager, name)
 		if err != nil {
-			return "", err
+			failures++
+			lines = append(lines, fmt.Sprintf("❌ %s: %s", name, sanitizeSensitiveText(err.Error())))
+			continue
 		}
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)
@@ -173,6 +176,9 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 	}
 	if len(lines) == 0 {
 		return "没有支持 Cookie 续期的平台", nil
+	}
+	if failures > 0 {
+		lines = append(lines, fmt.Sprintf("\n完成（失败 %d 个平台）", failures))
 	}
 	return strings.Join(lines, "\n"), nil
 }

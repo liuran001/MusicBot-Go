@@ -30,12 +30,10 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	if intervalSec > 0 {
 		interval = time.Duration(intervalSec) * time.Second
 	}
-	autoRenewPersist := true
-	if raw := cfg.GetPluginString("qqmusic", "auto_renew_persist_enabled"); raw != "" {
-		autoRenewPersist = cfg.GetPluginBool("qqmusic", "auto_renew_persist_enabled")
+	persist := func(pairs map[string]string) error {
+		return cfg.PersistPluginConfig("qqmusic", pairs)
 	}
-	autoRenewPersistPath := cfg.GetPluginString("qqmusic", "auto_renew_persist_path")
-	client := NewClient(cookie, time.Duration(timeoutSec)*time.Second, logger, autoRenewEnabled, interval, autoRenewPersist, autoRenewPersistPath)
+	client := NewClient(cookie, time.Duration(timeoutSec)*time.Second, logger, autoRenewEnabled, interval, persist)
 	platform := NewPlatform(client)
 	return &platformplugins.Contribution{Platform: platform}, nil
 }

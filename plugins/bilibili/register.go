@@ -31,19 +31,19 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	if intervalSec > 0 {
 		interval = time.Duration(intervalSec) * time.Second
 	}
-	autoRenewPersist := true
-	if raw := cfg.GetPluginString("bilibili", "auto_renew_persist_enabled"); raw != "" {
-		autoRenewPersist = cfg.GetPluginBool("bilibili", "auto_renew_persist_enabled")
-	}
-	autoRenewPersistPath := cfg.GetPluginString("bilibili", "auto_renew_persist_path")
+	streamURLPriority := cfg.GetPluginString("bilibili", "stream_url_priority")
 	searchMaxPages := cfg.GetPluginInt("bilibili", "search_max_pages")
 	if searchMaxPages <= 0 {
 		searchMaxPages = 5
 	}
+	persist := func(pairs map[string]string) error {
+		return cfg.PersistPluginConfig("bilibili", pairs)
+	}
 
-	client := New(logger, cookie, refreshToken, autoRenewEnabled, interval, autoRenewPersist, autoRenewPersistPath)
+	client := New(logger, cookie, refreshToken, autoRenewEnabled, interval, persist)
 	client.StartAutoRefreshDaemon(context.Background())
 	platform := NewPlatform(client, searchMaxPages)
+	platform.ConfigureStreamURLPriority(streamURLPriority)
 
 	contrib := &platformplugins.Contribution{
 		Platform: platform,
