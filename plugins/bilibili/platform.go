@@ -2,8 +2,6 @@ package bilibili
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -696,25 +694,21 @@ func (b *BilibiliPlatform) GetLyrics(ctx context.Context, trackID string) (*plat
 			return nil, platform.NewUnavailableError("bilibili", "lyrics", trackID)
 		}
 
-		subtitleURL, err := b.client.GetVideoSubtitleURL(ctx, videoInfo.Bvid, selected.Cid)
+		pageNo := selected.Page
+		if pageNo <= 0 {
+			pageNo = selectedPage
+			if pageNo <= 0 {
+				pageNo = 1
+			}
+		}
+
+		subtitleURL, err := b.client.GetVideoSubtitleURL(ctx, videoInfo.Bvid, selected.Cid, videoInfo.Aid, pageNo)
 		if err != nil {
 			return nil, fmt.Errorf("bilibili: failed to fetch subtitle list: %w", err)
 		}
 
 		if strings.TrimSpace(subtitleURL) == "" {
 			return nil, platform.NewUnavailableError("bilibili", "lyrics", trackID)
-		}
-
-		if isAISubtitleURL(subtitleURL) {
-			plain, timestamped, ok, err := b.getStableAISubtitleLyrics(ctx, videoInfo.Bvid, selected.Cid)
-			if err != nil {
-				return nil, fmt.Errorf("bilibili: failed to fetch stable ai subtitle data: %w", err)
-			}
-			if !ok {
-				return nil, platform.NewUnavailableError("bilibili", "lyrics", trackID)
-			}
-
-			return &platform.Lyrics{Plain: plain, Timestamped: timestamped}, nil
 		}
 
 		subtitleLines, err := b.client.GetVideoSubtitleLines(ctx, subtitleURL)
@@ -765,59 +759,6 @@ func (b *BilibiliPlatform) GetLyrics(ctx context.Context, trackID string) (*plat
 		Plain:       lyricStr,
 		Timestamped: platform.ParseLRCTimestampedLines(lyricStr),
 	}, nil
-}
-
-func isAISubtitleURL(subtitleURL string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(subtitleURL))
-	if normalized == "" {
-		return false
-	}
-	return strings.Contains(normalized, "aisubtitle.hdslb.com") || strings.Contains(normalized, "/ai_subtitle/")
-}
-
-func (b *BilibiliPlatform) getStableAISubtitleLyrics(ctx context.Context, bvid string, cid int) (string, []platform.LyricLine, bool, error) {
-	const probeCount = 3
-	variants := make(map[string]struct {
-		plain       string
-		timestamped []platform.LyricLine
-	})
-
-	for i := 0; i < probeCount; i++ {
-		subtitleURL, err := b.client.GetVideoSubtitleURL(ctx, bvid, cid)
-		if err != nil {
-			return "", nil, false, err
-		}
-		if strings.TrimSpace(subtitleURL) == "" || !isAISubtitleURL(subtitleURL) {
-			return "", nil, false, nil
-		}
-
-		subtitleLines, err := b.client.GetVideoSubtitleLines(ctx, subtitleURL)
-		if err != nil {
-			return "", nil, false, err
-		}
-
-		plain, timestamped := convertSubtitleLinesToLyrics(subtitleLines)
-		if strings.TrimSpace(plain) == "" || len(timestamped) == 0 {
-			return "", nil, false, nil
-		}
-
-		sum := sha1.Sum([]byte(plain))
-		hashKey := hex.EncodeToString(sum[:])
-		variants[hashKey] = struct {
-			plain       string
-			timestamped []platform.LyricLine
-		}{plain: plain, timestamped: timestamped}
-	}
-
-	if len(variants) != 1 {
-		return "", nil, false, nil
-	}
-
-	for _, variant := range variants {
-		return variant.plain, variant.timestamped, true, nil
-	}
-
-	return "", nil, false, nil
 }
 
 func (b *BilibiliPlatform) ListEpisodes(ctx context.Context, trackID string) ([]platform.Episode, error) {

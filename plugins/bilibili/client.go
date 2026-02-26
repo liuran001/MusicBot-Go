@@ -784,7 +784,9 @@ func (c *Client) GetVideoPlayUrl(ctx context.Context, bvid string, cid int) ([]V
 }
 
 // GetVideoSubtitleURL fetches an available subtitle URL for a video.
-func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) (string, error) {
+// It performs a lightweight warmup request on the video web page first, to
+// reduce mismatched/poisoned subtitle results observed on subtitle APIs.
+func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int, aid int, page int) (string, error) {
 	if c.logger != nil {
 		c.cookieMutex.RLock()
 		cookieLen := len(c.cookie)
@@ -794,19 +796,31 @@ func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) 
 		c.logger.Debug("bilibili: fetching video subtitle list", "bvid", bvid, "cid", cid, "cookie_len", cookieLen, "cookie_has_sessdata", hasSESSDATA)
 	}
 
+	_ = c.warmupVideoPage(ctx, bvid, page)
+
+	baseQuery := url.Values{}
+	baseQuery.Set("bvid", bvid)
+	baseQuery.Set("cid", fmt.Sprintf("%d", cid))
+	if aid > 0 {
+		baseQuery.Set("aid", fmt.Sprintf("%d", aid))
+	}
+
 	type subtitleEndpoint struct {
 		Name string
 		URL  string
 	}
 
+	wbiQuery := baseQuery.Encode()
+	v2Query := baseQuery.Encode()
+
 	endpoints := []subtitleEndpoint{
 		{
 			Name: "player.wbi.v2",
-			URL:  fmt.Sprintf("https://api.bilibili.com/x/player/wbi/v2?bvid=%s&cid=%d", bvid, cid),
+			URL:  "https://api.bilibili.com/x/player/wbi/v2?" + wbiQuery,
 		},
 		{
 			Name: "player.v2",
-			URL:  fmt.Sprintf("https://api.bilibili.com/x/player/v2?bvid=%s&cid=%d", bvid, cid),
+			URL:  "https://api.bilibili.com/x/player/v2?" + v2Query,
 		},
 	}
 
@@ -867,21 +881,18 @@ func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) 
 			c.logger.Debug("bilibili: subtitle list fetched", "bvid", bvid, "cid", cid, "endpoint", ep.Name, "api_code", result.Code, "subtitle_count", subtitleCount)
 		}
 
+		if ep.Name == "player.wbi.v2" && subtitleCount == 0 {
+			if c.logger != nil {
+				c.logger.Debug("bilibili: wbi subtitle list is empty, skip fallback endpoint to avoid poisoned subtitles", "bvid", bvid, "cid", cid)
+			}
+			return "", nil
+		}
+
 		if subtitleCount == 0 {
 			continue
 		}
 
 		if selected := pickBestSubtitleURL(result.Data.Subtitle.Subtitles); selected != "" {
-			if isAI := isAISubtitleSelection(result.Data.Subtitle.Subtitles, selected); isAI {
-				stable, stableURL := c.confirmAISubtitleURLStable(ctx, ep.URL, selected)
-				if !stable {
-					if c.logger != nil {
-						c.logger.Debug("bilibili: unstable ai subtitle candidate rejected", "bvid", bvid, "cid", cid, "endpoint", ep.Name)
-					}
-					continue
-				}
-				return stableURL, nil
-			}
 			return selected, nil
 		}
 	}
@@ -893,45 +904,25 @@ func (c *Client) GetVideoSubtitleURL(ctx context.Context, bvid string, cid int) 
 	return "", nil
 }
 
-func (c *Client) confirmAISubtitleURLStable(ctx context.Context, endpointURL, selected string) (bool, string) {
-	selectedIdentity := subtitleURLIdentity(selected)
-	if selectedIdentity == "" {
-		return false, ""
+func (c *Client) warmupVideoPage(ctx context.Context, bvid string, page int) error {
+	bvid = strings.TrimSpace(bvid)
+	if bvid == "" {
+		return nil
 	}
-	const probes = 3
-	for i := 0; i < probes; i++ {
-		result, err := c.fetchVideoSubtitleResponse(ctx, endpointURL)
-		if err != nil || result.Data == nil || len(result.Data.Subtitle.Subtitles) == 0 {
-			return false, ""
-		}
-
-		next := pickBestSubtitleURL(result.Data.Subtitle.Subtitles)
-		if next == "" {
-			return false, ""
-		}
-
-		if !isAISubtitleSelection(result.Data.Subtitle.Subtitles, next) {
-			return false, ""
-		}
-
-		nextIdentity := subtitleURLIdentity(next)
-		if nextIdentity == "" || nextIdentity != selectedIdentity {
-			return false, ""
-		}
+	if page <= 0 {
+		page = 1
 	}
 
-	return true, selected
-}
+	videoURL := fmt.Sprintf("https://www.bilibili.com/video/%s?p=%d", bvid, page)
 
-func (c *Client) fetchVideoSubtitleResponse(ctx context.Context, endpointURL string) (*VideoSubtitleResponse, error) {
-	var result VideoSubtitleResponse
-	err := c.execute(ctx, func() error {
-		req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, endpointURL, nil)
+	return c.execute(ctx, func() error {
+		req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
 		if err != nil {
 			return err
 		}
 
 		c.setHeaders(req)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
@@ -939,62 +930,14 @@ func (c *Client) fetchVideoSubtitleResponse(ctx context.Context, endpointURL str
 		}
 		defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
 			return err
 		}
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("bilibili: unexpected status code %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusBadRequest {
+			return fmt.Errorf("bilibili: warmup video page status %d", resp.StatusCode)
 		}
-
-		if err := json.Unmarshal(body, &result); err != nil {
-			return fmt.Errorf("bilibili: decode subtitle list: %w", err)
-		}
-
-		if result.Code != 0 {
-			return fmt.Errorf("bilibili: API error code %d: %s", result.Code, result.Message)
-		}
-
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func isAISubtitleSelection(items []VideoSubtitleItem, selected string) bool {
-	selectedIdentity := subtitleURLIdentity(selected)
-	if selectedIdentity == "" {
-		return false
-	}
-	for _, item := range items {
-		for _, u := range []string{item.SubtitleURL, item.SubtitleURLV2} {
-			if subtitleURLIdentity(u) == selectedIdentity {
-				return item.AiType != 0
-			}
-		}
-	}
-	return false
-}
-
-func subtitleURLIdentity(raw string) string {
-	u := strings.TrimSpace(raw)
-	if u == "" {
-		return ""
-	}
-	if strings.HasPrefix(u, "//") {
-		u = "https:" + u
-	}
-	parsed, err := url.Parse(u)
-	if err != nil {
-		return ""
-	}
-	if parsed.Host == "" {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(parsed.Host + parsed.EscapedPath()))
 }
 
 // GetVideoSubtitleLines fetches subtitle body lines from subtitle URL.
