@@ -18,31 +18,34 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// Repository provides access to the song cache database.
+// Repository provides access to the song cache and configuration databases.
 type Repository struct {
-	db              *gorm.DB
+	cacheDB         *gorm.DB
+	dataDB          *gorm.DB
 	defaultPlatform string
 	defaultQuality  string
 }
 
 // NewSQLiteRepository creates a repository backed by SQLite.
-func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, error) {
-	if dsn == "" {
-		return nil, fmt.Errorf("dsn required")
+func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface) (*Repository, error) {
+	if cacheDSN == "" || dataDSN == "" {
+		return nil, fmt.Errorf("dsns required")
 	}
 
 	if gormLogger == nil {
 		gormLogger = logger.Default.LogMode(logger.Silent)
 	}
 
-	dbDir := filepath.Dir(dsn)
-	if dbDir != "" && dbDir != "." {
-		if err := os.MkdirAll(dbDir, 0755); err != nil {
-			return nil, fmt.Errorf("create database directory: %w", err)
+	for _, dsn := range []string{cacheDSN, dataDSN} {
+		dbDir := filepath.Dir(dsn)
+		if dbDir != "" && dbDir != "." {
+			if err := os.MkdirAll(dbDir, 0755); err != nil {
+				return nil, fmt.Errorf("create database directory: %w", err)
+			}
 		}
 	}
 
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	cacheDB, err := gorm.Open(sqlite.Open(cacheDSN), &gorm.Config{
 		PrepareStmt:            true,
 		SkipDefaultTransaction: true,
 		Logger:                 gormLogger,
@@ -50,69 +53,149 @@ func NewSQLiteRepository(dsn string, gormLogger logger.Interface) (*Repository, 
 	if err != nil {
 		return nil, err
 	}
-
-	if err := applySQLitePragmas(db); err != nil {
+	if err := applySQLitePragmas(cacheDB); err != nil {
 		return nil, err
 	}
 
-	sqlDB, err := db.DB()
+	dataDB, err := gorm.Open(sqlite.Open(dataDSN), &gorm.Config{
+		PrepareStmt:            true,
+		SkipDefaultTransaction: true,
+		Logger:                 gormLogger,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&SongInfoModel{}, &UserSettingsModel{}, &BotStatModel{}); err != nil {
-		return nil, err
-	}
-	if err := db.AutoMigrate(&GroupSettingsModel{}, &PluginSettingModel{}); err != nil {
-		return nil, err
-	}
-	if err := migrateSettingsAutoLinkDetect(db); err != nil {
-		return nil, err
-	}
-	if err := migratePluginSettingsFromLegacyBilibiliParse(db); err != nil {
+	if err := applySQLitePragmas(dataDB); err != nil {
 		return nil, err
 	}
 
-	if err := migrateToMultiPlatform(db); err != nil {
+	if err := performDataMigration(cacheDB, dataDB, cacheDSN); err != nil {
+		return nil, fmt.Errorf("data migration failed: %w", err)
+	}
+
+	if err := cacheDB.AutoMigrate(&SongInfoModel{}); err != nil {
+		return nil, err
+	}
+	if err := dataDB.AutoMigrate(&UserSettingsModel{}, &BotStatModel{}, &GroupSettingsModel{}, &PluginSettingModel{}); err != nil {
 		return nil, err
 	}
 
-	if err := migrateToQualityBasedCache(db); err != nil {
+	if err := migrateSettingsAutoLinkDetect(dataDB); err != nil {
+		return nil, err
+	}
+	if err := migratePluginSettingsFromLegacyBilibiliParse(dataDB); err != nil {
 		return nil, err
 	}
 
-	if err := ensureSQLiteIndexes(db); err != nil {
+	if err := migrateToMultiPlatform(cacheDB); err != nil {
+		return nil, err
+	}
+	if err := migrateToQualityBasedCache(cacheDB); err != nil {
+		return nil, err
+	}
+	if err := ensureSQLiteIndexes(cacheDB); err != nil {
 		return nil, err
 	}
 
 	maxOpen, maxIdle, maxLifetime := sqlitePoolDefaultsFromEnv()
-	sqlDB.SetMaxOpenConns(maxOpen)
-	sqlDB.SetMaxIdleConns(maxIdle)
-	sqlDB.SetConnMaxLifetime(maxLifetime)
+	cacheSQLDB, _ := cacheDB.DB()
+	cacheSQLDB.SetMaxOpenConns(maxOpen)
+	cacheSQLDB.SetMaxIdleConns(maxIdle)
+	cacheSQLDB.SetConnMaxLifetime(maxLifetime)
+
+	dataSQLDB, _ := dataDB.DB()
+	dataSQLDB.SetMaxOpenConns(maxOpen)
+	dataSQLDB.SetMaxIdleConns(maxIdle)
+	dataSQLDB.SetConnMaxLifetime(maxLifetime)
 
 	return &Repository{
-		db:              db,
+		cacheDB:         cacheDB,
+		dataDB:          dataDB,
 		defaultPlatform: "netease",
 		defaultQuality:  "hires",
 	}, nil
 }
 
+// performDataMigration checks if legacy tables exist in cacheDB, backs up the DB, migrates data to dataDB, and drops tables.
+func performDataMigration(cacheDB, dataDB *gorm.DB, cacheDSN string) error {
+	legacyTables := []string{"user_settings", "group_settings", "plugin_settings", "bot_stats"}
+	var tablesToMigrate []string
+	for _, table := range legacyTables {
+		if cacheDB.Migrator().HasTable(table) {
+			tablesToMigrate = append(tablesToMigrate, table)
+		}
+	}
+
+	if len(tablesToMigrate) == 0 {
+		return nil // Nothing to migrate
+	}
+
+	dir := filepath.Dir(cacheDSN)
+	base := filepath.Base(cacheDSN)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if ext == "" {
+		ext = ".db"
+	}
+	backupPath := filepath.Join(dir, fmt.Sprintf("%s-%s%s.bak", name, time.Now().Format("20060102150405"), ext))
+	
+	input, err := os.ReadFile(cacheDSN)
+	if err == nil {
+		_ = os.WriteFile(backupPath, input, 0644)
+	}
+
+	for _, table := range tablesToMigrate {
+		switch table {
+		case "user_settings":
+			_ = dataDB.AutoMigrate(&UserSettingsModel{})
+			var records []UserSettingsModel
+			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
+				dataDB.CreateInBatches(records, 100)
+			}
+		case "group_settings":
+			_ = dataDB.AutoMigrate(&GroupSettingsModel{})
+			var records []GroupSettingsModel
+			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
+				dataDB.CreateInBatches(records, 100)
+			}
+		case "plugin_settings":
+			_ = dataDB.AutoMigrate(&PluginSettingModel{})
+			var records []PluginSettingModel
+			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
+				dataDB.CreateInBatches(records, 100)
+			}
+		case "bot_stats":
+			_ = dataDB.AutoMigrate(&BotStatModel{})
+			var records []BotStatModel
+			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
+				dataDB.CreateInBatches(records, 100)
+			}
+		}
+		_ = cacheDB.Migrator().DropTable(table)
+	}
+
+	return nil
+}
+
 // ConfigurePool updates the database connection pool settings.
 func (r *Repository) ConfigurePool(maxOpen, maxIdle int, maxLifetime time.Duration) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil || r.dataDB == nil {
 		return errors.New("repository not configured")
 	}
-	sqlDB, err := r.db.DB()
-	if err != nil {
-		return err
-	}
-	if maxOpen >= 0 {
-		sqlDB.SetMaxOpenConns(maxOpen)
-	}
-	if maxIdle >= 0 {
-		sqlDB.SetMaxIdleConns(maxIdle)
-	}
-	if maxLifetime >= 0 {
-		sqlDB.SetConnMaxLifetime(maxLifetime)
+	for _, db := range []*gorm.DB{r.cacheDB, r.dataDB} {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return err
+		}
+		if maxOpen >= 0 {
+			sqlDB.SetMaxOpenConns(maxOpen)
+		}
+		if maxIdle >= 0 {
+			sqlDB.SetMaxIdleConns(maxIdle)
+		}
+		if maxLifetime >= 0 {
+			sqlDB.SetConnMaxLifetime(maxLifetime)
+		}
 	}
 	return nil
 }
@@ -249,7 +332,7 @@ func migratePluginSettingsFromLegacyBilibiliParse(db *gorm.DB) error {
 // FindByMusicID returns a cached song by MusicID (legacy NetEase support).
 func (r *Repository) FindByMusicID(ctx context.Context, musicID int) (*bot.SongInfo, error) {
 	var model SongInfoModel
-	err := r.db.WithContext(ctx).Where("platform = ? AND music_id = ?", "netease", musicID).First(&model).Error
+	err := r.cacheDB.WithContext(ctx).Where("platform = ? AND music_id = ?", "netease", musicID).First(&model).Error
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +342,7 @@ func (r *Repository) FindByMusicID(ctx context.Context, musicID int) (*bot.SongI
 // FindByPlatformTrackID returns a cached song by platform, track ID and quality.
 func (r *Repository) FindByPlatformTrackID(ctx context.Context, platform, trackID, quality string) (*bot.SongInfo, error) {
 	var model SongInfoModel
-	err := r.db.WithContext(ctx).Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, quality).First(&model).Error
+	err := r.cacheDB.WithContext(ctx).Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, quality).First(&model).Error
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +351,7 @@ func (r *Repository) FindByPlatformTrackID(ctx context.Context, platform, trackI
 
 // SearchCachedSongs searches cached songs by keyword with optional platform/quality filters.
 func (r *Repository) SearchCachedSongs(ctx context.Context, keyword, platformName, quality string, limit int) ([]*bot.SongInfo, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil {
 		return nil, errors.New("repository not configured")
 	}
 	keyword = strings.TrimSpace(keyword)
@@ -285,7 +368,7 @@ func (r *Repository) SearchCachedSongs(ctx context.Context, keyword, platformNam
 	lowerKeyword := strings.ToLower(keyword)
 	likeValue := "%" + lowerKeyword + "%"
 
-	query := r.db.WithContext(ctx).Model(&SongInfoModel{}).
+	query := r.cacheDB.WithContext(ctx).Model(&SongInfoModel{}).
 		Where("file_id <> ''").
 		Where("song_name <> ''").
 		Where("(LOWER(song_name) LIKE ? OR LOWER(song_artists) LIKE ? OR LOWER(song_album) LIKE ?)", likeValue, likeValue, likeValue)
@@ -324,10 +407,10 @@ func (r *Repository) SearchCachedSongs(ctx context.Context, keyword, platformNam
 
 // FindRandomCachedSong returns a random cached song with valid file payload.
 func (r *Repository) FindRandomCachedSong(ctx context.Context) (*bot.SongInfo, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil {
 		return nil, errors.New("repository not configured")
 	}
-	query := r.db.WithContext(ctx).
+	query := r.cacheDB.WithContext(ctx).
 		Model(&SongInfoModel{}).
 		Where("file_id <> ''").
 		Where("song_name <> ''")
@@ -342,7 +425,7 @@ func (r *Repository) FindRandomCachedSong(ctx context.Context) (*bot.SongInfo, e
 	offset := rand.Int63n(count)
 
 	var model SongInfoModel
-	err := r.db.WithContext(ctx).
+	err := r.cacheDB.WithContext(ctx).
 		Model(&SongInfoModel{}).
 		Where("file_id <> ''").
 		Where("song_name <> ''").
@@ -361,7 +444,7 @@ func (r *Repository) FindRandomCachedSong(ctx context.Context) (*bot.SongInfo, e
 // FindByFileID returns a cached song by FileID.
 func (r *Repository) FindByFileID(ctx context.Context, fileID string) (*bot.SongInfo, error) {
 	var model SongInfoModel
-	err := r.db.WithContext(ctx).Where("file_id = ?", fileID).First(&model).Error
+	err := r.cacheDB.WithContext(ctx).Where("file_id = ?", fileID).First(&model).Error
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +456,7 @@ func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
 	if song != nil && song.ID != 0 {
 		return r.Update(ctx, song)
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := toModel(song)
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{
@@ -421,7 +504,7 @@ func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
 
 // Update updates an existing song record.
 func (r *Repository) Update(ctx context.Context, song *bot.SongInfo) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		model := toModel(song)
 		return tx.Save(model).Error
 	})
@@ -429,40 +512,40 @@ func (r *Repository) Update(ctx context.Context, song *bot.SongInfo) error {
 
 // Delete removes a song by MusicID (legacy NetEase support).
 func (r *Repository) Delete(ctx context.Context, musicID int) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&SongInfoModel{}, "platform = ? AND music_id = ?", "netease", musicID).Error
 	})
 }
 
 // DeleteAll clears all cached songs.
 func (r *Repository) DeleteAll(ctx context.Context) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil {
 		return errors.New("repository not configured")
 	}
-	return r.db.WithContext(ctx).
+	return r.cacheDB.WithContext(ctx).
 		Session(&gorm.Session{AllowGlobalUpdate: true}).
 		Delete(&SongInfoModel{}).Error
 }
 
 // DeleteAllByPlatform clears cached songs for a specific platform.
 func (r *Repository) DeleteAllByPlatform(ctx context.Context, platform string) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil {
 		return errors.New("repository not configured")
 	}
-	return r.db.WithContext(ctx).
+	return r.cacheDB.WithContext(ctx).
 		Where("platform = ?", platform).
 		Delete(&SongInfoModel{}).Error
 }
 
 // DeleteByPlatformTrackID removes a song by platform, track ID and quality.
 func (r *Repository) DeleteByPlatformTrackID(ctx context.Context, platform, trackID, quality string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&SongInfoModel{}, "platform = ? AND track_id = ? AND quality = ?", platform, trackID, quality).Error
 	})
 }
 
 func (r *Repository) DeleteAllQualitiesByPlatformTrackID(ctx context.Context, platform, trackID string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&SongInfoModel{}, "platform = ? AND track_id = ?", platform, trackID).Error
 	})
 }
@@ -470,34 +553,34 @@ func (r *Repository) DeleteAllQualitiesByPlatformTrackID(ctx context.Context, pl
 // Count returns total cached songs.
 func (r *Repository) Count(ctx context.Context) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Count(&count).Error
+	err := r.cacheDB.WithContext(ctx).Model(&SongInfoModel{}).Count(&count).Error
 	return count, err
 }
 
 // CountByUserID returns cached count by user ID.
 func (r *Repository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Where("from_user_id = ?", userID).Count(&count).Error
+	err := r.cacheDB.WithContext(ctx).Model(&SongInfoModel{}).Where("from_user_id = ?", userID).Count(&count).Error
 	return count, err
 }
 
 // CountByChatID returns cached count by chat ID.
 func (r *Repository) CountByChatID(ctx context.Context, chatID int64) (int64, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).Where("from_chat_id = ?", chatID).Count(&count).Error
+	err := r.cacheDB.WithContext(ctx).Model(&SongInfoModel{}).Where("from_chat_id = ?", chatID).Count(&count).Error
 	return count, err
 }
 
 // CountByPlatform returns cached counts grouped by platform.
 func (r *Repository) CountByPlatform(ctx context.Context) (map[string]int64, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil {
 		return nil, errors.New("repository not configured")
 	}
 	rows := make([]struct {
 		Platform string
 		Count    int64
 	}, 0)
-	err := r.db.WithContext(ctx).Model(&SongInfoModel{}).
+	err := r.cacheDB.WithContext(ctx).Model(&SongInfoModel{}).
 		Select("platform, COUNT(*) as count").
 		Group("platform").
 		Scan(&rows).Error
@@ -513,11 +596,11 @@ func (r *Repository) CountByPlatform(ctx context.Context) (map[string]int64, err
 
 // GetSendCount returns total successful send count.
 func (r *Repository) GetSendCount(ctx context.Context) (int64, error) {
-	if r == nil || r.db == nil {
+	if r == nil || r.dataDB == nil {
 		return 0, errors.New("repository not configured")
 	}
 	var stat BotStatModel
-	err := r.db.WithContext(ctx).Where("key = ?", "send_count").First(&stat).Error
+	err := r.dataDB.WithContext(ctx).Where("key = ?", "send_count").First(&stat).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, nil
 	}
@@ -529,10 +612,10 @@ func (r *Repository) GetSendCount(ctx context.Context) (int64, error) {
 
 // IncrementSendCount increments total successful send count.
 func (r *Repository) IncrementSendCount(ctx context.Context) error {
-	if r == nil || r.db == nil {
+	if r == nil || r.dataDB == nil {
 		return errors.New("repository not configured")
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.dataDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&BotStatModel{}).Where("key = ?", "send_count").UpdateColumn("value", gorm.Expr("value + ?", 1))
 		if res.Error != nil {
 			return res.Error
@@ -547,7 +630,7 @@ func (r *Repository) IncrementSendCount(ctx context.Context) error {
 // Last returns the last cached record.
 func (r *Repository) Last(ctx context.Context) (*bot.SongInfo, error) {
 	var model SongInfoModel
-	if err := r.db.WithContext(ctx).Last(&model).Error; err != nil {
+	if err := r.cacheDB.WithContext(ctx).Last(&model).Error; err != nil {
 		return nil, err
 	}
 	return toInternal(model), nil
@@ -653,7 +736,7 @@ func groupSettingsToInternal(settings GroupSettingsModel) *bot.GroupSettings {
 // GetUserSettings retrieves settings for a user, creating default if not exists.
 func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.UserSettings, error) {
 	var settings UserSettingsModel
-	err := r.db.WithContext(ctx).
+	err := r.dataDB.WithContext(ctx).
 		Where(UserSettingsModel{UserID: userID}).
 		Attrs(UserSettingsModel{
 			DefaultPlatform: r.defaultPlatform,
@@ -663,7 +746,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 		}).
 		FirstOrCreate(&settings).Error
 	if isSQLiteUniqueConstraint(err) {
-		err = r.db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
+		err = r.dataDB.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error
 	}
 	if err != nil {
 		return nil, err
@@ -674,7 +757,7 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 // GetGroupSettings retrieves settings for a group, creating default if not exists.
 func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.GroupSettings, error) {
 	var settings GroupSettingsModel
-	err := r.db.WithContext(ctx).
+	err := r.dataDB.WithContext(ctx).
 		Where(GroupSettingsModel{ChatID: chatID}).
 		Attrs(GroupSettingsModel{
 			DefaultPlatform: r.defaultPlatform,
@@ -684,7 +767,7 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 		}).
 		FirstOrCreate(&settings).Error
 	if isSQLiteUniqueConstraint(err) {
-		err = r.db.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
+		err = r.dataDB.WithContext(ctx).Where("chat_id = ?", chatID).First(&settings).Error
 	}
 	if err != nil {
 		return nil, err
@@ -717,7 +800,7 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
 	}
-	return r.db.WithContext(ctx).Save(&model).Error
+	return r.dataDB.WithContext(ctx).Save(&model).Error
 }
 
 // UpdateGroupSettings updates group settings.
@@ -737,13 +820,13 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
 	}
-	return r.db.WithContext(ctx).Save(&model).Error
+	return r.dataDB.WithContext(ctx).Save(&model).Error
 }
 
 // GetPluginSetting returns plugin setting value by scope/plugin/key.
 func (r *Repository) GetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string) (string, error) {
 	var model PluginSettingModel
-	err := r.db.WithContext(ctx).
+	err := r.dataDB.WithContext(ctx).
 		Where("scope_type = ? AND scope_id = ? AND plugin = ? AND setting_key = ?", scopeType, scopeID, plugin, key).
 		First(&model).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -768,7 +851,7 @@ func (r *Repository) SetPluginSetting(ctx context.Context, scopeType string, sco
 		return fmt.Errorf("invalid plugin setting key")
 	}
 
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	return r.dataDB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "scope_type"}, {Name: "scope_id"}, {Name: "plugin"}, {Name: "setting_key"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"setting_value": model.SettingValue,
@@ -779,12 +862,14 @@ func (r *Repository) SetPluginSetting(ctx context.Context, scopeType string, sco
 
 // Close closes the database connection.
 func (r *Repository) Close() error {
-	if r == nil || r.db == nil {
+	if r == nil || r.cacheDB == nil || r.dataDB == nil {
 		return nil
 	}
-	sqlDB, err := r.db.DB()
-	if err != nil {
-		return fmt.Errorf("get sql.DB: %w", err)
+	if sqlDB, err := r.cacheDB.DB(); err == nil {
+		_ = sqlDB.Close()
 	}
-	return sqlDB.Close()
+	if sqlDB, err := r.dataDB.DB(); err == nil {
+		_ = sqlDB.Close()
+	}
+	return nil
 }

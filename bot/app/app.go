@@ -153,8 +153,12 @@ func initRepository(conf *config.Config, log *logpkg.Logger) (*db.Repository, er
 	if strings.TrimSpace(databasePath) == "" {
 		databasePath = "cache.db"
 	}
+	dataDatabasePath := conf.GetString("DataDatabase")
+	if strings.TrimSpace(dataDatabasePath) == "" {
+		dataDatabasePath = "data.db"
+	}
 
-	repo, err := db.NewSQLiteRepository(databasePath, gormLogger)
+	repo, err := db.NewSQLiteRepository(databasePath, dataDatabasePath, gormLogger)
 	if err != nil {
 		return nil, fmt.Errorf("init db: %w", err)
 	}
