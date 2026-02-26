@@ -11,6 +11,10 @@ const (
 	ParseModeOn           = "on"
 	ParseModeMusicKichiku = "music_kichiku"
 	ParseModeOff          = "off"
+
+	SearchFilterKey = "search_filter_kichiku"
+	SearchFilterOn  = "on"
+	SearchFilterOff = "off"
 )
 
 func ParseModeDefinition() botpkg.PluginSettingDefinition {
@@ -37,5 +41,22 @@ func normalizeParseMode(mode string) string {
 		return strings.TrimSpace(mode)
 	default:
 		return ParseModeOn
+	}
+}
+
+func SearchFilterDefinition() botpkg.PluginSettingDefinition {
+	return botpkg.PluginSettingDefinition{
+		Plugin:                "bilibili",
+		Key:                   SearchFilterKey,
+		Title:                 "B站搜索默认筛选音乐/鬼畜区内容",
+		Description:           "在Bilibili搜索时，是否仅搜寻音乐/鬼畜相关分区（如关闭则搜索所有）",
+		DefaultUser:           SearchFilterOn,
+		DefaultGroup:          SearchFilterOn,
+		RequireAutoLinkDetect: false,
+		Order:                 110,
+		Options: []botpkg.PluginSettingOption{
+			{Value: SearchFilterOn, Label: "开"},
+			{Value: SearchFilterOff, Label: "关"},
+		},
 	}
 }

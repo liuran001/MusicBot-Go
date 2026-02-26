@@ -36,15 +36,20 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		autoRenewPersist = cfg.GetPluginBool("bilibili", "auto_renew_persist_enabled")
 	}
 	autoRenewPersistPath := cfg.GetPluginString("bilibili", "auto_renew_persist_path")
+	searchMaxPages := cfg.GetPluginInt("bilibili", "search_max_pages")
+	if searchMaxPages <= 0 {
+		searchMaxPages = 5
+	}
 
 	client := New(logger, cookie, refreshToken, autoRenewEnabled, interval, autoRenewPersist, autoRenewPersistPath)
 	client.StartAutoRefreshDaemon(context.Background())
-	platform := NewPlatform(client)
+	platform := NewPlatform(client, searchMaxPages)
 
 	contrib := &platformplugins.Contribution{
 		Platform: platform,
 		SettingDefinitions: []botpkg.PluginSettingDefinition{
 			ParseModeDefinition(),
+			SearchFilterDefinition(),
 		},
 		// ID3 is skipped since Bilibili audio does not usually serve ID3 tags directly in the same way,
 		// or if we needed to, we'd add an id3provider.go later.

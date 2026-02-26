@@ -158,7 +158,7 @@ func TestSearchHandler_buildSearchPage_Basic(t *testing.T) {
 		},
 	}
 
-	pageText, keyboard := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 1, nil, false, 48)
+	pageText, keyboard := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 1, nil, false, 48, true, "")
 
 	if !strings.Contains(pageText, "test") {
 		t.Errorf("buildSearchPage: pageText missing keyword 'test'")
@@ -203,7 +203,7 @@ func TestSearchHandler_buildSearchPage_Pagination(t *testing.T) {
 		}
 	}
 
-	pageText, keyboard := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 1, nil, false, 48)
+	pageText, keyboard := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 1, nil, false, 48, true, "")
 	if !strings.Contains(pageText, "1/3") {
 		t.Errorf("buildSearchPage page 1: missing pagination '1/3'")
 	}
@@ -221,7 +221,7 @@ func TestSearchHandler_buildSearchPage_Pagination(t *testing.T) {
 		t.Errorf("buildSearchPage page 1: second nav button = %q, want %q", navRow[1].Text, "➡️ 下一页")
 	}
 
-	pageText2, keyboard2 := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 2, nil, false, 48)
+	pageText2, keyboard2 := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 2, nil, false, 48, true, "")
 	if !strings.Contains(pageText2, "2/3") {
 		t.Errorf("buildSearchPage page 2: missing pagination '2/3'")
 	}
@@ -236,7 +236,7 @@ func TestSearchHandler_buildSearchPage_Pagination(t *testing.T) {
 		t.Errorf("buildSearchPage page 2: second nav button = %q, want %q", navRow2[1].Text, "➡️ 下一页")
 	}
 
-	pageText3, keyboard3 := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 3, nil, false, 48)
+	pageText3, keyboard3 := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 3, nil, false, 48, true, "")
 	if !strings.Contains(pageText3, "3/3") {
 		t.Errorf("buildSearchPage page 3: missing pagination '3/3'")
 	}
@@ -259,7 +259,7 @@ func TestSearchHandler_buildSearchPage_SinglePage(t *testing.T) {
 		{ID: "1", Title: "Song", Artists: []platform.Artist{{Name: "Artist"}}},
 	}
 
-	pageText, keyboard := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 1, nil, false, 48)
+	pageText, keyboard := handler.buildSearchPage(tracks, "netease", "test", "hires", 12345, 100, 1, nil, false, 48, true, "")
 	if strings.Contains(pageText, "/") {
 		t.Errorf("buildSearchPage single page: should not show pagination")
 	}
