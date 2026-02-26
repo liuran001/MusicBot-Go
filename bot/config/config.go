@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/spf13/viper"
 	"gopkg.in/ini.v1"
@@ -18,6 +20,8 @@ type PluginConfig map[string]interface{}
 type Config struct {
 	v       *viper.Viper
 	plugins map[string]PluginConfig
+	path    string
+	mu      sync.Mutex
 }
 
 // Load reads an INI config file and prepares defaults.
@@ -37,6 +41,7 @@ func Load(path string) (*Config, error) {
 		c := &Config{
 			v:       v,
 			plugins: make(map[string]PluginConfig),
+			path:    path,
 		}
 
 		loadPlugins(cfg, c)
@@ -54,11 +59,85 @@ func Load(path string) (*Config, error) {
 	c := &Config{
 		v:       v,
 		plugins: make(map[string]PluginConfig),
+		path:    path,
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	return c, nil
+}
+
+// PersistPluginConfig writes plugin key-values back to current config file.
+// It always upserts [plugins.<name>] and missing keys/sections automatically.
+func (c *Config) PersistPluginConfig(plugin string, pairs map[string]string) error {
+	if c == nil {
+		return fmt.Errorf("config is nil")
+	}
+	plugin = strings.TrimSpace(plugin)
+	if plugin == "" {
+		return fmt.Errorf("plugin name empty")
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	path := strings.TrimSpace(c.path)
+	if path == "" {
+		path = strings.TrimSpace(c.v.ConfigFileUsed())
+	}
+	if path == "" {
+		path = "config.ini"
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := ensureParentDir(path); err != nil {
+		return err
+	}
+
+	iniCfg, err := ini.Load(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		iniCfg = ini.Empty()
+	}
+
+	section := iniCfg.Section("plugins." + plugin)
+	for key, value := range pairs {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		section.Key(key).SetValue(value)
+	}
+	if err := iniCfg.SaveTo(path); err != nil {
+		return err
+	}
+
+	pluginCfg, ok := c.plugins[plugin]
+	if !ok || pluginCfg == nil {
+		pluginCfg = make(PluginConfig)
+		c.plugins[plugin] = pluginCfg
+	}
+	for key, value := range pairs {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		pluginCfg[key] = value
+	}
+
+	return nil
+}
+
+func ensureParentDir(path string) error {
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	return os.MkdirAll(dir, 0o755)
 }
 
 // Validate checks critical configuration values for sane ranges.

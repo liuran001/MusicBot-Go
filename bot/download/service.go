@@ -34,14 +34,15 @@ type DownloadService struct {
 }
 
 type inflightDownload struct {
-	done    chan struct{}
-	temp    string
-	written int64
-	size    int64
-	format  string
-	err     error
-	refs    int
-	closed  bool
+	done      chan struct{}
+	temp      string
+	written   int64
+	size      int64
+	format    string
+	sourceURL string
+	err       error
+	refs      int
+	closed    bool
 }
 
 type DownloadServiceOptions struct {
@@ -179,6 +180,7 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 		call.err = err
 		call.size = infoCopy.Size
 		call.format = infoCopy.Format
+		call.sourceURL = strings.TrimSpace(infoCopy.URL)
 		s.inflightMu.Lock()
 		call.closed = true
 		s.inflightMu.Unlock()
@@ -200,6 +202,9 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 		}
 		if strings.TrimSpace(info.Format) == "" && strings.TrimSpace(call.format) != "" {
 			info.Format = call.format
+		}
+		if strings.TrimSpace(call.sourceURL) != "" {
+			info.URL = call.sourceURL
 		}
 	}
 
@@ -229,55 +234,93 @@ func (s *DownloadService) downloadToPath(ctx context.Context, info *platform.Dow
 		return 0, errors.New("dest path missing")
 	}
 
-	baseURL := rewriteNeteaseHost(info.URL)
-
-	if s.multipartEnabled && s.multipartDownloader != nil {
-		written, err := s.tryMultipartDownload(ctx, baseURL, info, destPath, progress)
-		if err == nil {
-			if s.checkMD5 && info.MD5 != "" {
-				if ok, err := util.VerifyMD5(destPath, info.MD5); err != nil || !ok {
-					_ = os.Remove(destPath)
-					if err != nil {
-						return 0, err
-					}
-					return 0, errors.New("md5 verification failed")
-				}
-			}
-			return written, nil
-		}
-	}
-
+	urls := candidateDownloadURLs(info)
 	var lastErr error
-	for attempt := 0; attempt < s.maxRetries; attempt++ {
-		written, err := s.downloadOnce(ctx, baseURL, info, destPath, progress)
-		if err == nil {
-			if info.Size > 0 && written < info.Size {
-				_ = os.Remove(destPath)
-				return 0, fmt.Errorf("incomplete download: got %d bytes, expected %d", written, info.Size)
-			}
-			if s.checkMD5 && info.MD5 != "" {
-				if ok, err := util.VerifyMD5(destPath, info.MD5); err != nil || !ok {
-					_ = os.Remove(destPath)
-					if err != nil {
-						return 0, err
+	for idx, raw := range urls {
+		info.URL = raw
+		baseURL := rewriteNeteaseHost(raw)
+
+		if s.multipartEnabled && s.multipartDownloader != nil {
+			written, err := s.tryMultipartDownload(ctx, baseURL, info, destPath, progress)
+			if err == nil {
+				if s.checkMD5 && info.MD5 != "" {
+					if ok, err := util.VerifyMD5(destPath, info.MD5); err != nil || !ok {
+						_ = os.Remove(destPath)
+						if err != nil {
+							return 0, err
+						}
+						return 0, errors.New("md5 verification failed")
 					}
-					return 0, errors.New("md5 verification failed")
+				}
+				return written, nil
+			}
+			lastErr = err
+			_ = os.Remove(destPath)
+		}
+
+		for attempt := 0; attempt < s.maxRetries; attempt++ {
+			written, err := s.downloadOnce(ctx, baseURL, info, destPath, progress)
+			if err == nil {
+				if info.Size > 0 && written < info.Size {
+					_ = os.Remove(destPath)
+					return 0, fmt.Errorf("incomplete download: got %d bytes, expected %d", written, info.Size)
+				}
+				if s.checkMD5 && info.MD5 != "" {
+					if ok, err := util.VerifyMD5(destPath, info.MD5); err != nil || !ok {
+						_ = os.Remove(destPath)
+						if err != nil {
+							return 0, err
+						}
+						return 0, errors.New("md5 verification failed")
+					}
+				}
+				return written, nil
+			}
+			lastErr = err
+			_ = os.Remove(destPath)
+			if attempt < s.maxRetries-1 {
+				wait := retryDelayWithJitter(attempt)
+				select {
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				case <-time.After(wait):
 				}
 			}
-			return written, nil
 		}
-		lastErr = err
-		_ = os.Remove(destPath)
-		if attempt < s.maxRetries-1 {
-			wait := retryDelayWithJitter(attempt)
+
+		if idx < len(urls)-1 {
 			select {
 			case <-ctx.Done():
 				return 0, ctx.Err()
-			case <-time.After(wait):
+			default:
 			}
 		}
 	}
 	return 0, lastErr
+}
+
+func candidateDownloadURLs(info *platform.DownloadInfo) []string {
+	if info == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, 1+len(info.CandidateURLs))
+	urls := make([]string, 0, 1+len(info.CandidateURLs))
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		if _, ok := seen[raw]; ok {
+			return
+		}
+		seen[raw] = struct{}{}
+		urls = append(urls, raw)
+	}
+	add(info.URL)
+	for _, item := range info.CandidateURLs {
+		add(item)
+	}
+	return urls
 }
 
 func (s *DownloadService) acquireInflight(key string) (*inflightDownload, bool) {

@@ -4,13 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/ini.v1"
 )
 
 const (
@@ -49,17 +45,13 @@ func (c *Client) setCookie(value string) {
 }
 
 func (c *Client) persistCookie(cookie string) {
-	if !c.autoRenew.persist {
+	if c.persistFunc == nil {
 		return
 	}
 	if strings.TrimSpace(cookie) == "" {
 		return
 	}
-	path := strings.TrimSpace(c.autoRenew.path)
-	if path == "" {
-		path = "config.ini"
-	}
-	if err := writeCookieToIni(path, cookie); err != nil {
+	if err := c.persistFunc(map[string]string{"cookie": cookie}); err != nil {
 		c.logWarn(fmt.Sprintf("qqmusic: persist cookie failed: %v", err))
 	}
 }
@@ -200,42 +192,6 @@ func updateCookieWithData(original string, data refreshData) string {
 	updateIfNonEmpty(cookieMap, "psrf_qqunionid", data.UnionID)
 	updateIfNonEmpty(cookieMap, "login_type", data.LoginType)
 	return renderCookie(cookieMap)
-}
-
-func writeCookieToIni(path string, cookie string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return fmt.Errorf("persist path empty")
-	}
-	if err := ensureParentDir(path); err != nil {
-		return err
-	}
-	cfg, err := ini.Load(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		cfg = ini.Empty()
-	}
-	section := cfg.Section("plugins.qqmusic")
-	section.Key("cookie").SetValue(cookie)
-	prevPretty := ini.PrettyFormat
-	prevEqual := ini.PrettyEqual
-	ini.PrettyFormat = false
-	ini.PrettyEqual = true
-	defer func() {
-		ini.PrettyFormat = prevPretty
-		ini.PrettyEqual = prevEqual
-	}()
-	return cfg.SaveTo(path)
-}
-
-func ensureParentDir(path string) error {
-	dir := filepath.Dir(path)
-	if dir == "." || dir == "" {
-		return nil
-	}
-	return os.MkdirAll(dir, 0o755)
 }
 
 func updateIfNonEmpty(cookieMap map[string]string, key, value string) {

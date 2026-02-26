@@ -166,14 +166,15 @@ type TrackMetadata struct {
 }
 
 type DownloadInfo struct {
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Size      int64             `json:"size"`
-	Format    string            `json:"format"`
-	Bitrate   int               `json:"bitrate"`
-	MD5       string            `json:"md5,omitempty"`
-	Quality   Quality           `json:"quality"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	URL           string            `json:"url"`
+	CandidateURLs []string          `json:"candidate_urls,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	Size          int64             `json:"size"`
+	Format        string            `json:"format"`
+	Bitrate       int               `json:"bitrate"`
+	MD5           string            `json:"md5,omitempty"`
+	Quality       Quality           `json:"quality"`
+	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
 }
 
 type Capabilities struct {

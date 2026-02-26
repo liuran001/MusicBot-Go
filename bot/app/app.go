@@ -348,7 +348,10 @@ func (a *App) Start(ctx context.Context) error {
 	whitelist := handler.NewWhitelist(a.Config.GetBool("EnableWhitelist"), whitelistIDs, a.AdminIDs, a.ConfigPath)
 
 	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
-	adminCommands = append(adminCommands, handler.BuildCheckCookieCommand(a.PlatformManager), handler.BuildCookieRenewCommand(a.PlatformManager))
+	adminCommands = append(adminCommands,
+		handler.BuildCheckCookieCommand(a.PlatformManager),
+		handler.BuildCookieRenewCommand(a.PlatformManager),
+	)
 	if whitelist.Enabled() {
 		adminCommands = append(adminCommands, BuildWhitelistCommand(whitelist))
 	}

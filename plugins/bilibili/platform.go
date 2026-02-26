@@ -110,6 +110,7 @@ func selectedBilibiliPage(videoInfo *VideoInfoData, requestedPage int) (page Vid
 // BilibiliPlatform implements the Platform interface for Bilibili Audio & Video.
 type BilibiliPlatform struct {
 	client                 *Client
+	streamURLPriority      string
 	mu                     sync.Mutex
 	cache                  map[string]*bilibiliSearchSession
 	searchMaxPagesPerPhase int
@@ -134,9 +135,17 @@ func NewPlatform(client *Client, searchMaxPagesPerPhase int) *BilibiliPlatform {
 	}
 	return &BilibiliPlatform{
 		client:                 client,
+		streamURLPriority:      "base",
 		cache:                  make(map[string]*bilibiliSearchSession),
 		searchMaxPagesPerPhase: searchMaxPagesPerPhase,
 	}
+}
+
+func (b *BilibiliPlatform) ConfigureStreamURLPriority(priority string) {
+	if b == nil {
+		return
+	}
+	b.streamURLPriority = normalizeStreamURLPriority(priority)
 }
 
 // Name returns the platform identifier.
@@ -463,14 +472,19 @@ func (b *BilibiliPlatform) getAudioDownloadInfo(ctx context.Context, trackID str
 		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
 	}
 
-	url := streamData.Cdns[0]
+	candidates := prioritizeCDNs(streamData.Cdns, b.streamURLPriority)
+	if len(candidates) == 0 {
+		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
+	}
+	url := candidates[0]
 	expiresAt := time.Now().Add(time.Duration(streamData.Timeout) * time.Second)
 	info := &platform.DownloadInfo{
-		URL:       url,
-		Size:      int64(streamData.Size),
-		Format:    "mp3",
-		Quality:   b.resolveQualityCode(streamData.Type),
-		ExpiresAt: &expiresAt,
+		URL:           url,
+		CandidateURLs: candidates,
+		Size:          int64(streamData.Size),
+		Format:        "mp3",
+		Quality:       b.resolveQualityCode(streamData.Type),
+		ExpiresAt:     &expiresAt,
 		Headers: map[string]string{
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 			"Referer":    "https://www.bilibili.com/",
@@ -553,12 +567,19 @@ func (b *BilibiliPlatform) getVideoDownloadInfo(ctx context.Context, trackID str
 	expiresAt := time.Now().Add(110 * time.Minute)
 
 	// Format is usually derived from codec, we default to m4a instead of mp4 for audio
+	candidates := prioritizeCDNs(selectedStream.CandidateURLs(), b.streamURLPriority)
+	if len(candidates) == 0 {
+		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
+	}
+	selectedURL := candidates[0]
+
 	info := &platform.DownloadInfo{
-		URL:       selectedStream.BaseURL,
-		Size:      0, // the API does not always return raw sizes unless accessed with HEAD
-		Format:    "m4a",
-		Quality:   resolvedQuality,
-		ExpiresAt: &expiresAt,
+		URL:           selectedURL,
+		CandidateURLs: candidates,
+		Size:          0, // the API does not always return raw sizes unless accessed with HEAD
+		Format:        "m4a",
+		Quality:       resolvedQuality,
+		ExpiresAt:     &expiresAt,
 		Headers: map[string]string{
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 			"Referer":    "https://www.bilibili.com/",
@@ -566,6 +587,40 @@ func (b *BilibiliPlatform) getVideoDownloadInfo(ctx context.Context, trackID str
 	}
 
 	return info, nil
+}
+
+func normalizeStreamURLPriority(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "backup" || raw == "backup_first" || raw == "b" {
+		return "backup"
+	}
+	return "base"
+}
+
+func prioritizeCDNs(cdns []string, priority string) []string {
+	cleaned := make([]string, 0, len(cdns))
+	seen := make(map[string]struct{}, len(cdns))
+	for _, item := range cdns {
+		url := strings.TrimSpace(item)
+		if url == "" {
+			continue
+		}
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		seen[url] = struct{}{}
+		cleaned = append(cleaned, url)
+	}
+	if len(cleaned) <= 1 {
+		return cleaned
+	}
+	if normalizeStreamURLPriority(priority) != "backup" {
+		return cleaned
+	}
+	ordered := make([]string, 0, len(cleaned))
+	ordered = append(ordered, cleaned[1:]...)
+	ordered = append(ordered, cleaned[0])
+	return ordered
 }
 
 // GetTrack retrieves song detailing info

@@ -11,7 +11,7 @@ import (
 
 func getTestClient() *Client {
 	logger, _ := logpkg.New("debug", "text", false)
-	return New(logger, "", "", false, 0, false, "")
+	return New(logger, "", "", false, 0, nil)
 }
 
 func TestClient_GetAudioSongInfo(t *testing.T) {

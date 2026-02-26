@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
-	"gopkg.in/ini.v1"
 )
 
 var correspondPathPublicKey *rsa.PublicKey
@@ -243,14 +242,14 @@ func (c *Client) CheckAndRefreshCookie(ctx context.Context) error {
 	c.refreshToken = confirm.Data.RefreshToken
 	c.cookieMutex.Unlock()
 
-	// 5. Persist to config.ini
+	// 5. Persist by host app
 	if err := c.saveCookieToConfig(updatedCookieStr, confirm.Data.RefreshToken); err != nil {
 		if c.logger != nil {
-			c.logger.Error("bilibili: failed to persist refreshed cookie to config", "err", err)
+			c.logger.Error("bilibili: failed to persist refreshed cookie", "err", err)
 		}
 	} else {
 		if c.logger != nil {
-			c.logger.Info("bilibili: cookie successfully refreshed and saved to config.ini")
+			c.logger.Info("bilibili: cookie successfully refreshed and persisted")
 		}
 	}
 
@@ -306,36 +305,13 @@ func (c *Client) mergeCookies(oldCookie string, newCookies []*http.Cookie, newAc
 	return strings.Join(segments, "; ")
 }
 
-// saveCookieToConfig saves the updated cookie and refresh token back to the user's config.ini preserving structure
+// saveCookieToConfig delegates persistence to host app unified writer.
 func (c *Client) saveCookieToConfig(cookieStr string, refreshTokenStr string) error {
-	if !c.autoRenew.persist {
+	if c.persistFunc == nil {
 		return nil
 	}
-	path := strings.TrimSpace(c.autoRenew.path)
-	if path == "" {
-		path = "config.ini"
-	}
-	cfg, err := ini.Load(path)
-	if err != nil {
-		return err
-	}
-
-	sec := cfg.Section("plugins.bilibili")
-	if sec == nil {
-		return fmt.Errorf("section [plugins.bilibili] not found")
-	}
-
-	if !sec.HasKey("cookie") {
-		sec.NewKey("cookie", cookieStr)
-	} else {
-		sec.Key("cookie").SetValue(cookieStr)
-	}
-
-	if !sec.HasKey("refresh_token") {
-		sec.NewKey("refresh_token", refreshTokenStr)
-	} else {
-		sec.Key("refresh_token").SetValue(refreshTokenStr)
-	}
-
-	return cfg.SaveTo(path)
+	return c.persistFunc(map[string]string{
+		"cookie":        cookieStr,
+		"refresh_token": refreshTokenStr,
+	})
 }

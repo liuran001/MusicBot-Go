@@ -30,13 +30,12 @@ type Client struct {
 	refreshToken string
 	cookieMutex  sync.RWMutex
 	autoRenew    bilibiliAutoRenewConfig
+	persistFunc  func(map[string]string) error
 }
 
 type bilibiliAutoRenewConfig struct {
 	enabled  bool
 	interval time.Duration
-	persist  bool
-	path     string
 }
 
 // AudioSongInfoRequestParams for requesting Audio song info
@@ -131,11 +130,37 @@ type VideoInfoResponse struct {
 
 // VideoDashAudio represents an audio stream within the DASH format
 type VideoDashAudio struct {
-	ID        int    `json:"id"`
-	BaseURL   string `json:"baseUrl"`
-	Bandwidth int    `json:"bandwidth"`
-	MimeType  string `json:"mimeType"`
-	Codecs    string `json:"codecs"`
+	ID             int      `json:"id"`
+	BaseURL        string   `json:"baseUrl"`
+	Bandwidth      int      `json:"bandwidth"`
+	MimeType       string   `json:"mimeType"`
+	Codecs         string   `json:"codecs"`
+	BackupURL      []string `json:"backupUrl"`
+	BackupURLSnake []string `json:"backup_url"`
+}
+
+func (v VideoDashAudio) CandidateURLs() []string {
+	seen := make(map[string]struct{})
+	urls := make([]string, 0, 1+len(v.BackupURL)+len(v.BackupURLSnake))
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		if _, ok := seen[raw]; ok {
+			return
+		}
+		seen[raw] = struct{}{}
+		urls = append(urls, raw)
+	}
+	add(v.BaseURL)
+	for _, item := range v.BackupURL {
+		add(item)
+	}
+	for _, item := range v.BackupURLSnake {
+		add(item)
+	}
+	return urls
 }
 
 type VideoPlayUrlData struct {
@@ -213,7 +238,7 @@ type SubtitleBodyResponse struct {
 }
 
 // New returns an instance of Bilibili client.
-func New(logger bot.Logger, cookie string, refreshToken string, autoRenewEnabled bool, autoRenewInterval time.Duration, autoRenewPersist bool, autoRenewPersistPath string) *Client {
+func New(logger bot.Logger, cookie string, refreshToken string, autoRenewEnabled bool, autoRenewInterval time.Duration, persist func(map[string]string) error) *Client {
 	c := &Client{
 		httpClient:   retryablehttp.NewClient(),
 		maxRetries:   3,
@@ -225,9 +250,8 @@ func New(logger bot.Logger, cookie string, refreshToken string, autoRenewEnabled
 		autoRenew: bilibiliAutoRenewConfig{
 			enabled:  autoRenewEnabled,
 			interval: autoRenewInterval,
-			persist:  autoRenewPersist,
-			path:     strings.TrimSpace(autoRenewPersistPath),
 		},
+		persistFunc: persist,
 	}
 
 	c.httpClient.RetryMax = c.maxRetries
