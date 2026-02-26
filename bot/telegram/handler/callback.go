@@ -859,7 +859,10 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 			if strings.TrimSpace(songInfo.ThumbFileID) != "" {
 				media.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
 			}
-			replyMarkup := buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+			var replyMarkup *telego.InlineKeyboardMarkup
+			if resolveForwardButtonEnabledForUser(ctx, h.Music.Repo, userID) {
+				replyMarkup = buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+			}
 			params := &telego.EditMessageMediaParams{
 				InlineMessageID: inlineMessageID,
 				Media:           media,

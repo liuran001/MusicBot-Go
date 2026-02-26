@@ -942,7 +942,10 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 	if strings.TrimSpace(songInfo.TrackURL) == "" && platformName == "netease" && trackID != "" {
 		songInfo.TrackURL = fmt.Sprintf("https://music.163.com/song?id=%s", trackID)
 	}
-	keyboard := buildForwardKeyboard(songInfo.TrackURL, platformName, trackID)
+	var keyboard *telego.InlineKeyboardMarkup
+	if resolveForwardButtonEnabledForUser(ctx, h.Repo, query.From.ID) {
+		keyboard = buildForwardKeyboard(songInfo.TrackURL, platformName, trackID)
+	}
 
 	newAudio := &telego.InlineQueryResultCachedDocument{
 		Type:           telego.ResultTypeDocument,
