@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -477,6 +478,14 @@ func (b *BilibiliPlatform) getAudioDownloadInfo(ctx context.Context, trackID str
 		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
 	}
 	url := candidates[0]
+	if b.client != nil && b.client.logger != nil {
+		b.client.logger.Debug("bilibili: resolved audio download urls",
+			"track_id", trackID,
+			"priority", b.streamURLPriority,
+			"selected", url,
+			"candidates", strings.Join(candidates, ","),
+		)
+	}
 	expiresAt := time.Now().Add(time.Duration(streamData.Timeout) * time.Second)
 	info := &platform.DownloadInfo{
 		URL:           url,
@@ -572,6 +581,16 @@ func (b *BilibiliPlatform) getVideoDownloadInfo(ctx context.Context, trackID str
 		return nil, platform.NewUnavailableError("bilibili", "track", trackID)
 	}
 	selectedURL := candidates[0]
+	if b.client != nil && b.client.logger != nil {
+		b.client.logger.Debug("bilibili: resolved video audio download urls",
+			"track_id", trackID,
+			"bvid", videoInfo.Bvid,
+			"cid", selected.Cid,
+			"priority", b.streamURLPriority,
+			"selected", selectedURL,
+			"candidates", strings.Join(candidates, ","),
+		)
+	}
 
 	info := &platform.DownloadInfo{
 		URL:           selectedURL,
@@ -605,6 +624,9 @@ func prioritizeCDNs(cdns []string, priority string) []string {
 		if url == "" {
 			continue
 		}
+		if isBlockedBilibiliCDN(url) {
+			continue
+		}
 		if _, ok := seen[url]; ok {
 			continue
 		}
@@ -621,6 +643,16 @@ func prioritizeCDNs(cdns []string, priority string) []string {
 	ordered = append(ordered, cleaned[1:]...)
 	ordered = append(ordered, cleaned[0])
 	return ordered
+}
+
+func isBlockedBilibiliCDN(raw string) bool {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if parsed, err := url.Parse(raw); err == nil {
+		if h := strings.TrimSpace(parsed.Hostname()); h != "" {
+			host = strings.ToLower(h)
+		}
+	}
+	return strings.Contains(host, "akamai")
 }
 
 // GetTrack retrieves song detailing info
