@@ -445,6 +445,9 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 		if plat := h.PlatformManager.Get(platformName); plat != nil {
 			if track, err := plat.GetTrack(ctx, trackID); err == nil && track != nil {
 				title = strings.TrimSpace(track.Title)
+				if strings.TrimSpace(track.ID) != "" {
+					trackID = track.ID
+				}
 				artists = inlineArtistsLabel(track.Artists)
 				thumbnailSource = strings.TrimSpace(track.CoverURL)
 				if track.Album != nil {

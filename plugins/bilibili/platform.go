@@ -211,6 +211,11 @@ func (b *BilibiliPlatform) Metadata() platform.Meta {
 	}
 }
 
+// ShortLinkHosts implements platform.ShortLinkProvider.
+func (b *BilibiliPlatform) ShortLinkHosts() []string {
+	return []string{"b23.tv", "bili2233.cn"}
+}
+
 func (b *BilibiliPlatform) ResolveTrackCategory(ctx context.Context, trackID string) (string, int, error) {
 	if strings.HasPrefix(trackID, "b23:") {
 		resolvedID, err := b.client.ResolveB23ID(ctx, strings.TrimPrefix(trackID, "b23:"))
