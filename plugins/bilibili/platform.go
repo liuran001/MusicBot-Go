@@ -56,6 +56,22 @@ func parseBilibiliVideoTrackID(trackID string) (baseID string, page int, ok bool
 	return "", 0, false
 }
 
+func isBilibiliAudioTrackID(trackID string) bool {
+	trimmed := strings.TrimSpace(trackID)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "au") {
+		trimmed = strings.TrimSpace(trimmed[2:])
+	}
+	if trimmed == "" {
+		return false
+	}
+	_, err := strconv.Atoi(trimmed)
+	return err == nil
+}
+
 func buildBilibiliVideoTrackID(baseID string, page int) string {
 	baseID = strings.TrimSpace(baseID)
 	if baseID == "" {
@@ -344,6 +360,21 @@ func (b *BilibiliPlatform) ShouldAutoParse(ctx context.Context, trackID string, 
 	case ParseModeOn:
 		return true, nil
 	case ParseModeMusicKichiku:
+		trackID = strings.TrimSpace(trackID)
+		if isBilibiliAudioTrackID(trackID) {
+			return true, nil
+		}
+		if strings.HasPrefix(trackID, "b23:") {
+			resolvedID, err := b.client.ResolveB23ID(ctx, strings.TrimPrefix(trackID, "b23:"))
+			if err != nil {
+				return false, err
+			}
+			resolvedID = strings.TrimSpace(resolvedID)
+			if isBilibiliAudioTrackID(resolvedID) {
+				return true, nil
+			}
+			trackID = resolvedID
+		}
 		category, categoryID, err := b.ResolveTrackCategory(ctx, trackID)
 		if err != nil {
 			return false, err
