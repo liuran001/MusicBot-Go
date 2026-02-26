@@ -21,6 +21,10 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
+type bilibiliSearchFilterContextKey string
+
+const bilibiliSearchFilterCtxKey bilibiliSearchFilterContextKey = "bilibili_search_filter"
+
 var (
 	bilibiliBVTrackPattern = regexp.MustCompile(`^(BV[a-zA-Z0-9]{10})(?:_p(\d+))?$`)
 	bilibiliAVTrackPattern = regexp.MustCompile(`^(?i)(av\d+)(?:_p(\d+))?$`)
@@ -91,9 +95,10 @@ func selectedBilibiliPage(videoInfo *VideoInfoData, requestedPage int) (page Vid
 
 // BilibiliPlatform implements the Platform interface for Bilibili Audio & Video.
 type BilibiliPlatform struct {
-	client *Client
-	mu     sync.Mutex
-	cache  map[string]*bilibiliSearchSession
+	client                 *Client
+	mu                     sync.Mutex
+	cache                  map[string]*bilibiliSearchSession
+	searchMaxPagesPerPhase int
 }
 
 type bilibiliSearchSession struct {
@@ -109,8 +114,15 @@ type bilibiliSearchSession struct {
 }
 
 // NewPlatform creates a new BilibiliPlatform instance.
-func NewPlatform(client *Client) *BilibiliPlatform {
-	return &BilibiliPlatform{client: client, cache: make(map[string]*bilibiliSearchSession)}
+func NewPlatform(client *Client, searchMaxPagesPerPhase int) *BilibiliPlatform {
+	if searchMaxPagesPerPhase <= 0 {
+		searchMaxPagesPerPhase = bilibiliDefaultSearchMaxPagesPerPhase
+	}
+	return &BilibiliPlatform{
+		client:                 client,
+		cache:                  make(map[string]*bilibiliSearchSession),
+		searchMaxPagesPerPhase: searchMaxPagesPerPhase,
+	}
 }
 
 // Name returns the platform identifier.
@@ -214,6 +226,73 @@ func (b *BilibiliPlatform) Metadata() platform.Meta {
 // ShortLinkHosts implements platform.ShortLinkProvider.
 func (b *BilibiliPlatform) ShortLinkHosts() []string {
 	return []string{"b23.tv", "bili2233.cn"}
+}
+
+// ParseEpisodeTrackID implements platform.EpisodeTrackIDResolver.
+func (b *BilibiliPlatform) ParseEpisodeTrackID(trackID string) (baseTrackID string, page int, hasExplicitPage bool) {
+	baseID, resolvedPage, ok := parseBilibiliVideoTrackID(trackID)
+	if !ok {
+		trimmed := strings.TrimSpace(trackID)
+		if trimmed == "" {
+			return "", 0, false
+		}
+		return trimmed, 1, false
+	}
+	return baseID, resolvedPage, buildBilibiliVideoTrackID(baseID, resolvedPage) != strings.TrimSpace(baseID)
+}
+
+// BuildEpisodeTrackID implements platform.EpisodeTrackIDResolver.
+func (b *BilibiliPlatform) BuildEpisodeTrackID(baseTrackID string, page int, explicit bool) string {
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	if baseTrackID == "" {
+		return ""
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if explicit {
+		return fmt.Sprintf("%s_p%d", baseTrackID, page)
+	}
+	return buildBilibiliVideoTrackID(baseTrackID, page)
+}
+
+// BuildEpisodeCollectionID implements platform.EpisodeCollectionProvider.
+func (b *BilibiliPlatform) BuildEpisodeCollectionID(baseTrackID string) string {
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	if baseTrackID == "" {
+		return ""
+	}
+	return "ep:" + baseTrackID
+}
+
+// ParseEpisodeCollectionID implements platform.EpisodeCollectionProvider.
+func (b *BilibiliPlatform) ParseEpisodeCollectionID(collectionID string) (baseTrackID string, ok bool) {
+	collectionID = strings.TrimSpace(collectionID)
+	if !strings.HasPrefix(collectionID, "ep:") {
+		return "", false
+	}
+	baseTrackID = strings.TrimSpace(strings.TrimPrefix(collectionID, "ep:"))
+	if baseTrackID == "" {
+		return "", false
+	}
+	return baseTrackID, true
+}
+
+// SearchFilterProvider implementations.
+func (b *BilibiliPlatform) SearchFilterSettingKey() string {
+	return SearchFilterKey
+}
+
+func (b *BilibiliPlatform) SearchFilterButtonLabel() string {
+	return "仅展示音乐/鬼畜区内容"
+}
+
+func (b *BilibiliPlatform) SearchFilterDefaultEnabled() bool {
+	return true
+}
+
+func (b *BilibiliPlatform) WithSearchFilter(ctx context.Context, enabled bool) context.Context {
+	return context.WithValue(ctx, bilibiliSearchFilterCtxKey, enabled)
 }
 
 func (b *BilibiliPlatform) ResolveTrackCategory(ctx context.Context, trackID string) (string, int, error) {
@@ -975,7 +1054,7 @@ func (b *BilibiliPlatform) Search(ctx context.Context, query string, limit int) 
 		limit = 10
 	}
 
-	session := b.getOrCreateSearchSession(keyword)
+	session := b.getOrCreateSearchSession(ctx, keyword)
 	if err := b.expandSession(ctx, session, limit); err != nil && len(session.results) == 0 {
 		return nil, err
 	}
@@ -994,19 +1073,28 @@ func (b *BilibiliPlatform) Search(ctx context.Context, query string, limit int) 
 }
 
 const (
-	bilibiliSearchMaxPagesPerPhase = 10
-	bilibiliSearchSessionTTL       = 10 * time.Minute
-	bilibiliSearchSessionMaxSize   = 256
+	bilibiliDefaultSearchMaxPagesPerPhase = 5
+	bilibiliSearchSessionTTL              = 10 * time.Minute
+	bilibiliSearchSessionMaxSize          = 256
 )
 
-func (b *BilibiliPlatform) getOrCreateSearchSession(keyword string) *bilibiliSearchSession {
+func (b *BilibiliPlatform) getOrCreateSearchSession(ctx context.Context, keyword string) *bilibiliSearchSession {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.cleanupSearchSessionsLocked()
 	if b.cache == nil {
 		b.cache = make(map[string]*bilibiliSearchSession)
 	}
-	if session, ok := b.cache[keyword]; ok && session != nil {
+
+	filterOn := true
+	if val := ctx.Value(bilibiliSearchFilterCtxKey); val != nil {
+		if filterEnable, ok := val.(bool); ok {
+			filterOn = filterEnable
+		}
+	}
+	cacheKey := fmt.Sprintf("%s|filter:%t", keyword, filterOn)
+
+	if session, ok := b.cache[cacheKey]; ok && session != nil {
 		session.updatedAt = time.Now()
 		return session
 	}
@@ -1020,7 +1108,7 @@ func (b *BilibiliPlatform) getOrCreateSearchSession(keyword string) *bilibiliSea
 		fallbackDone:     strings.Contains(strings.ToLower(keyword), "音乐"),
 		updatedAt:        time.Now(),
 	}
-	b.cache[keyword] = session
+	b.cache[cacheKey] = session
 	return session
 }
 
@@ -1086,7 +1174,7 @@ func (b *BilibiliPlatform) expandSession(ctx context.Context, session *bilibiliS
 		if page <= 0 {
 			page = 1
 		}
-		if page > bilibiliSearchMaxPagesPerPhase {
+		if page > b.searchMaxPagesPerPhase {
 			if useFallback {
 				session.fallbackDone = true
 			} else {
@@ -1125,7 +1213,7 @@ func (b *BilibiliPlatform) expandSession(ctx context.Context, session *bilibiliS
 			continue
 		}
 		for _, item := range items {
-			track, ok := b.searchItemToTrack(item)
+			track, ok := b.searchItemToTrack(ctx, item)
 			if !ok {
 				continue
 			}
@@ -1140,12 +1228,12 @@ func (b *BilibiliPlatform) expandSession(ctx context.Context, session *bilibiliS
 		}
 		if useFallback {
 			session.fallbackNextPage = page + 1
-			if session.fallbackNextPage > bilibiliSearchMaxPagesPerPhase {
+			if session.fallbackNextPage > b.searchMaxPagesPerPhase {
 				session.fallbackDone = true
 			}
 		} else {
 			session.primaryNextPage = page + 1
-			if session.primaryNextPage > bilibiliSearchMaxPagesPerPhase {
+			if session.primaryNextPage > b.searchMaxPagesPerPhase {
 				session.primaryDone = true
 			}
 		}
@@ -1156,10 +1244,16 @@ func (b *BilibiliPlatform) expandSession(ctx context.Context, session *bilibiliS
 	return firstErr
 }
 
-func (b *BilibiliPlatform) searchItemToTrack(item VideoSearchItem) (platform.Track, bool) {
+func (b *BilibiliPlatform) searchItemToTrack(ctx context.Context, item VideoSearchItem) (platform.Track, bool) {
 	categoryID, _ := strconv.Atoi(strings.TrimSpace(item.TypeID))
 	categoryName := strings.TrimSpace(item.TypeName)
-	if !isMusicOrKichikuCategoryID(categoryID) && !isMusicOrKichikuCategoryName(categoryName) {
+	filterOn := true
+	if val := ctx.Value(bilibiliSearchFilterCtxKey); val != nil {
+		if filterEnable, ok := val.(bool); ok {
+			filterOn = filterEnable
+		}
+	}
+	if filterOn && !isMusicOrKichikuCategoryID(categoryID) && !isMusicOrKichikuCategoryName(categoryName) {
 		return platform.Track{}, false
 	}
 

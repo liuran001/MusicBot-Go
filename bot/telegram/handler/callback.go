@@ -249,11 +249,8 @@ func (h *CallbackMusicHandler) tryPresentInlineEpisodePicker(ctx context.Context
 	if h == nil || h.Music == nil || b == nil || query == nil || strings.TrimSpace(query.InlineMessageID) == "" {
 		return false
 	}
-	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
-		return false
-	}
-	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
-	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
+	baseTrackID, _, hasExplicitPage, ok := parseEpisodeTrackID(h.Music.PlatformManager, platformName, trackID)
+	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false
 	}
 	episodes, err := h.fetchEpisodes(ctx, platformName, baseTrackID)
@@ -278,14 +275,11 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || query == nil || listMsg == nil || msgToUse == nil {
 		return false
 	}
-	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+	baseTrackID, _, hasExplicitPage, ok := parseEpisodeTrackID(h.Music.PlatformManager, platformName, trackID)
+	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false
 	}
-	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
-	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
-		return false
-	}
-	episodes, err := h.fetchEpisodes(ctx, "bilibili", baseTrackID)
+	episodes, err := h.fetchEpisodes(ctx, platformName, baseTrackID)
 	if err != nil || len(episodes) <= 1 {
 		return false
 	}
@@ -295,7 +289,7 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	}
 	backCallback := fmt.Sprintf("search %d home %d", listMsg.MessageID, reqID)
 	setEpisodeSearchBackCallback(listMsg.Chat.ID, listMsg.MessageID, backCallback)
-	text, keyboard := buildEpisodePickerPage("bilibili", baseTrackID, qualityOverride, reqID, episodes, 1, backCallback)
+	text, keyboard := buildEpisodePickerPage(platformName, baseTrackID, qualityOverride, reqID, episodes, 1, backCallback)
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false
 	}
@@ -585,7 +579,10 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 		if msg.ReplyToMessage != nil {
 			msgToUse = msg.ReplyToMessage
 		}
-		selectedTrackID := buildExplicitBilibiliVideoTrackID(trackID, page)
+		selectedTrackID := buildEpisodeTrackID(h.Music.PlatformManager, platformName, trackID, page, true)
+		if strings.TrimSpace(selectedTrackID) == "" {
+			selectedTrackID = trackID
+		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
 		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, selectedTrackID, qualityValue)
@@ -679,7 +676,10 @@ func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, 
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 	case "p":
-		selectedTrackID := buildExplicitBilibiliVideoTrackID(trackID, page)
+		selectedTrackID := buildEpisodeTrackID(h.Music.PlatformManager, platformName, trackID, page, true)
+		if strings.TrimSpace(selectedTrackID) == "" {
+			selectedTrackID = trackID
+		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, selectedTrackID, qualityValue)
 	default:

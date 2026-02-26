@@ -149,6 +149,36 @@ type EpisodeProvider interface {
 	ListEpisodes(ctx context.Context, trackID string) ([]Episode, error)
 }
 
+// EpisodeTrackIDResolver defines an optional interface for platforms that
+// encode episode/page selection inside track IDs (e.g. BVxxxx_p2).
+type EpisodeTrackIDResolver interface {
+	// ParseEpisodeTrackID parses a track ID and returns:
+	// - baseTrackID: canonical base ID without explicit episode suffix.
+	// - page: resolved page/episode index (>=1 when available).
+	// - hasExplicitPage: whether the original track ID explicitly carried page info.
+	ParseEpisodeTrackID(trackID string) (baseTrackID string, page int, hasExplicitPage bool)
+
+	// BuildEpisodeTrackID builds track ID from baseTrackID and page.
+	// If explicit is true, page information should be explicitly encoded even for page=1.
+	BuildEpisodeTrackID(baseTrackID string, page int, explicit bool) string
+}
+
+// EpisodeCollectionProvider defines an optional interface for platforms that
+// provide a logical collection ID used to open episode picker in inline mode.
+type EpisodeCollectionProvider interface {
+	BuildEpisodeCollectionID(baseTrackID string) string
+	ParseEpisodeCollectionID(collectionID string) (baseTrackID string, ok bool)
+}
+
+// SearchFilterProvider defines an optional interface for platforms that expose
+// user-toggleable search filters (and context injection) in UI.
+type SearchFilterProvider interface {
+	SearchFilterSettingKey() string
+	SearchFilterButtonLabel() string
+	SearchFilterDefaultEnabled() bool
+	WithSearchFilter(ctx context.Context, enabled bool) context.Context
+}
+
 // Manager provides a registry for multiple platform implementations.
 // This allows the bot to work with multiple music platforms simultaneously.
 type Manager interface {

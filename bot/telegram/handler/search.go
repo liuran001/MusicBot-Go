@@ -44,6 +44,8 @@ type searchState struct {
 	tracksByPlatform map[string][]platform.Track
 	hasMoreByPlat    map[string]bool
 	unavailable      map[string]bool
+	biliFilter       bool
+	searchFilterText string
 }
 
 func (s *searchState) setTracks(platformName string, tracks []platform.Track) {
@@ -211,7 +213,24 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 	primaryPlatform := platformName
 
-	tracks, platformName, usedFallback, err := searchTracksWithFallback(ctx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
+	biliFilter := true
+	filterLabel := ""
+	scopeType := botpkg.PluginScopeUser
+	var scopeID int64
+	if message.From != nil {
+		scopeID = message.From.ID
+	}
+	if message.Chat.Type != "private" {
+		scopeType = botpkg.PluginScopeGroup
+		scopeID = message.Chat.ID
+	}
+	if enabled, supported, label := resolveSearchFilterEnabled(ctx, h.PlatformManager, h.Repo, platformName, scopeType, scopeID); supported {
+		biliFilter = enabled
+		filterLabel = label
+	}
+	searchCtx := withSearchFilterContext(ctx, h.PlatformManager, platformName, biliFilter)
+
+	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
 		errorText := userVisibleSearchError(err, "搜索服务暂时不可用")
@@ -248,6 +267,8 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 			updatedAt:        time.Now(),
 			tracksByPlatform: make(map[string][]platform.Track),
 			unavailable:      unavailable,
+			biliFilter:       biliFilter,
+			searchFilterText: filterLabel,
 		}
 		if hasPlatformSuffix {
 			state.setUnavailable(platformName, true)
@@ -285,7 +306,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 	initialLimit := h.initialSearchLimit(platformName)
 	hasMore := len(tracks) >= initialLimit && initialLimit < searchLimit
-	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit)
+	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit, biliFilter, filterLabel)
 	textMessage.WriteString(pageText)
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -302,14 +323,16 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		_, _ = b.EditMessageText(ctx, params)
 	}
 	state := &searchState{
-		keyword:     keyword,
-		platform:    platformName,
-		quality:     qualityValue,
-		requesterID: requesterID,
-		limit:       searchLimit,
-		currentPage: 1,
-		updatedAt:   time.Now(),
-		unavailable: unavailable,
+		keyword:          keyword,
+		platform:         platformName,
+		quality:          qualityValue,
+		requesterID:      requesterID,
+		limit:            searchLimit,
+		currentPage:      1,
+		updatedAt:        time.Now(),
+		unavailable:      unavailable,
+		biliFilter:       biliFilter,
+		searchFilterText: filterLabel,
 	}
 	state.setTracks(platformName, tracks)
 	state.setHasMore(platformName, hasMore)
@@ -397,9 +420,44 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 			return
 		}
 		state.platform = strings.TrimSpace(parts[3])
+		state.searchFilterText = ""
+		if msg != nil {
+			scopeType := botpkg.PluginScopeUser
+			scopeID := int64(0)
+			scopeID = query.From.ID
+			if msg.Chat.Type != "private" {
+				scopeType = botpkg.PluginScopeGroup
+				scopeID = msg.Chat.ID
+			}
+			if enabled, supported, label := resolveSearchFilterEnabled(ctx, h.Search.PlatformManager, h.Search.Repo, state.platform, scopeType, scopeID); supported {
+				state.biliFilter = enabled
+				state.searchFilterText = label
+			}
+		}
 		page = 1
 		state.limit = h.Search.searchLimit(state.platform)
 		state.setUnavailable(state.platform, false)
+	}
+	if action == "bilifilter" {
+		if len(parts) < 4 {
+			return
+		}
+		state.biliFilter = parts[3] == "on"
+		if state.searchFilterText == "" {
+			scopeType := botpkg.PluginScopeUser
+			scopeID := query.From.ID
+			if msg.Chat.Type != "private" {
+				scopeType = botpkg.PluginScopeGroup
+				scopeID = msg.Chat.ID
+			}
+			if _, supported, label := resolveSearchFilterEnabled(ctx, h.Search.PlatformManager, h.Search.Repo, state.platform, scopeType, scopeID); supported {
+				state.searchFilterText = label
+			}
+		}
+		if state.tracksByPlatform != nil {
+			delete(state.tracksByPlatform, state.platform)
+		}
+		page = 1
 	}
 	if action == "home" {
 		page = 1
@@ -445,7 +503,8 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		if requestLimit > limit {
 			requestLimit = limit
 		}
-		tracks, err = plat.Search(ctx, state.keyword, requestLimit)
+		searchCtx := withSearchFilterContext(ctx, h.Search.PlatformManager, state.platform, state.biliFilter)
+		tracks, err = plat.Search(searchCtx, state.keyword, requestLimit)
 		if err != nil {
 			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: "搜索失败，请稍后重试"}
 			if h.RateLimiter != nil {
@@ -476,7 +535,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	}
 	manager := h.Search.PlatformManager
 	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
-	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit)
+	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText)
 	text := textHeader + pageText
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -545,7 +604,7 @@ func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *tele
 	return qualityValue
 }
 
-func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int) (string, *telego.InlineKeyboardMarkup) {
+func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int, biliFilter bool, filterLabel string) (string, *telego.InlineKeyboardMarkup) {
 	pageSize := h.pageSize()
 	if page < 1 {
 		page = 1
@@ -640,6 +699,21 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	if switchRow := h.buildPlatformSwitchRow(platformName, requesterID, messageID, unavailable); len(switchRow) > 0 {
 		rows = append(rows, switchRow)
 	}
+
+	if strings.TrimSpace(filterLabel) != "" {
+		filterText := "开"
+		toggleAction := "off"
+		if !biliFilter {
+			filterText = "关"
+			toggleAction = "on"
+		}
+		btn := telego.InlineKeyboardButton{
+			Text:         fmt.Sprintf("%s: %s", filterLabel, filterText),
+			CallbackData: fmt.Sprintf("search %d bilifilter %s %d", messageID, toggleAction, requesterID),
+		}
+		rows = append(rows, []telego.InlineKeyboardButton{btn})
+	}
+
 	keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 	return textMessage.String(), keyboard
 }

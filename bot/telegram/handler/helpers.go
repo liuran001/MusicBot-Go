@@ -715,45 +715,118 @@ func buildInlineSendCallbackData(platformName, trackID, qualityValue string, req
 	return ""
 }
 
-func splitBilibiliTrackPage(trackID string) (baseID string, hasExplicitPage bool) {
+func parseEpisodeTrackID(manager platform.Manager, platformName, trackID string) (baseTrackID string, page int, hasExplicitPage bool, ok bool) {
+	platformName = strings.TrimSpace(platformName)
 	trackID = strings.TrimSpace(trackID)
-	if trackID == "" {
-		return "", false
+	if manager == nil || platformName == "" || trackID == "" {
+		return "", 0, false, false
 	}
-	lower := strings.ToLower(trackID)
-	if !strings.HasPrefix(trackID, "BV") && !strings.HasPrefix(lower, "av") {
-		return trackID, false
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return "", 0, false, false
 	}
-	idx := strings.LastIndex(lower, "_p")
-	if idx <= 0 || idx+2 >= len(trackID) {
-		return trackID, false
+	resolver, ok := plat.(platform.EpisodeTrackIDResolver)
+	if !ok {
+		return "", 0, false, false
 	}
-	if _, err := strconv.Atoi(trackID[idx+2:]); err != nil {
-		return trackID, false
-	}
-	return trackID[:idx], true
-}
-
-func buildBilibiliVideoTrackID(baseID string, page int) string {
-	baseID = strings.TrimSpace(baseID)
-	if baseID == "" {
-		return ""
-	}
-	if page <= 1 {
-		return baseID
-	}
-	return fmt.Sprintf("%s_p%d", baseID, page)
-}
-
-func buildExplicitBilibiliVideoTrackID(baseID string, page int) string {
-	baseID = strings.TrimSpace(baseID)
-	if baseID == "" {
-		return ""
+	baseTrackID, page, hasExplicitPage = resolver.ParseEpisodeTrackID(trackID)
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	if baseTrackID == "" {
+		return "", 0, false, false
 	}
 	if page <= 0 {
 		page = 1
 	}
-	return fmt.Sprintf("%s_p%d", baseID, page)
+	return baseTrackID, page, hasExplicitPage, true
+}
+
+func buildEpisodeTrackID(manager platform.Manager, platformName, baseTrackID string, page int, explicit bool) string {
+	platformName = strings.TrimSpace(platformName)
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	if manager == nil || platformName == "" || baseTrackID == "" {
+		return ""
+	}
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return ""
+	}
+	resolver, ok := plat.(platform.EpisodeTrackIDResolver)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(resolver.BuildEpisodeTrackID(baseTrackID, page, explicit))
+}
+
+func buildEpisodeCollectionID(manager platform.Manager, platformName, baseTrackID string) string {
+	platformName = strings.TrimSpace(platformName)
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	if manager == nil || platformName == "" || baseTrackID == "" {
+		return ""
+	}
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return ""
+	}
+	provider, ok := plat.(platform.EpisodeCollectionProvider)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(provider.BuildEpisodeCollectionID(baseTrackID))
+}
+
+func parseEpisodeCollectionID(manager platform.Manager, platformName, collectionID string) (baseTrackID string, ok bool) {
+	platformName = strings.TrimSpace(platformName)
+	collectionID = strings.TrimSpace(collectionID)
+	if manager == nil || platformName == "" || collectionID == "" {
+		return "", false
+	}
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return "", false
+	}
+	provider, ok := plat.(platform.EpisodeCollectionProvider)
+	if !ok {
+		return "", false
+	}
+	baseTrackID, ok = provider.ParseEpisodeCollectionID(collectionID)
+	baseTrackID = strings.TrimSpace(baseTrackID)
+	return baseTrackID, ok && baseTrackID != ""
+}
+
+func getSearchFilterProvider(manager platform.Manager, platformName string) (platform.SearchFilterProvider, bool) {
+	platformName = strings.TrimSpace(platformName)
+	if manager == nil || platformName == "" {
+		return nil, false
+	}
+	plat := manager.Get(platformName)
+	if plat == nil {
+		return nil, false
+	}
+	provider, ok := plat.(platform.SearchFilterProvider)
+	return provider, ok
+}
+
+func resolveSearchFilterEnabled(ctx context.Context, manager platform.Manager, repo botpkg.SongRepository, platformName string, scopeType string, scopeID int64) (enabled bool, supported bool, label string) {
+	provider, ok := getSearchFilterProvider(manager, platformName)
+	if !ok {
+		return false, false, ""
+	}
+	enabled = provider.SearchFilterDefaultEnabled()
+	label = strings.TrimSpace(provider.SearchFilterButtonLabel())
+	if repo != nil && scopeID != 0 {
+		if val, err := repo.GetPluginSetting(ctx, scopeType, scopeID, strings.TrimSpace(platformName), provider.SearchFilterSettingKey()); err == nil && val != "" {
+			enabled = strings.TrimSpace(strings.ToLower(val)) == "on"
+		}
+	}
+	return enabled, true, label
+}
+
+func withSearchFilterContext(ctx context.Context, manager platform.Manager, platformName string, enabled bool) context.Context {
+	provider, ok := getSearchFilterProvider(manager, platformName)
+	if !ok {
+		return ctx
+	}
+	return provider.WithSearchFilter(ctx, enabled)
 }
 
 func buildInlineEpisodeShowCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
@@ -766,10 +839,6 @@ func buildInlineEpisodeSelectCallbackData(platformName, trackID, qualityValue st
 
 func buildInlineEpisodeNavCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
 	return buildInlineEpisodeCallbackData("n", platformName, trackID, qualityValue, requesterID, page)
-}
-
-func buildInlineEpisodeCloseCallbackData(platformName, trackID, qualityValue string, requesterID int64) string {
-	return buildInlineEpisodeCallbackData("c", platformName, trackID, qualityValue, requesterID, 1)
 }
 
 func buildInlineEpisodeCallbackData(action, platformName, trackID, qualityValue string, requesterID int64, page int) string {

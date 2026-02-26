@@ -511,7 +511,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	quality := h.resolveRequestedQuality(ctx, message, userID, qualityOverride)
 
 	qualityStr := quality.String()
-	if handled, err := h.tryPresentDirectBilibiliEpisodes(ctx, b, message, platformName, trackID, qualityStr); handled {
+	if handled, err := h.tryPresentDirectEpisodes(ctx, b, message, platformName, trackID, qualityStr); handled {
 		return err
 	}
 
@@ -615,19 +615,19 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	return nil
 }
 
-func (h *MusicHandler) tryPresentDirectBilibiliEpisodes(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID, qualityValue string) (bool, error) {
+func (h *MusicHandler) tryPresentDirectEpisodes(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID, qualityValue string) (bool, error) {
 	if h == nil || h.PlatformManager == nil || b == nil || message == nil {
 		return false, nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
+	baseTrackID, _, hasExplicitPage, ok := parseEpisodeTrackID(h.PlatformManager, platformName, trackID)
+	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false, nil
 	}
-	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
-	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
-		return false, nil
-	}
-	plat := h.PlatformManager.Get("bilibili")
+	plat := h.PlatformManager.Get(strings.TrimSpace(platformName))
 	if plat == nil {
+		return false, nil
+	}
+	if _, ok := plat.(platform.EpisodeTrackIDResolver); !ok {
 		return false, nil
 	}
 	provider, ok := plat.(platform.EpisodeProvider)
@@ -642,7 +642,7 @@ func (h *MusicHandler) tryPresentDirectBilibiliEpisodes(ctx context.Context, b *
 	if message.From != nil {
 		requesterID = message.From.ID
 	}
-	text, keyboard := buildEpisodePickerPage("bilibili", baseTrackID, qualityValue, requesterID, episodes, 1, "")
+	text, keyboard := buildEpisodePickerPage(platformName, baseTrackID, qualityValue, requesterID, episodes, 1, "")
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false, nil
 	}

@@ -221,11 +221,8 @@ func (h *ChosenInlineMusicHandler) tryPresentChosenInlineEpisodePicker(ctx conte
 	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || chosen == nil || strings.TrimSpace(chosen.InlineMessageID) == "" {
 		return false
 	}
-	if !strings.EqualFold(strings.TrimSpace(platformName), "bilibili") {
-		return false
-	}
-	baseTrackID, hasExplicitPage := splitBilibiliTrackPage(trackID)
-	if hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
+	baseTrackID, _, hasExplicitPage, ok := parseEpisodeTrackID(h.Music.PlatformManager, platformName, trackID)
+	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false
 	}
 	plat := h.Music.PlatformManager.Get(strings.TrimSpace(platformName))
@@ -257,8 +254,8 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 	if h == nil || h.Music == nil || h.Music.PlatformManager == nil || b == nil || chosen == nil {
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(platformName), "bilibili") && strings.HasPrefix(strings.TrimSpace(collectionID), "ep:") {
-		h.handleChosenEpisodeCollection(ctx, b, chosen, platformName, strings.TrimPrefix(strings.TrimSpace(collectionID), "ep:"), qualityValue)
+	if baseTrackID, ok := parseEpisodeCollectionID(h.Music.PlatformManager, platformName, collectionID); ok {
+		h.handleChosenEpisodeCollection(ctx, b, chosen, platformName, baseTrackID, qualityValue)
 		return
 	}
 	plat := h.Music.PlatformManager.Get(platformName)
