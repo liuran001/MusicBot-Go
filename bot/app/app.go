@@ -236,6 +236,8 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 		registerContribution(platformManager, pluginTagProviders, &recognizeService, &adminCommands, &pluginSettingDefinitions, contrib, log)
 	}
 
+	pluginSettingDefinitions = append(pluginSettingDefinitions, handler.ForwardButtonSettingDefinition())
+
 	if err := dynManager.Load(ctx, conf, platformManager); err != nil {
 		if log != nil {
 			log.Warn("dynamic plugin load failed", "error", err)
