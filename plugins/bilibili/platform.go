@@ -874,10 +874,14 @@ func (b *BilibiliPlatform) ListEpisodes(ctx context.Context, trackID string) ([]
 	}
 	if len(videoInfo.Pages) == 0 {
 		duration := time.Duration(videoInfo.Duration) * time.Second
+		explicitTrackID := b.BuildEpisodeTrackID(videoInfo.Bvid, 1, true)
+		if strings.TrimSpace(explicitTrackID) == "" {
+			explicitTrackID = fmt.Sprintf("%s_p1", strings.TrimSpace(videoInfo.Bvid))
+		}
 		return []platform.Episode{{
 			Index:       1,
 			Title:       "P1",
-			TrackID:     buildBilibiliVideoTrackID(videoInfo.Bvid, 1),
+			TrackID:     explicitTrackID,
 			URL:         fmt.Sprintf("%s?p=1", videoURL),
 			Duration:    duration,
 			VideoTitle:  strings.TrimSpace(videoInfo.Title),
@@ -902,10 +906,14 @@ func (b *BilibiliPlatform) ListEpisodes(ctx context.Context, trackID string) ([]
 		if page.Duration > 0 {
 			d = time.Duration(page.Duration) * time.Second
 		}
+		explicitTrackID := b.BuildEpisodeTrackID(videoInfo.Bvid, number, true)
+		if strings.TrimSpace(explicitTrackID) == "" {
+			explicitTrackID = fmt.Sprintf("%s_p%d", strings.TrimSpace(videoInfo.Bvid), number)
+		}
 		episodes = append(episodes, platform.Episode{
 			Index:       number,
 			Title:       title,
-			TrackID:     buildBilibiliVideoTrackID(videoInfo.Bvid, number),
+			TrackID:     explicitTrackID,
 			URL:         url,
 			Duration:    d,
 			VideoTitle:  strings.TrimSpace(videoInfo.Title),
