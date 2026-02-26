@@ -254,15 +254,19 @@ func (b *BilibiliPlatform) ShortLinkHosts() []string {
 
 // ParseEpisodeTrackID implements platform.EpisodeTrackIDResolver.
 func (b *BilibiliPlatform) ParseEpisodeTrackID(trackID string) (baseTrackID string, page int, hasExplicitPage bool) {
+	trimmed := strings.TrimSpace(trackID)
 	baseID, resolvedPage, ok := parseBilibiliVideoTrackID(trackID)
 	if !ok {
-		trimmed := strings.TrimSpace(trackID)
 		if trimmed == "" {
 			return "", 0, false
 		}
 		return trimmed, 1, false
 	}
-	return baseID, resolvedPage, buildBilibiliVideoTrackID(baseID, resolvedPage) != strings.TrimSpace(baseID)
+	explicitID := b.BuildEpisodeTrackID(baseID, resolvedPage, true)
+	if explicitID != "" && strings.EqualFold(trimmed, explicitID) {
+		return baseID, resolvedPage, true
+	}
+	return baseID, resolvedPage, false
 }
 
 // BuildEpisodeTrackID implements platform.EpisodeTrackIDResolver.

@@ -881,13 +881,17 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 		if title == "" {
 			title = fmt.Sprintf("P%d", ep.Index)
 		}
+		explicitTrackID := buildEpisodeTrackID(h.PlatformManager, platformName, baseTrackID, ep.Index, true)
+		if strings.TrimSpace(explicitTrackID) == "" {
+			explicitTrackID = strings.TrimSpace(ep.TrackID)
+		}
 		results = append(results, &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
-			ID:                  buildInlinePendingResultID(platformName, ep.TrackID, qualityValue),
+			ID:                  buildInlinePendingResultID(platformName, explicitTrackID, qualityValue),
 			Title:               fmt.Sprintf("%d. %s", displayIndex, title),
 			Description:         strings.TrimSpace(first.CreatorName),
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
-			ReplyMarkup:         buildInlineSendKeyboard(platformName, ep.TrackID, qualityValue, query.From.ID),
+			ReplyMarkup:         buildInlineSendKeyboard(platformName, explicitTrackID, qualityValue, query.From.ID),
 		})
 	}
 

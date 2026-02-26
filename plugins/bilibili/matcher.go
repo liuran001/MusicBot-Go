@@ -35,7 +35,7 @@ func (m *URLMatcher) MatchURL(url string) (string, bool) {
 	// First check explicit video formats as they might be within short domains
 	if matches := m.videoPattern.FindStringSubmatch(url); len(matches) > 1 {
 		videoID := strings.TrimSpace(matches[1])
-		if page := m.extractPage(url); page > 1 {
+		if page := m.extractPage(url); page > 0 {
 			return videoID + "_p" + strconv.Itoa(page), true
 		}
 		return videoID, true
