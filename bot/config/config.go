@@ -96,23 +96,7 @@ func (c *Config) PersistPluginConfig(plugin string, pairs map[string]string) err
 		return err
 	}
 
-	iniCfg, err := ini.Load(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		iniCfg = ini.Empty()
-	}
-
-	section := iniCfg.Section("plugins." + plugin)
-	for key, value := range pairs {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		section.Key(key).SetValue(value)
-	}
-	if err := iniCfg.SaveTo(path); err != nil {
+	if err := upsertINIWithoutReformat(path, "plugins."+plugin, pairs); err != nil {
 		return err
 	}
 
@@ -138,6 +122,165 @@ func ensureParentDir(path string) error {
 		return nil
 	}
 	return os.MkdirAll(dir, 0o755)
+}
+
+func upsertINIWithoutReformat(path, sectionName string, pairs map[string]string) error {
+	cleanPairs := make(map[string]string, len(pairs))
+	for key, value := range pairs {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			continue
+		}
+		cleanPairs[k] = value
+	}
+	if len(cleanPairs) == 0 {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		return writeNewINI(path, sectionName, cleanPairs)
+	}
+
+	content := string(data)
+	lineSep := "\n"
+	if strings.Contains(content, "\r\n") {
+		lineSep = "\r\n"
+	}
+	lines := strings.Split(content, lineSep)
+
+	sectionStart, sectionEnd := findSectionRange(lines, sectionName)
+	if sectionStart < 0 {
+		return appendNewSection(path, content, lineSep, sectionName, cleanPairs)
+	}
+
+	pending := make(map[string]string, len(cleanPairs))
+	for k, v := range cleanPairs {
+		pending[k] = v
+	}
+	indent := ""
+	for i := sectionStart + 1; i < sectionEnd; i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		eq := strings.Index(line, "=")
+		if eq < 0 {
+			continue
+		}
+		if indent == "" {
+			indent = leadingWhitespace(line)
+		}
+		key := strings.TrimSpace(line[:eq])
+		value, ok := pending[key]
+		if !ok {
+			continue
+		}
+		rest := line[eq+1:]
+		j := 0
+		for j < len(rest) && (rest[j] == ' ' || rest[j] == '\t') {
+			j++
+		}
+		lines[i] = line[:eq+1] + rest[:j] + value
+		delete(pending, key)
+	}
+
+	if len(pending) > 0 {
+		keys := make([]string, 0, len(pending))
+		for k := range pending {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		extra := make([]string, 0, len(keys))
+		for _, k := range keys {
+			extra = append(extra, fmt.Sprintf("%s%s = %s", indent, k, pending[k]))
+		}
+
+		newLines := make([]string, 0, len(lines)+len(extra))
+		newLines = append(newLines, lines[:sectionEnd]...)
+		newLines = append(newLines, extra...)
+		newLines = append(newLines, lines[sectionEnd:]...)
+		lines = newLines
+	}
+
+	out := strings.Join(lines, lineSep)
+	return os.WriteFile(path, []byte(out), 0o644)
+}
+
+func writeNewINI(path, sectionName string, pairs map[string]string) error {
+	keys := make([]string, 0, len(pairs))
+	for k := range pairs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := []string{"[" + sectionName + "]"}
+	for _, k := range keys {
+		lines = append(lines, fmt.Sprintf("%s = %s", k, pairs[k]))
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+func appendNewSection(path, content, lineSep, sectionName string, pairs map[string]string) error {
+	keys := make([]string, 0, len(pairs))
+	for k := range pairs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	b.WriteString(content)
+	if content != "" {
+		if !strings.HasSuffix(content, lineSep) {
+			b.WriteString(lineSep)
+		}
+		if !strings.HasSuffix(content, lineSep+lineSep) {
+			b.WriteString(lineSep)
+		}
+	}
+	b.WriteString("[")
+	b.WriteString(sectionName)
+	b.WriteString("]")
+	b.WriteString(lineSep)
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteString(" = ")
+		b.WriteString(pairs[k])
+		b.WriteString(lineSep)
+	}
+
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+func findSectionRange(lines []string, sectionName string) (start, end int) {
+	start, end = -1, len(lines)
+	target := strings.ToLower(strings.TrimSpace(sectionName))
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			name := strings.ToLower(strings.TrimSpace(trimmed[1 : len(trimmed)-1]))
+			if start >= 0 {
+				end = i
+				break
+			}
+			if name == target {
+				start = i
+			}
+		}
+	}
+	return start, end
+}
+
+func leadingWhitespace(s string) string {
+	i := 0
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	return s[:i]
 }
 
 // Validate checks critical configuration values for sane ranges.
