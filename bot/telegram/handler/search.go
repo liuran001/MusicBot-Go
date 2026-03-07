@@ -298,7 +298,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		textMessage.WriteString(fmt.Sprintf("⚠️ 默认平台搜索失败，已切换到%s\n\n", displayName))
 	}
 
-	textMessage.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji, mdV2Replacer.Replace(displayName)))
+	textMessage.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmoji, mdV2Replacer.Replace(displayName)))
 
 	qualityValue := h.resolveDefaultQuality(ctx, message, userID)
 	if strings.TrimSpace(qualityOverride) != "" {
@@ -534,7 +534,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		hasMore = state.hasMore(state.platform)
 	}
 	manager := h.Search.PlatformManager
-	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
+	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
 	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText)
 	text := textHeader + pageText
 	disablePreview := true
