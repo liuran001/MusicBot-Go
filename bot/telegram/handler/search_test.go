@@ -51,6 +51,76 @@ func TestSearchHandler_searchLimit(t *testing.T) {
 	}
 }
 
+func TestParseSearchCallbackData(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want parsedSearchCallback
+	}{
+		{
+			name: "close",
+			args: []string{"search", "100", "close", "12345"},
+			want: parsedSearchCallback{messageID: 100, action: "close", requesterID: 12345, ok: true},
+		},
+		{
+			name: "home",
+			args: []string{"search", "100", "home", "12345"},
+			want: parsedSearchCallback{messageID: 100, action: "home", requesterID: 12345, ok: true},
+		},
+		{
+			name: "page",
+			args: []string{"search", "100", "page", "2", "12345"},
+			want: parsedSearchCallback{messageID: 100, action: "page", page: 2, requesterID: 12345, ok: true},
+		},
+		{
+			name: "platform",
+			args: []string{"search", "100", "platform", "qqmusic", "12345"},
+			want: parsedSearchCallback{messageID: 100, action: "platform", platformName: "qqmusic", requesterID: 12345, ok: true},
+		},
+		{
+			name: "bilifilter on",
+			args: []string{"search", "100", "bilifilter", "on", "12345"},
+			want: parsedSearchCallback{messageID: 100, action: "bilifilter", filterEnabled: true, requesterID: 12345, ok: true},
+		},
+		{
+			name: "bilifilter off",
+			args: []string{"search", "100", "bilifilter", "off", "12345"},
+			want: parsedSearchCallback{messageID: 100, action: "bilifilter", filterEnabled: false, requesterID: 12345, ok: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSearchCallbackData(tt.args)
+			if got != tt.want {
+				t.Fatalf("parse mismatch: got %+v want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSearchCallbackData_InvalidArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "empty", args: nil},
+		{name: "wrong prefix", args: []string{"music", "100", "close", "12345"}},
+		{name: "platform requester wrong index", args: []string{"search", "100", "platform", "qqmusic"}},
+		{name: "platform requester not number", args: []string{"search", "100", "platform", "qqmusic", "abc"}},
+		{name: "page not number", args: []string{"search", "100", "page", "x", "12345"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSearchCallbackData(tt.args)
+			if got.ok {
+				t.Fatalf("expected invalid parse, got %+v", got)
+			}
+		})
+	}
+}
+
 func TestSearchHandler_resolveDefaultQuality_Group(t *testing.T) {
 	repo := newStubRepo()
 	ctx := context.Background()

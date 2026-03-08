@@ -350,29 +350,14 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	}
 	query := update.CallbackQuery
 	parts := strings.Fields(query.Data)
-	if len(parts) < 4 || parts[0] != "search" {
+	parsed := parseSearchCallbackData(parts)
+	if !parsed.ok {
 		return
 	}
-	messageID, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return
-	}
-	action := parts[2]
-	page := 0
-	if action == "page" {
-		page, err = strconv.Atoi(parts[3])
-		if err != nil {
-			return
-		}
-	}
-	requesterIDIndex := 3
-	if action == "page" {
-		requesterIDIndex = 4
-	}
-	if len(parts) <= requesterIDIndex {
-		return
-	}
-	requesterID, _ := strconv.ParseInt(parts[requesterIDIndex], 10, 64)
+	messageID := parsed.messageID
+	action := parsed.action
+	page := parsed.page
+	requesterID := parsed.requesterID
 	if query.Message == nil {
 		return
 	}
@@ -380,6 +365,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	if msg == nil {
 		return
 	}
+	var err error
 	if msg.Chat.Type != "private" {
 		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, requesterID) {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
@@ -416,10 +402,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	}
 	defer releaseGuard()
 	if action == "platform" {
-		if len(parts) < 5 {
-			return
-		}
-		state.platform = strings.TrimSpace(parts[3])
+		state.platform = strings.TrimSpace(parsed.platformName)
 		state.searchFilterText = ""
 		if msg != nil {
 			scopeType := botpkg.PluginScopeUser
@@ -439,10 +422,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		state.setUnavailable(state.platform, false)
 	}
 	if action == "bilifilter" {
-		if len(parts) < 4 {
-			return
-		}
-		state.biliFilter = parts[3] == "on"
+		state.biliFilter = parsed.filterEnabled
 		if state.searchFilterText == "" {
 			scopeType := botpkg.PluginScopeUser
 			scopeID := query.From.ID
@@ -557,6 +537,79 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	state.currentPage = page
 	h.Search.storeSearchState(messageID, state)
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+}
+
+type parsedSearchCallback struct {
+	messageID     int
+	action        string
+	page          int
+	platformName  string
+	requesterID   int64
+	filterEnabled bool
+	ok            bool
+}
+
+func parseSearchCallbackData(parts []string) parsedSearchCallback {
+	if len(parts) < 4 || parts[0] != "search" {
+		return parsedSearchCallback{}
+	}
+	messageID, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return parsedSearchCallback{}
+	}
+	parsed := parsedSearchCallback{
+		messageID: messageID,
+		action:    parts[2],
+		ok:        true,
+	}
+	switch parsed.action {
+	case "page":
+		if len(parts) < 5 {
+			return parsedSearchCallback{}
+		}
+		page, err := strconv.Atoi(parts[3])
+		if err != nil {
+			return parsedSearchCallback{}
+		}
+		requesterID, err := strconv.ParseInt(parts[4], 10, 64)
+		if err != nil {
+			return parsedSearchCallback{}
+		}
+		parsed.page = page
+		parsed.requesterID = requesterID
+	case "platform":
+		if len(parts) < 5 {
+			return parsedSearchCallback{}
+		}
+		requesterID, err := strconv.ParseInt(parts[4], 10, 64)
+		if err != nil {
+			return parsedSearchCallback{}
+		}
+		parsed.platformName = strings.TrimSpace(parts[3])
+		if parsed.platformName == "" {
+			return parsedSearchCallback{}
+		}
+		parsed.requesterID = requesterID
+	case "bilifilter":
+		if len(parts) < 5 {
+			return parsedSearchCallback{}
+		}
+		requesterID, err := strconv.ParseInt(parts[4], 10, 64)
+		if err != nil {
+			return parsedSearchCallback{}
+		}
+		parsed.filterEnabled = parts[3] == "on"
+		parsed.requesterID = requesterID
+	case "close", "home":
+		requesterID, err := strconv.ParseInt(parts[3], 10, 64)
+		if err != nil {
+			return parsedSearchCallback{}
+		}
+		parsed.requesterID = requesterID
+	default:
+		return parsedSearchCallback{}
+	}
+	return parsed
 }
 
 func (h *SearchHandler) searchLimit(platformName string) int {
