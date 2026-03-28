@@ -3,6 +3,7 @@ package kugou
 import (
 	"testing"
 
+	"github.com/guohuiyuan/music-lib/model"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
@@ -41,6 +42,128 @@ func TestQualityFromSong(t *testing.T) {
 				t.Fatalf("qualityFromSong()=%v want=%v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInferTrackID(t *testing.T) {
+	tests := []struct {
+		name  string
+		id    string
+		link  string
+		extra map[string]string
+		want  string
+	}{
+		{
+			name:  "prefer extra hash",
+			id:    "raw-id",
+			link:  "https://www.kugou.com/song/#hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			extra: map[string]string{"sq_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "hash": "cccccccccccccccccccccccccccccccc"},
+			want:  "cccccccccccccccccccccccccccccccc",
+		},
+		{
+			name:  "fallback to link hash",
+			id:    "raw-id",
+			link:  "https://www.kugou.com/song/#hash=dddddddddddddddddddddddddddddddd",
+			extra: nil,
+			want:  "dddddddddddddddddddddddddddddddd",
+		},
+		{
+			name:  "fallback to normalized id",
+			id:    "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+			link:  "",
+			extra: nil,
+			want:  "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		},
+		{
+			name:  "fallback to raw id",
+			id:    "not-a-hash",
+			link:  "",
+			extra: nil,
+			want:  "not-a-hash",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inferTrackID(tt.id, tt.link, tt.extra); got != tt.want {
+				t.Fatalf("inferTrackID()=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectCandidateURLs(t *testing.T) {
+	urls := collectCandidateURLs("https://a.example/test.flac", map[string]string{
+		"play_backup_url": "https://b.example/test.flac",
+		"play_url":        "https://a.example/test.flac",
+	})
+	if len(urls) != 2 {
+		t.Fatalf("collectCandidateURLs len=%d want=2", len(urls))
+	}
+	if urls[0] != "https://a.example/test.flac" || urls[1] != "https://b.example/test.flac" {
+		t.Fatalf("collectCandidateURLs=%v", urls)
+	}
+}
+
+func TestMergeDownloadSong(t *testing.T) {
+	song := &model.Song{
+		ID:  "abcdef1234567890abcdef1234567890",
+		Ext: "",
+		Extra: map[string]string{
+			"hash": "abcdef1234567890abcdef1234567890",
+		},
+	}
+	merged := mergeDownloadSong(song, "https://cdn.example/music.flac")
+	if merged == song {
+		t.Fatal("mergeDownloadSong should clone input song")
+	}
+	if merged.URL != "https://cdn.example/music.flac" {
+		t.Fatalf("mergeDownloadSong URL=%q", merged.URL)
+	}
+	if merged.Ext != "flac" {
+		t.Fatalf("mergeDownloadSong Ext=%q want=flac", merged.Ext)
+	}
+	merged.Extra["hash"] = "changed"
+	if song.Extra["hash"] == "changed" {
+		t.Fatal("mergeDownloadSong should deep copy Extra")
+	}
+	if merged.Extra["play_url"] != "https://cdn.example/music.flac" {
+		t.Fatalf("mergeDownloadSong play_url=%q", merged.Extra["play_url"])
+	}
+}
+
+func TestNormalizeRequestedQuality(t *testing.T) {
+	if got := normalizeRequestedQuality(platform.QualityHiRes); got != platform.QualityHiRes {
+		t.Fatalf("normalizeRequestedQuality(hires)=%v", got)
+	}
+	if got := normalizeRequestedQuality(platform.Quality(-100)); got != platform.QualityHigh {
+		t.Fatalf("normalizeRequestedQuality(invalid)=%v want=%v", got, platform.QualityHigh)
+	}
+}
+
+func TestBuildTrackURLPrefersHashAlbumPage(t *testing.T) {
+	got := buildTrackURL(
+		"abcdef1234567890abcdef1234567890",
+		"41668184",
+		"",
+		map[string]string{"mix_song_id": "294998706"},
+	)
+	want := "https://www.kugou.com/song/#hash=abcdef1234567890abcdef1234567890&album_id=41668184"
+	if got != want {
+		t.Fatalf("buildTrackURL()=%q want=%q", got, want)
+	}
+}
+
+func TestSplitArtistsBuildsArtistURLs(t *testing.T) {
+	artists := splitArtists("花玲、喵酱油、宴宁、Kinsen", map[string]string{"singer_ids": "766730,6792161,1078494,2503850"})
+	if len(artists) != 4 {
+		t.Fatalf("splitArtists len=%d want=4", len(artists))
+	}
+	if artists[0].URL != "https://www.kugou.com/singer/766730.html" {
+		t.Fatalf("artists[0].URL=%q", artists[0].URL)
+	}
+	if artists[3].URL != "https://www.kugou.com/singer/2503850.html" {
+		t.Fatalf("artists[3].URL=%q", artists[3].URL)
 	}
 }
 

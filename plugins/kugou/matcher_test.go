@@ -11,6 +11,8 @@ func TestURLMatcherMatchURL(t *testing.T) {
 		wantMatch bool
 	}{
 		{name: "song link", url: "https://www.kugou.com/song/#hash=ABCDEF1234567890ABCDEF1234567890", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
+		{name: "hash query", url: "https://www.kugou.com/share/song?song=foo&hash=ABCDEF1234567890ABCDEF1234567890", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
+		{name: "fragment only hash", url: "https://www.kugou.com/song/#ABCDEF1234567890ABCDEF1234567890", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
 		{name: "playlist url not song", url: "https://www.kugou.com/yy/special/single/546903.html", wantID: "", wantMatch: false},
 		{name: "non kugou", url: "https://music.163.com/song?id=12345", wantID: "", wantMatch: false},
 	}
@@ -36,7 +38,10 @@ func TestURLMatcherMatchPlaylistURL(t *testing.T) {
 		wantMatch bool
 	}{
 		{name: "special playlist", url: "https://www.kugou.com/yy/special/single/546903.html", wantID: "546903", wantMatch: true},
+		{name: "playlist query id", url: "https://www.kugou.com/playlist/?specialid=546903", wantID: "546903", wantMatch: true},
+		{name: "playlist path variant", url: "https://www.kugou.com/playlist/546903", wantID: "546903", wantMatch: true},
 		{name: "songlist playlist", url: "https://www.kugou.com/songlist/gcid_abcd1234/", wantID: "gcid_abcd1234", wantMatch: true},
+		{name: "songlist query", url: "https://www.kugou.com/songlist/?gcid=gcid_abcd1234", wantID: "gcid_abcd1234", wantMatch: true},
 		{name: "song url", url: "https://www.kugou.com/song/#hash=abcdef1234567890abcdef1234567890", wantID: "", wantMatch: false},
 	}
 	for _, tt := range tests {
@@ -62,6 +67,8 @@ func TestTextMatcherMatchText(t *testing.T) {
 	}{
 		{name: "raw hash", text: "ABCDEF1234567890ABCDEF1234567890", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
 		{name: "prefixed hash", text: "kugou:abcdef1234567890abcdef1234567890", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
+		{name: "prefixed url", text: "kg:https://www.kugou.com/share/song?song=foo&hash=ABCDEF1234567890ABCDEF1234567890", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
+		{name: "text with url", text: "分享链接 https://www.kugou.com/share/song?song=foo&hash=ABCDEF1234567890ABCDEF1234567890 快来听", wantID: "abcdef1234567890abcdef1234567890", wantMatch: true},
 		{name: "non hash", text: "jay chou", wantID: "", wantMatch: false},
 	}
 	for _, tt := range tests {
