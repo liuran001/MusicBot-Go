@@ -1,0 +1,13 @@
+services:
+  musicbot-go:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: musicbot-go
+    restart: unless-stopped
+    working_dir: /app/workdir
+    command: ["-c", "/app/workdir/config.ini"]
+    volumes:
+      - ./docker-data:/app/workdir
+    environment:
+      TZ: Asia/Shanghai

@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+MusicBot-Go
+Music163bot-Go
+*.db
+*.db-shm
+*.db-wal
+*.log
+cache/
+tmp/
+config.ini
+node_modules/
+plugins/netease/recognize/service/node_modules/
