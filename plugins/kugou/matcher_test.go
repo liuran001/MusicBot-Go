@@ -40,11 +40,16 @@ func TestURLMatcherMatchPlaylistURL(t *testing.T) {
 		wantID    string
 		wantMatch bool
 	}{
+		{name: "album url", url: "https://www.kugou.com/album/979856.html", wantID: "album:979856", wantMatch: true},
+		{name: "album query", url: "https://www.kugou.com/share/some.html?albumid=979856", wantID: "album:979856", wantMatch: true},
 		{name: "special playlist", url: "https://www.kugou.com/yy/special/single/546903.html", wantID: "546903", wantMatch: true},
 		{name: "playlist query id", url: "https://www.kugou.com/playlist/?specialid=546903", wantID: "546903", wantMatch: true},
 		{name: "playlist path variant", url: "https://www.kugou.com/playlist/546903", wantID: "546903", wantMatch: true},
 		{name: "songlist playlist", url: "https://www.kugou.com/songlist/gcid_abcd1234/", wantID: "gcid_abcd1234", wantMatch: true},
+		{name: "songlist real playlist", url: "https://www.kugou.com/songlist/gcid_3zvq18y5z29z08e/", wantID: "gcid_3zvq18y5z29z08e", wantMatch: true},
 		{name: "songlist query", url: "https://www.kugou.com/songlist/?gcid=gcid_abcd1234", wantID: "gcid_abcd1234", wantMatch: true},
+		{name: "share zlist", url: "https://www.kugou.com/share/zlist.html?global_collection_id=test-id&listid=123", wantID: "playlisturl:https://www.kugou.com/share/zlist.html?global_collection_id=test-id&listid=123", wantMatch: true},
+		{name: "m share playlist chain", url: "https://m.kugou.com/share/?chain=bRMyd3fFZV2&id=bRMyd3fFZV2", wantID: "playlisturl:https://m.kugou.com/share/?chain=bRMyd3fFZV2&id=bRMyd3fFZV2", wantMatch: true},
 		{name: "song url", url: "https://www.kugou.com/song/#hash=abcdef1234567890abcdef1234567890", wantID: "", wantMatch: false},
 	}
 	for _, tt := range tests {

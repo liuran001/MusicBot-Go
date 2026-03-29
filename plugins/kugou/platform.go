@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ import (
 type KugouPlatform struct {
 	client *Client
 }
+
+const kugouCookieCheckTrackID = "f73f22fb046ca1a135c70417163af82e"
 
 func NewPlatform(client *Client) *KugouPlatform {
 	return &KugouPlatform{client: client}
@@ -73,25 +76,36 @@ func (k *KugouPlatform) CheckCookie(ctx context.Context) (platform.CookieCheckRe
 	if !ok {
 		return platform.CookieCheckResult{OK: false, Message: "Cookie 未检测到 VIP 能力或未配置"}, nil
 	}
-	tracks, err := k.Search(checkCtx, "周杰伦", 1)
+	info, err := k.GetDownloadInfo(checkCtx, kugouCookieCheckTrackID, platform.QualityHiRes)
 	if err != nil {
-		return platform.CookieCheckResult{OK: false, Message: fmt.Sprintf("VIP 已识别，但测试搜索失败: %v", err)}, nil
-	}
-	if len(tracks) == 0 || strings.TrimSpace(tracks[0].ID) == "" {
-		return platform.CookieCheckResult{OK: false, Message: "VIP 已识别，但测试曲目获取失败"}, nil
-	}
-	info, err := k.GetDownloadInfo(checkCtx, tracks[0].ID, platform.QualityHiRes)
-	if err != nil {
-		return platform.CookieCheckResult{OK: false, Message: fmt.Sprintf("VIP 已识别，但下载链路校验失败: %v", err)}, nil
+		return platform.CookieCheckResult{OK: false, Message: fmt.Sprintf("VIP 已识别，但测试曲目下载链路校验失败: %v", err)}, nil
 	}
 	if info == nil || strings.TrimSpace(info.URL) == "" {
-		return platform.CookieCheckResult{OK: false, Message: "VIP 已识别，但下载链接为空"}, nil
+		return platform.CookieCheckResult{OK: false, Message: "VIP 已识别，但测试曲目下载链接为空"}, nil
 	}
-	message := fmt.Sprintf("Cookie 可用，下载链路已验证（实际音质：%s）", info.Quality.String())
+	if size, probeErr := probeKugouContentLength(checkCtx, info.URL); probeErr == nil && size > 0 {
+		info.Size = size
+	}
+	message := fmt.Sprintf("%s 可用", formatCookieCheckQuality(info.Quality))
 	if info.Size > 0 {
-		message = fmt.Sprintf("Cookie 可用，下载链路已验证（%s / %.2fMB）", info.Quality.String(), float64(info.Size)/1024/1024)
+		message = fmt.Sprintf("%s 可用: %.2fMB", formatCookieCheckQuality(info.Quality), float64(info.Size)/1024/1024)
 	}
 	return platform.CookieCheckResult{OK: true, Message: message}, nil
+}
+
+func formatCookieCheckQuality(q platform.Quality) string {
+	switch q {
+	case platform.QualityHiRes:
+		return "Hi-Res"
+	case platform.QualityLossless:
+		return "Lossless"
+	case platform.QualityHigh:
+		return "High"
+	case platform.QualityStandard:
+		return "Standard"
+	default:
+		return q.String()
+	}
 }
 
 func (k *KugouPlatform) ManualRenew(ctx context.Context) (string, error) {
@@ -132,6 +146,60 @@ func (k *KugouPlatform) GetDownloadInfo(ctx context.Context, trackID string, qua
 		Bitrate:       song.Bitrate,
 		Quality:       resolvedQuality,
 	}, nil
+}
+
+func probeKugouContentLength(ctx context.Context, rawURL string) (int64, error) {
+	if strings.TrimSpace(rawURL) == "" {
+		return 0, nil
+	}
+	headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	headReq.Header.Set("User-Agent", kugouPlaylistWebUA)
+	headResp, headErr := http.DefaultClient.Do(headReq)
+	if headErr == nil {
+		defer headResp.Body.Close()
+		if headResp.ContentLength > 0 {
+			return headResp.ContentLength, nil
+		}
+	}
+	rangeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		if headErr != nil {
+			return 0, headErr
+		}
+		return 0, err
+	}
+	rangeReq.Header.Set("User-Agent", kugouPlaylistWebUA)
+	rangeReq.Header.Set("Range", "bytes=0-0")
+	rangeResp, err := http.DefaultClient.Do(rangeReq)
+	if err != nil {
+		if headErr != nil {
+			return 0, headErr
+		}
+		return 0, err
+	}
+	defer rangeResp.Body.Close()
+	if contentRange := strings.TrimSpace(rangeResp.Header.Get("Content-Range")); contentRange != "" {
+		parts := strings.Split(contentRange, "/")
+		if len(parts) == 2 {
+			totalStr := strings.TrimSpace(parts[1])
+			if totalStr != "" && totalStr != "*" {
+				total, parseErr := strconv.ParseInt(totalStr, 10, 64)
+				if parseErr == nil && total > 0 {
+					return total, nil
+				}
+			}
+		}
+	}
+	if rangeResp.ContentLength > 0 {
+		return rangeResp.ContentLength, nil
+	}
+	if headErr != nil {
+		return 0, headErr
+	}
+	return 0, nil
 }
 
 func (k *KugouPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
@@ -192,13 +260,35 @@ func (k *KugouPlatform) GetArtist(ctx context.Context, artistID string) (*platfo
 }
 
 func (k *KugouPlatform) GetAlbum(ctx context.Context, albumID string) (*platform.Album, error) {
-	return nil, platform.NewUnsupportedError("kugou", "get album")
+	if k == nil || k.client == nil {
+		return nil, platform.NewUnavailableError("kugou", "album", albumID)
+	}
+	playlist, _, err := k.client.GetAlbumPlaylist(ctx, albumID)
+	if err != nil {
+		return nil, err
+	}
+	if playlist == nil {
+		return nil, platform.NewNotFoundError("kugou", "album", albumID)
+	}
+	album := &platform.Album{
+		ID:         strings.TrimSpace(albumID),
+		Platform:   "kugou",
+		Title:      strings.TrimSpace(playlist.Name),
+		CoverURL:   strings.TrimSpace(playlist.Cover),
+		URL:        buildAlbumURL(albumID),
+		TrackCount: playlist.TrackCount,
+	}
+	if creator := strings.TrimSpace(playlist.Creator); creator != "" {
+		album.Artists = splitArtists(creator, nil)
+	}
+	return album, nil
 }
 
 func (k *KugouPlatform) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
 	if k == nil || k.client == nil {
 		return nil, platform.NewUnavailableError("kugou", "playlist", playlistID)
 	}
+	kind, rawID := parseCollectionID(playlistID)
 	playlistData, songs, err := k.client.GetPlaylist(ctx, playlistID)
 	if err != nil {
 		return nil, err
@@ -226,8 +316,16 @@ func (k *KugouPlatform) GetPlaylist(ctx context.Context, playlistID string) (*pl
 	if trackCount <= 0 {
 		trackCount = len(songs)
 	}
+	playlistURL := strings.TrimSpace(playlistData.Link)
+	if kind == "album" {
+		playlistURL = buildAlbumURL(rawID)
+	}
+	playlistIDValue := strings.TrimSpace(playlistData.ID)
+	if playlistIDValue == "" {
+		playlistIDValue = strings.TrimSpace(rawID)
+	}
 	return &platform.Playlist{
-		ID:          strings.TrimSpace(playlistData.ID),
+		ID:          playlistIDValue,
 		Platform:    "kugou",
 		Title:       strings.TrimSpace(playlistData.Name),
 		Description: strings.TrimSpace(playlistData.Description),
@@ -235,7 +333,7 @@ func (k *KugouPlatform) GetPlaylist(ctx context.Context, playlistID string) (*pl
 		Creator:     strings.TrimSpace(playlistData.Creator),
 		TrackCount:  trackCount,
 		Tracks:      tracks,
-		URL:         strings.TrimSpace(playlistData.Link),
+		URL:         playlistURL,
 	}, nil
 }
 

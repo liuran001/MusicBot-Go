@@ -54,8 +54,9 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 		}
 	}
 	args := commandArguments(message.Text)
+	cmdCtx := admincmd.WithChatID(ctx, message.Chat.ID)
 	if command.RichHandler != nil {
-		resp, err := command.RichHandler(ctx, args)
+		resp, err := command.RichHandler(cmdCtx, args)
 		if err != nil {
 			h.sendText(ctx, b, message.Chat.ID, message.MessageID, fmt.Sprintf("执行失败: %v", err))
 			return
@@ -63,7 +64,7 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 		h.sendResponse(ctx, b, message.Chat.ID, message.MessageID, resp)
 		return
 	}
-	result, err := command.Handler(ctx, args)
+	result, err := command.Handler(cmdCtx, args)
 	if err != nil {
 		h.sendText(ctx, b, message.Chat.ID, message.MessageID, fmt.Sprintf("执行失败: %v", err))
 		return
@@ -252,7 +253,7 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 			return "", err
 		}
 		if strings.TrimSpace(line) == "" {
-			return fmt.Sprintf("%s 不支持 Cookie 续期", platformName), nil
+			return fmt.Sprintf("%s 不支持 Cookie 续期", platformDisplayName(manager, platformName)), nil
 		}
 		return line, nil
 	}
@@ -268,7 +269,7 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 		line, err := renewCookieForPlatform(ctx, manager, name)
 		if err != nil {
 			failures++
-			lines = append(lines, fmt.Sprintf("❌ %s: %s", name, sanitizeSensitiveText(err.Error())))
+			lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
 			continue
 		}
 		if strings.TrimSpace(line) != "" {
@@ -316,7 +317,7 @@ func checkCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 	if message == "" {
 		message = "未知"
 	}
-	return fmt.Sprintf("%s %s: %s", status, platformName, message), nil
+	return fmt.Sprintf("%s %s: %s", status, platformDisplayName(manager, platformName), message), nil
 }
 
 func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platformName string) (string, error) {
@@ -337,7 +338,7 @@ func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 		message = "续期完成"
 	}
 	message = sanitizeSensitiveText(message)
-	return fmt.Sprintf("✅ %s: %s", platformName, message), nil
+	return fmt.Sprintf("✅ %s: %s", platformDisplayName(manager, platformName), message), nil
 }
 
 func sanitizeSensitiveText(text string) string {

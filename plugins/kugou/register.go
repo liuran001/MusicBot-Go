@@ -23,7 +23,7 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	persist := func(pairs map[string]string) error {
 		return cfg.PersistPluginConfig("kugou", pairs)
 	}
-	client := NewClient(cfg.GetPluginString("kugou", "cookie"), logger)
+	client := NewClient("", logger)
 	concept := loadConceptSessionFromConfig(cfg.GetPluginString, cfg.GetPluginBool, cfg.GetPluginInt)
 	manager := NewConceptSessionManager(logger, persist, concept)
 	manager.SetBaseURL(cfg.GetPluginString("kugou", "concept_base_url"))

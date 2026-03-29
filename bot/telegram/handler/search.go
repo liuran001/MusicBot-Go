@@ -821,6 +821,8 @@ func platformSearchShortName(name string) string {
 		return "网易云"
 	case "qqmusic":
 		return "Q音"
+	case "kugou":
+		return "酷狗"
 	default:
 		trimmed := strings.TrimSpace(name)
 		if trimmed == "" {
