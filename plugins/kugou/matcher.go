@@ -12,6 +12,8 @@ var (
 	kugouHashPattern         = regexp.MustCompile(`(?i)hash=([a-f0-9]{32})`)
 	kugouSongPathHashPattern = regexp.MustCompile(`(?i)/song/[^?#]*#hash=([a-f0-9]{32})`)
 	kugouPathHashPattern     = regexp.MustCompile(`(?i)/(?:song|share)/(?:[^/?#]+/)?([a-f0-9]{32})(?:[/?#]|$)`)
+	kugouSharePathPattern    = regexp.MustCompile(`(?i)^/share/([a-z0-9]+)\.html$`)
+	kugouWCShortPathPattern  = regexp.MustCompile(`(?i)^/wc/s/([a-z0-9]+)$`)
 	kugouPlaylistPattern     = regexp.MustCompile(`(?i)special/single/(\d+)\.html`)
 	kugouPlaylistPathPattern = regexp.MustCompile(`(?i)/(?:special|playlist)/(?:single/)?(\d+)(?:\.html)?(?:[/?#]|$)`)
 	kugouSonglistPattern     = regexp.MustCompile(`(?i)songlist/(gcid_[a-z0-9]+)/?`)
@@ -45,9 +47,22 @@ func (m *URLMatcher) MatchURL(rawURL string) (trackID string, matched bool) {
 		return hash, true
 	}
 	query := parsed.Query()
+	if chain := normalizeShareChain(query.Get("chain")); chain != "" {
+		return encodeShareTrackID(chain), true
+	}
 	for _, key := range []string{"hash", "fileHash", "filehash", "encode_album_audio_id"} {
 		if hash := normalizeHash(query.Get(key)); hash != "" {
 			return hash, true
+		}
+	}
+	if matches := kugouSharePathPattern.FindStringSubmatch(parsed.Path); len(matches) == 2 {
+		if chain := normalizeShareChain(matches[1]); chain != "" {
+			return encodeShareTrackID(chain), true
+		}
+	}
+	if matches := kugouWCShortPathPattern.FindStringSubmatch(parsed.Path); len(matches) == 2 {
+		if chain := normalizeShareChain(matches[1]); chain != "" {
+			return encodeShareTrackID(chain), true
 		}
 	}
 	if matches := kugouPathHashPattern.FindStringSubmatch(strings.ToLower(parsed.Path)); len(matches) == 2 {
@@ -107,6 +122,9 @@ func (m *TextMatcher) MatchText(text string) (trackID string, matched bool) {
 		return strings.ToLower(value), true
 	}
 	if prefix, value := parsePlatformPrefix(text); prefix != "" {
+		if chain := normalizeShareChain(value); chain != "" {
+			return encodeShareTrackID(chain), true
+		}
 		if urlStr := extractURL(value); urlStr != "" {
 			if id, ok := NewURLMatcher().MatchURL(urlStr); ok {
 				return id, true
@@ -125,6 +143,51 @@ func (m *TextMatcher) MatchText(text string) (trackID string, matched bool) {
 		return strings.ToLower(text), true
 	}
 	return "", false
+}
+
+const kugouShareTrackPrefix = "sharechain:"
+
+func encodeShareTrackID(chain string) string {
+	chain = normalizeShareChain(chain)
+	if chain == "" {
+		return ""
+	}
+	return kugouShareTrackPrefix + chain
+}
+
+func decodeShareTrackID(trackID string) (string, bool) {
+	trackID = strings.TrimSpace(trackID)
+	if !strings.HasPrefix(strings.ToLower(trackID), kugouShareTrackPrefix) {
+		return "", false
+	}
+	chain := strings.TrimSpace(trackID[len(kugouShareTrackPrefix):])
+	chain = normalizeShareChain(chain)
+	if chain == "" {
+		return "", false
+	}
+	return chain, true
+}
+
+func normalizeShareChain(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	hasLetter := false
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+			hasLetter = true
+			continue
+		}
+		if ch >= '0' && ch <= '9' {
+			continue
+		}
+		return ""
+	}
+	if !hasLetter {
+		return ""
+	}
+	return value
 }
 
 func parsePlatformPrefix(text string) (string, string) {

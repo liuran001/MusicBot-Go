@@ -723,6 +723,9 @@ func (h *MusicHandler) trySendCachedTrack(
 	}
 
 	songInfo := *cached
+	if h != nil {
+		h.refreshCachedSongLinks(ctx, &songInfo)
+	}
 	if !silent {
 		status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
 	}
@@ -734,6 +737,53 @@ func (h *MusicHandler) trySendCachedTrack(
 	}
 
 	return songInfo, true, nil
+}
+
+func (h *MusicHandler) refreshCachedSongLinks(ctx context.Context, songInfo *botpkg.SongInfo) {
+	if h == nil || h.PlatformManager == nil || h.Repo == nil || songInfo == nil {
+		return
+	}
+	if strings.TrimSpace(songInfo.Platform) != "kugou" || strings.TrimSpace(songInfo.TrackID) == "" {
+		return
+	}
+	if !needsKugouLinkRefresh(songInfo) {
+		return
+	}
+	track, err := h.getTrackSingleflight(ctx, songInfo.Platform, songInfo.TrackID)
+	if err != nil || track == nil {
+		return
+	}
+	fillSongInfoFromTrack(songInfo, track, songInfo.Platform, songInfo.TrackID, nil)
+	_ = h.Repo.Create(ctx, songInfo)
+}
+
+func needsKugouLinkRefresh(songInfo *botpkg.SongInfo) bool {
+	if songInfo == nil {
+		return false
+	}
+	if strings.TrimSpace(songInfo.Platform) != "kugou" {
+		return false
+	}
+	trackURL := strings.TrimSpace(songInfo.TrackURL)
+	artistURLs := strings.TrimSpace(songInfo.SongArtistsURLs)
+	albumURL := strings.TrimSpace(songInfo.AlbumURL)
+
+	if trackURL == "" || strings.Contains(trackURL, "www.kugou.com/song/#hash=") {
+		return true
+	}
+	if albumURL == "" && strings.TrimSpace(songInfo.SongAlbum) != "" {
+		return true
+	}
+	if artistURLs == "" {
+		return true
+	}
+	for _, artistURL := range strings.Split(artistURLs, ",") {
+		artistURL = strings.TrimSpace(artistURL)
+		if artistURL == "" || strings.Contains(artistURL, "m.kugou.com/singer/info/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *telego.Message, status *statusSession, platformName, trackID string) (*platform.Track, platform.Platform, string, string, error) {

@@ -63,6 +63,12 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		}
 		bh.Handle(r.wrapMessage(r.Admin), matchCommandFunc(botName, cmd))
 	}
+	bh.Handle(r.wrapCallback(r.Admin), func(ctx context.Context, update telego.Update) bool {
+		if update.CallbackQuery == nil {
+			return false
+		}
+		return strings.HasPrefix(strings.TrimSpace(update.CallbackQuery.Data), "admin ")
+	})
 
 	bh.Handle(r.wrapMessage(r.Music), func(ctx context.Context, update telego.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {

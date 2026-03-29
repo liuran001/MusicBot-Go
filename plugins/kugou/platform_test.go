@@ -3,7 +3,6 @@ package kugou
 import (
 	"testing"
 
-	"github.com/guohuiyuan/music-lib/model"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
@@ -105,33 +104,6 @@ func TestCollectCandidateURLs(t *testing.T) {
 	}
 }
 
-func TestMergeDownloadSong(t *testing.T) {
-	song := &model.Song{
-		ID:  "abcdef1234567890abcdef1234567890",
-		Ext: "",
-		Extra: map[string]string{
-			"hash": "abcdef1234567890abcdef1234567890",
-		},
-	}
-	merged := mergeDownloadSong(song, "https://cdn.example/music.flac")
-	if merged == song {
-		t.Fatal("mergeDownloadSong should clone input song")
-	}
-	if merged.URL != "https://cdn.example/music.flac" {
-		t.Fatalf("mergeDownloadSong URL=%q", merged.URL)
-	}
-	if merged.Ext != "flac" {
-		t.Fatalf("mergeDownloadSong Ext=%q want=flac", merged.Ext)
-	}
-	merged.Extra["hash"] = "changed"
-	if song.Extra["hash"] == "changed" {
-		t.Fatal("mergeDownloadSong should deep copy Extra")
-	}
-	if merged.Extra["play_url"] != "https://cdn.example/music.flac" {
-		t.Fatalf("mergeDownloadSong play_url=%q", merged.Extra["play_url"])
-	}
-}
-
 func TestNormalizeRequestedQuality(t *testing.T) {
 	if got := normalizeRequestedQuality(platform.QualityHiRes); got != platform.QualityHiRes {
 		t.Fatalf("normalizeRequestedQuality(hires)=%v", got)
@@ -147,6 +119,32 @@ func TestBuildTrackURLPrefersHashAlbumPage(t *testing.T) {
 		"41668184",
 		"",
 		map[string]string{"mix_song_id": "294998706"},
+	)
+	want := "https://www.kugou.com/song/#hash=abcdef1234567890abcdef1234567890&album_id=41668184"
+	if got != want {
+		t.Fatalf("buildTrackURL()=%q want=%q", got, want)
+	}
+}
+
+func TestBuildTrackURLPrefersShareChain(t *testing.T) {
+	got := buildTrackURL(
+		"abcdef1234567890abcdef1234567890",
+		"41668184",
+		"",
+		map[string]string{"share_chain": "bJ2np35FZV2"},
+	)
+	want := "https://www.kugou.com/share/bJ2np35FZV2.html"
+	if got != want {
+		t.Fatalf("buildTrackURL()=%q want=%q", got, want)
+	}
+}
+
+func TestBuildTrackURLFallsBackToH5Link(t *testing.T) {
+	got := buildTrackURL(
+		"abcdef1234567890abcdef1234567890",
+		"41668184",
+		"",
+		map[string]string{"album_audio_id": "32218352"},
 	)
 	want := "https://www.kugou.com/song/#hash=abcdef1234567890abcdef1234567890&album_id=41668184"
 	if got != want {

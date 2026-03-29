@@ -96,6 +96,153 @@ func TestBuildMusicCaptionHidesAlbumLineWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildMusicCaptionEscapesHTMLAndKeepsLinks(t *testing.T) {
+	info := &botpkg.SongInfo{
+		SongName:        `Song <Test>`,
+		SongArtists:     `A & B/C<D>`,
+		SongArtistsURLs: `https://artist.example/a,https://artist.example/b`,
+		SongAlbum:       `Album & More`,
+		TrackURL:        `https://track.example/?a=1&b=2`,
+		AlbumURL:        `https://album.example/?q=1&x=2`,
+		FileExt:         "mp3",
+		MusicSize:       1024,
+		BitRate:         320000,
+	}
+	caption := buildMusicCaption(nil, info, "botname")
+	if !strings.Contains(caption, `<a href="https://track.example/?a=1&amp;b=2">Song &lt;Test&gt;</a>`) {
+		t.Fatalf("expected escaped track link, got %q", caption)
+	}
+	if !strings.Contains(caption, `<a href="https://artist.example/a">A &amp; B</a> / <a href="https://artist.example/b">C&lt;D&gt;</a>`) {
+		t.Fatalf("expected escaped artist links, got %q", caption)
+	}
+	if !strings.Contains(caption, `<a href="https://album.example/?q=1&amp;x=2">Album &amp; More</a>`) {
+		t.Fatalf("expected escaped album link, got %q", caption)
+	}
+}
+
+func TestNeedsKugouLinkRefresh(t *testing.T) {
+	tests := []struct {
+		name string
+		info *botpkg.SongInfo
+		want bool
+	}{
+		{
+			name: "legacy track url",
+			info: &botpkg.SongInfo{Platform: "kugou", TrackURL: "https://www.kugou.com/song/#hash=abc&album_id=1", SongArtistsURLs: "https://www.kugou.com/singer/1.html", SongAlbum: "Album", AlbumURL: "https://www.kugou.com/album/1.html"},
+			want: true,
+		},
+		{
+			name: "legacy artist url",
+			info: &botpkg.SongInfo{Platform: "kugou", TrackURL: "https://h5.kugou.com/v2/v-5a15aeb1/index.html?hash=abc", SongArtistsURLs: "https://m.kugou.com/singer/info/1/", SongAlbum: "Album", AlbumURL: "https://www.kugou.com/album/1.html"},
+			want: true,
+		},
+		{
+			name: "missing album link",
+			info: &botpkg.SongInfo{Platform: "kugou", TrackURL: "https://h5.kugou.com/v2/v-5a15aeb1/index.html?hash=abc", SongArtistsURLs: "https://www.kugou.com/singer/1.html", SongAlbum: "Album"},
+			want: true,
+		},
+		{
+			name: "fresh kugou links",
+			info: &botpkg.SongInfo{Platform: "kugou", TrackURL: "https://h5.kugou.com/v2/v-5a15aeb1/index.html?hash=abc&album_id=1", SongArtistsURLs: "https://www.kugou.com/singer/1.html,https://www.kugou.com/singer/2.html", SongAlbum: "Album", AlbumURL: "https://www.kugou.com/album/1.html"},
+			want: false,
+		},
+		{
+			name: "non kugou",
+			info: &botpkg.SongInfo{Platform: "qqmusic", TrackURL: "https://example.com/track"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := needsKugouLinkRefresh(tt.info); got != tt.want {
+				t.Fatalf("needsKugouLinkRefresh()=%v want=%v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRefreshCachedSongLinksUpdatesKugouSongInfo(t *testing.T) {
+	repo := newStubRepo()
+	mgr := newStubManager()
+	mgr.Register(&refreshKugouTestPlatform{})
+	h := &MusicHandler{Repo: repo, PlatformManager: mgr}
+
+	info := &botpkg.SongInfo{
+		Platform:        "kugou",
+		TrackID:         "track-1",
+		Quality:         "high",
+		SongName:        "Old Song",
+		SongArtists:     "Old Artist",
+		SongAlbum:       "Old Album",
+		TrackURL:        "https://www.kugou.com/song/#hash=legacy&album_id=1",
+		SongArtistsURLs: "https://m.kugou.com/singer/info/1/",
+	}
+
+	h.refreshCachedSongLinks(context.Background(), info)
+
+	if info.TrackURL != "https://h5.kugou.com/v2/v-5a15aeb1/index.html?hash=newhash&album_id=9&album_audio_id=99" {
+		t.Fatalf("unexpected track url: %q", info.TrackURL)
+	}
+	if info.SongArtistsURLs != "https://www.kugou.com/singer/3520.html" {
+		t.Fatalf("unexpected artist urls: %q", info.SongArtistsURLs)
+	}
+	if info.AlbumURL != "https://www.kugou.com/album/9.html" {
+		t.Fatalf("unexpected album url: %q", info.AlbumURL)
+	}
+
+	cached, err := repo.FindByPlatformTrackID(context.Background(), "kugou", "track-1", "high")
+	if err != nil {
+		t.Fatalf("find cached: %v", err)
+	}
+	if cached == nil || cached.TrackURL != info.TrackURL {
+		t.Fatalf("expected refreshed song info persisted, got %+v", cached)
+	}
+}
+
+type refreshKugouTestPlatform struct{}
+
+func (p *refreshKugouTestPlatform) Name() string              { return "kugou" }
+func (p *refreshKugouTestPlatform) SupportsDownload() bool    { return true }
+func (p *refreshKugouTestPlatform) SupportsSearch() bool      { return true }
+func (p *refreshKugouTestPlatform) SupportsLyrics() bool      { return true }
+func (p *refreshKugouTestPlatform) SupportsRecognition() bool { return false }
+func (p *refreshKugouTestPlatform) Capabilities() platform.Capabilities {
+	return platform.Capabilities{}
+}
+func (p *refreshKugouTestPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *refreshKugouTestPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *refreshKugouTestPlatform) GetLyrics(ctx context.Context, trackID string) (*platform.Lyrics, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *refreshKugouTestPlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*platform.Track, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *refreshKugouTestPlatform) GetTrack(ctx context.Context, trackID string) (*platform.Track, error) {
+	return &platform.Track{
+		ID:       trackID,
+		Platform: "kugou",
+		Title:    "New Song",
+		URL:      "https://h5.kugou.com/v2/v-5a15aeb1/index.html?hash=newhash&album_id=9&album_audio_id=99",
+		Duration: 200 * time.Second,
+		Artists:  []platform.Artist{{ID: "3520", Platform: "kugou", Name: "周杰伦", URL: "https://www.kugou.com/singer/3520.html"}},
+		Album:    &platform.Album{ID: "9", Platform: "kugou", Title: "New Album", URL: "https://www.kugou.com/album/9.html"},
+	}, nil
+}
+func (p *refreshKugouTestPlatform) GetArtist(ctx context.Context, artistID string) (*platform.Artist, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *refreshKugouTestPlatform) GetAlbum(ctx context.Context, albumID string) (*platform.Album, error) {
+	return nil, platform.ErrUnsupported
+}
+func (p *refreshKugouTestPlatform) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
+	return nil, platform.ErrUnsupported
+}
+
 func TestBuildMusicInfoTextHideAlbumLineWhenEmpty(t *testing.T) {
 	text := buildMusicInfoText("Song", "", "mp3 1MB", "下载中...")
 	if strings.Contains(text, "专辑:") {

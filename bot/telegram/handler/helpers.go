@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"os"
@@ -576,9 +577,12 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 		return ""
 	}
 
-	songNameHTML := songInfo.SongName
-	artistsHTML := songInfo.SongArtists
-	albumHTML := songInfo.SongAlbum
+	songNameText := html.EscapeString(songInfo.SongName)
+	artistsText := html.EscapeString(songInfo.SongArtists)
+	albumText := html.EscapeString(songInfo.SongAlbum)
+	songNameHTML := songNameText
+	artistsHTML := artistsText
+	albumHTML := albumText
 	infoParts := make([]string, 0, 2)
 	if sizeText := formatFileSize(songInfo.MusicSize + songInfo.EmbPicSize); sizeText != "" {
 		infoParts = append(infoParts, sizeText)
@@ -593,7 +597,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	tags := strings.Join(formatInfoTags(manager, songInfo.Platform, songInfo.FileExt), " ")
 
 	if strings.TrimSpace(songInfo.TrackURL) != "" {
-		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", songInfo.TrackURL, songInfo.SongName)
+		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(songInfo.TrackURL), songNameText)
 	}
 
 	if strings.TrimSpace(songInfo.SongArtistsURLs) != "" {
@@ -601,9 +605,9 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 		artists := strings.Split(songInfo.SongArtists, "/")
 		var parts []string
 		for i, artist := range artists {
-			artist = strings.TrimSpace(artist)
+			artist = html.EscapeString(strings.TrimSpace(artist))
 			if i < len(artistURLs) && strings.TrimSpace(artistURLs[i]) != "" {
-				parts = append(parts, fmt.Sprintf("<a href=\"%s\">%s</a>", strings.TrimSpace(artistURLs[i]), artist))
+				parts = append(parts, fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(strings.TrimSpace(artistURLs[i])), artist))
 				continue
 			}
 			parts = append(parts, artist)
@@ -612,7 +616,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	}
 
 	if strings.TrimSpace(songInfo.AlbumURL) != "" {
-		albumHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", songInfo.AlbumURL, songInfo.SongAlbum)
+		albumHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(songInfo.AlbumURL), albumText)
 	}
 	albumLine := ""
 	if strings.TrimSpace(songInfo.SongAlbum) != "" {

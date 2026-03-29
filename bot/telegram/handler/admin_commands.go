@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
 	"github.com/mymmrac/telego"
+	"github.com/mymmrac/telego/telegoutil"
 )
 
 type AdminCommandHandler struct {
@@ -23,7 +25,14 @@ type AdminCommandHandler struct {
 var sensitiveKVPattern = regexp.MustCompile(`(?i)\b(cookie|sessdata|music_u|refresh_token|ac_time_value|psrf_qqaccess_token|qqmusic_key|auth_token|access_token)\b\s*[:=]\s*([^\s;,\n]+)`)
 
 func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
-	if update == nil || update.Message == nil || update.Message.From == nil {
+	if update == nil {
+		return
+	}
+	if update.CallbackQuery != nil {
+		h.handleCallback(ctx, b, update.CallbackQuery)
+		return
+	}
+	if update.Message == nil || update.Message.From == nil {
 		return
 	}
 	message := update.Message
@@ -39,10 +48,21 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 		return
 	}
 	if command.Handler == nil {
-		h.sendText(ctx, b, message.Chat.ID, message.MessageID, "命令不可用")
-		return
+		if command.RichHandler == nil {
+			h.sendText(ctx, b, message.Chat.ID, message.MessageID, "命令不可用")
+			return
+		}
 	}
 	args := commandArguments(message.Text)
+	if command.RichHandler != nil {
+		resp, err := command.RichHandler(ctx, args)
+		if err != nil {
+			h.sendText(ctx, b, message.Chat.ID, message.MessageID, fmt.Sprintf("执行失败: %v", err))
+			return
+		}
+		h.sendResponse(ctx, b, message.Chat.ID, message.MessageID, resp)
+		return
+	}
 	result, err := command.Handler(ctx, args)
 	if err != nil {
 		h.sendText(ctx, b, message.Chat.ID, message.MessageID, fmt.Sprintf("执行失败: %v", err))
@@ -54,6 +74,28 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 	}
 	result = sanitizeSensitiveText(result)
 	h.sendText(ctx, b, message.Chat.ID, message.MessageID, result)
+}
+
+func (h *AdminCommandHandler) handleCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery) {
+	if h == nil || query == nil {
+		return
+	}
+	if !isBotAdmin(h.AdminIDs, query.From.ID) {
+		return
+	}
+	for _, cmd := range h.Commands {
+		prefix := strings.TrimSpace(cmd.CallbackPrefix)
+		if prefix == "" || cmd.CallbackHandler == nil {
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimSpace(query.Data), prefix) {
+			continue
+		}
+		if err := cmd.CallbackHandler(ctx, b, query); err != nil {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: sanitizeSensitiveText(err.Error()), ShowAlert: true})
+		}
+		return
+	}
 }
 
 func (h *AdminCommandHandler) commandByName(name string) (admincmd.Command, bool) {
@@ -75,6 +117,65 @@ func (h *AdminCommandHandler) sendText(ctx context.Context, b *telego.Bot, chatI
 		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
 	} else {
 		_, _ = b.SendMessage(ctx, params)
+	}
+}
+
+func (h *AdminCommandHandler) sendResponse(ctx context.Context, b *telego.Bot, chatID int64, replyID int, resp *admincmd.Response) {
+	if resp == nil {
+		h.sendText(ctx, b, chatID, replyID, "执行完成")
+		return
+	}
+	text := sanitizeSensitiveText(strings.TrimSpace(resp.Text))
+	if len(resp.Photo) > 0 {
+		name := strings.TrimSpace(resp.PhotoName)
+		if name == "" {
+			name = "qrcode.png"
+		}
+		params := &telego.SendPhotoParams{
+			ChatID:          telego.ChatID{ID: chatID},
+			Photo:           telego.InputFile{File: telegoutil.NameReader(bytes.NewReader(resp.Photo), name)},
+			ReplyParameters: &telego.ReplyParameters{MessageID: replyID},
+			ReplyMarkup:     resp.ReplyMarkup,
+		}
+		if text != "" {
+			params.Caption = text
+		}
+		var sent *telego.Message
+		if h.RateLimiter != nil {
+			sent, _ = telegram.SendPhotoWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			sent, _ = b.SendPhoto(ctx, params)
+		}
+		if resp.AfterSend != nil && sent != nil {
+			resp.AfterSend(ctx, b, sent)
+		}
+		return
+	}
+	if text == "" {
+		text = "执行完成"
+	}
+	if h.RateLimiter != nil {
+		params := &telego.SendMessageParams{
+			ChatID:          telego.ChatID{ID: chatID},
+			Text:            text,
+			ReplyParameters: &telego.ReplyParameters{MessageID: replyID},
+			ReplyMarkup:     resp.ReplyMarkup,
+		}
+		sent, _ := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
+		if resp.AfterSend != nil && sent != nil {
+			resp.AfterSend(ctx, b, sent)
+		}
+	} else {
+		params := &telego.SendMessageParams{
+			ChatID:          telego.ChatID{ID: chatID},
+			Text:            text,
+			ReplyParameters: &telego.ReplyParameters{MessageID: replyID},
+			ReplyMarkup:     resp.ReplyMarkup,
+		}
+		sent, _ := b.SendMessage(ctx, params)
+		if resp.AfterSend != nil && sent != nil {
+			resp.AfterSend(ctx, b, sent)
+		}
 	}
 }
 

@@ -17,12 +17,6 @@ type KugouPlatform struct {
 	client *Client
 }
 
-type kugouDownloadCandidate struct {
-	Quality platform.Quality
-	Song    *model.Song
-	Source  string
-}
-
 func NewPlatform(client *Client) *KugouPlatform {
 	return &KugouPlatform{client: client}
 }
@@ -98,6 +92,13 @@ func (k *KugouPlatform) CheckCookie(ctx context.Context) (platform.CookieCheckRe
 		message = fmt.Sprintf("Cookie 可用，下载链路已验证（%s / %.2fMB）", info.Quality.String(), float64(info.Size)/1024/1024)
 	}
 	return platform.CookieCheckResult{OK: true, Message: message}, nil
+}
+
+func (k *KugouPlatform) ManualRenew(ctx context.Context) (string, error) {
+	if k == nil || k.client == nil {
+		return "", fmt.Errorf("kugou client unavailable")
+	}
+	return k.client.ManualRenew(ctx)
 }
 
 func (k *KugouPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
@@ -250,6 +251,10 @@ func (k *KugouPlatform) MatchText(text string) (string, bool) {
 	return NewTextMatcher().MatchText(text)
 }
 
+func (k *KugouPlatform) ShortLinkHosts() []string {
+	return []string{"t1.kugou.com", "m.kugou.com"}
+}
+
 func convertSongModel(song songModelLike) platform.Track {
 	artists := splitArtists(song.Artist, song.Extra)
 	var album *platform.Album
@@ -331,26 +336,6 @@ func inferTrackID(id, link string, extra map[string]string) string {
 		return normalized
 	}
 	return strings.TrimSpace(id)
-}
-
-func mergeDownloadSong(song *model.Song, resolvedURL string) *model.Song {
-	if song == nil {
-		return nil
-	}
-	copySong := *song
-	copySong.URL = strings.TrimSpace(resolvedURL)
-	ensureSongExtra(&copySong)["play_url"] = copySong.URL
-	if strings.TrimSpace(copySong.Ext) == "" {
-		copySong.Ext = detectExtFromURL(copySong.URL)
-	}
-	if copySong.Extra != nil {
-		clone := make(map[string]string, len(copySong.Extra))
-		for key, value := range copySong.Extra {
-			clone[key] = value
-		}
-		copySong.Extra = clone
-	}
-	return &copySong
 }
 
 func collectCandidateURLs(primary string, extra map[string]string) []string {
@@ -435,10 +420,13 @@ func buildTrackLinkWithAlbum(hash, albumID string) string {
 }
 
 func buildTrackURL(id, albumID, link string, extra map[string]string) string {
+	if chain := mapValue(extra, "share_chain"); chain != "" {
+		return buildShareTrackLink(chain, id, firstNonEmpty(albumID, mapValue(extra, "album_id")), mapValue(extra, "album_audio_id"))
+	}
 	if strings.TrimSpace(link) != "" {
 		return strings.TrimSpace(link)
 	}
-	return buildTrackLinkWithAlbum(id, firstNonEmpty(albumID, mapValue(extra, "album_id")))
+	return buildShareTrackLink("", id, firstNonEmpty(albumID, mapValue(extra, "album_id")), mapValue(extra, "album_audio_id"))
 }
 
 func buildArtistURL(artistID string) string {

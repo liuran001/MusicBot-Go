@@ -86,8 +86,12 @@ func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admin
 		"`/music 周杰伦`\n" +
 		"`/search 周杰伦 qq`"
 	adminText := buildAdminHelp(adminCommands)
+	conceptText := buildConceptAdminHelp(adminCommands)
 	if isAdmin && adminText != "" {
 		text += "\n\n管理员命令:\n" + adminText
+		if conceptText != "" {
+			text += "\n\n酷狗概念版命令:\n" + conceptText
+		}
 	}
 	return text
 }
@@ -96,9 +100,13 @@ func buildAdminHelp(adminCommands []admincmd.Command) string {
 	if len(adminCommands) == 0 {
 		return ""
 	}
+	conceptNames := conceptAdminCommandNames()
 	items := make([]admincmd.Command, 0, len(adminCommands))
 	for _, cmd := range adminCommands {
 		if strings.TrimSpace(cmd.Name) == "" {
+			continue
+		}
+		if _, ok := conceptNames[strings.TrimSpace(cmd.Name)]; ok {
 			continue
 		}
 		items = append(items, cmd)
@@ -120,6 +128,49 @@ func buildAdminHelp(adminCommands []admincmd.Command) string {
 		lines = append(lines, "`/"+name+"` \\- "+desc)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func buildConceptAdminHelp(adminCommands []admincmd.Command) string {
+	if len(adminCommands) == 0 {
+		return ""
+	}
+	conceptNames := conceptAdminCommandNames()
+	items := make([]admincmd.Command, 0, len(conceptNames))
+	for _, cmd := range adminCommands {
+		name := strings.TrimSpace(cmd.Name)
+		if _, ok := conceptNames[name]; !ok {
+			continue
+		}
+		items = append(items, cmd)
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	lines := make([]string, 0, len(items)+1)
+	lines = append(lines, "以下命令用于酷狗概念版登录、状态检查与签到：")
+	for _, cmd := range items {
+		name := mdV2Replacer.Replace(strings.TrimSpace(cmd.Name))
+		desc := mdV2Replacer.Replace(strings.TrimSpace(cmd.Description))
+		if desc == "" {
+			lines = append(lines, "`/"+name+"`")
+			continue
+		}
+		lines = append(lines, "`/"+name+"` \\- "+desc)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func conceptAdminCommandNames() map[string]struct{} {
+	return map[string]struct{}{
+		"kgqr":       {},
+		"kgqrstatus": {},
+		"kgstatus":   {},
+		"kgrenew":    {},
+		"kgsign":     {},
+	}
 }
 
 func buildAliasHint(manager platform.Manager) string {

@@ -375,6 +375,27 @@ func EditMessageReplyMarkupWithRetry(ctx context.Context, rl *RateLimiter, b *te
 	return result, nil
 }
 
+func EditMessageCaptionWithBestEffort(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageCaptionParams) (*telego.Message, error) {
+	chatID := extractChatID(params.ChatID)
+	if rl != nil {
+		if err := rl.Wait(ctx, chatID); err != nil {
+			return nil, err
+		}
+	}
+
+	msg, err := b.EditMessageCaption(ctx, params)
+	if err == nil {
+		return msg, nil
+	}
+	if isMessageNotModified(err) {
+		return msg, nil
+	}
+	if _, shouldDrop := parseRetryAfter(err); shouldDrop {
+		return nil, nil
+	}
+	return msg, err
+}
+
 func DeleteMessageWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.DeleteMessageParams) error {
 	chatID := extractChatID(params.ChatID)
 	err := WithRetry(ctx, rl, chatID, func() error {
@@ -437,6 +458,34 @@ func SendDocumentWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, 
 		}
 		if rl != nil {
 			rl.logError("SendDocument failed", "chat_id", chatID, "error", retErr)
+		}
+		return result, retErr
+	}
+	return result, nil
+}
+
+func SendPhotoWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.SendPhotoParams) (*telego.Message, error) {
+	var result *telego.Message
+	var lastErr error
+
+	chatID := extractChatID(params.ChatID)
+	err := WithRetry(ctx, rl, chatID, func() error {
+		msg, err := b.SendPhoto(ctx, params)
+		if err != nil {
+			lastErr = err
+			return err
+		}
+		result = msg
+		return nil
+	})
+
+	if err != nil {
+		retErr := lastErr
+		if retErr == nil {
+			retErr = err
+		}
+		if rl != nil {
+			rl.logError("SendPhoto failed", "chat_id", chatID, "error", retErr)
 		}
 		return result, retErr
 	}
