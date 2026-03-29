@@ -9,12 +9,22 @@ COPY . .
 
 RUN CGO_ENABLED=0 go build -trimpath -o /out/MusicBot-Go .
 
+FROM node:20-bookworm AS npm-builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY plugins/netease/recognize/service/package*.json ./
+RUN npm install --omit=dev
+
 FROM node:20-bookworm-slim AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tzdata git \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,8 +32,7 @@ WORKDIR /app
 COPY --from=builder /out/MusicBot-Go /app/MusicBot-Go
 COPY config_example.ini /app/config_example.ini
 COPY plugins /app/plugins
-
-RUN cd /app/plugins/netease/recognize/service && npm install --omit=dev
+COPY --from=npm-builder /build/node_modules /app/plugins/netease/recognize/service/node_modules
 
 RUN mkdir -p /app/workdir
 
