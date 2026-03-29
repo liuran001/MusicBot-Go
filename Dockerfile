@@ -23,7 +23,7 @@ COPY --from=builder /out/MusicBot-Go /app/MusicBot-Go
 COPY config_example.ini /app/config_example.ini
 COPY plugins /app/plugins
 
-RUN cd /app/plugins/netease/recognize/service && npm ci --omit=dev
+RUN cd /app/plugins/netease/recognize/service && npm install --omit=dev
 
 RUN mkdir -p /app/workdir
 
