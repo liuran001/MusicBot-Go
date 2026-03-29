@@ -6,6 +6,32 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
+func TestCollectionIDHelpers(t *testing.T) {
+	if got := encodeAlbumCollectionID("979856"); got != "album:979856" {
+		t.Fatalf("encodeAlbumCollectionID()=%q", got)
+	}
+	if got := encodePlaylistURLCollectionID("https://www.kugou.com/share/zlist.html?id=1"); got != "playlisturl:https://www.kugou.com/share/zlist.html?id=1" {
+		t.Fatalf("encodePlaylistURLCollectionID()=%q", got)
+	}
+	kind, id := parseCollectionID("album:979856")
+	if kind != "album" || id != "979856" {
+		t.Fatalf("parseCollectionID(album)=(%q,%q)", kind, id)
+	}
+	kind, id = parseCollectionID("playlisturl:https://www.kugou.com/share/zlist.html?id=1")
+	if kind != "playlist_url" || id != "https://www.kugou.com/share/zlist.html?id=1" {
+		t.Fatalf("parseCollectionID(playlist_url)=(%q,%q)", kind, id)
+	}
+	if !isGlobalCollectionID("collection_3_1_2_3") {
+		t.Fatal("expected global collection id to be recognized")
+	}
+	if isGlobalCollectionID("546903") {
+		t.Fatal("numeric special id should not be treated as global collection id")
+	}
+	if got := buildPlaylistLink("collection_3_1_2_3"); got != "https://www.kugou.com/share/zlist.html?global_collection_id=collection_3_1_2_3" {
+		t.Fatalf("buildPlaylistLink(global collection)=%q", got)
+	}
+}
+
 func TestName(t *testing.T) {
 	p := &KugouPlatform{}
 	if name := p.Name(); name != "kugou" {

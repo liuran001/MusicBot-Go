@@ -2,6 +2,7 @@ package kugou
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -119,6 +120,9 @@ func (m *ConceptSessionManager) StartQRCodePolling(ctx context.Context, interval
 		for {
 			select {
 			case <-pollCtx.Done():
+				if onUpdate != nil && errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
+					onUpdate(conceptQRCheckData{}, pollCtx.Err())
+				}
 				return
 			default:
 			}
@@ -158,7 +162,6 @@ func (m *ConceptSessionManager) Persist() error {
 	}
 	state := m.Snapshot()
 	pairs := map[string]string{
-		"concept_enabled":                   boolString(state.Enabled),
 		"concept_auto_refresh_enabled":      boolString(state.AutoRefresh),
 		"concept_auto_refresh_interval_sec": fmt.Sprintf("%d", int(state.AutoRefreshPeriod/time.Second)),
 		"concept_cookie":                    state.Cookie,
@@ -187,10 +190,11 @@ func (m *ConceptSessionManager) Persist() error {
 }
 
 func (m *ConceptSessionManager) StatusSummary() string {
+	return m.StatusSummaryForChat(false)
+}
+
+func (m *ConceptSessionManager) StatusSummaryForChat(maskSensitive bool) string {
 	state := m.Snapshot()
-	if !state.Enabled {
-		return "概念版未启用"
-	}
 	lines := []string{"酷狗概念版状态"}
 	if m.HasUsableSession() {
 		lines = append(lines, "- 会话: 可用")
@@ -201,13 +205,21 @@ func (m *ConceptSessionManager) StatusSummary() string {
 		lines = append(lines, "- 昵称: "+state.Nickname)
 	}
 	if strings.TrimSpace(state.UserID) != "" {
-		lines = append(lines, "- 用户ID: "+state.UserID)
+		lines = append(lines, "- 用户ID: "+maskConceptValue(state.UserID, maskSensitive))
 	}
 	if strings.TrimSpace(state.Token) != "" {
-		lines = append(lines, "- Token: 已存在")
+		if maskSensitive {
+			lines = append(lines, "- Token: 已存在")
+		} else {
+			lines = append(lines, "- Token: "+state.Token)
+		}
 	}
 	if strings.TrimSpace(state.T1) != "" {
-		lines = append(lines, "- T1: 已存在")
+		if maskSensitive {
+			lines = append(lines, "- T1: 已存在")
+		} else {
+			lines = append(lines, "- T1: "+state.T1)
+		}
 	}
 	if strings.TrimSpace(state.VIPType) != "" {
 		lines = append(lines, "- VIP类型: "+state.VIPType)
@@ -224,13 +236,13 @@ func (m *ConceptSessionManager) StatusSummary() string {
 	if strings.TrimSpace(state.Device.Dfid) != "" || strings.TrimSpace(state.Device.Mid) != "" || strings.TrimSpace(state.Device.Dev) != "" {
 		lines = append(lines, "- 设备:")
 		if strings.TrimSpace(state.Device.Dfid) != "" {
-			lines = append(lines, "  • DFID: "+state.Device.Dfid)
+			lines = append(lines, "  • DFID: "+maskConceptValue(state.Device.Dfid, maskSensitive))
 		}
 		if strings.TrimSpace(state.Device.Mid) != "" {
-			lines = append(lines, "  • MID: "+state.Device.Mid)
+			lines = append(lines, "  • MID: "+maskConceptValue(state.Device.Mid, maskSensitive))
 		}
 		if strings.TrimSpace(state.Device.Dev) != "" {
-			lines = append(lines, "  • DEV: "+state.Device.Dev)
+			lines = append(lines, "  • DEV: "+maskConceptValue(state.Device.Dev, maskSensitive))
 		}
 	}
 	if !state.LastCheckTime.IsZero() || !state.LastRefreshTime.IsZero() || !state.LastSignTime.IsZero() {
@@ -246,6 +258,22 @@ func (m *ConceptSessionManager) StatusSummary() string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func maskConceptValue(value string, masked bool) string {
+	value = strings.TrimSpace(value)
+	if !masked || value == "" {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= 4 {
+		return strings.Repeat("*", len(runes))
+	}
+	keep := 3
+	if len(runes) > 10 {
+		keep = 4
+	}
+	return string(runes[:keep]) + strings.Repeat("*", len(runes)-keep*2) + string(runes[len(runes)-keep:])
 }
 
 func describeQRStatus(status int) string {
@@ -314,7 +342,7 @@ func (m *ConceptSessionManager) FetchSongURL(ctx context.Context, song *model.So
 
 func loadConceptSessionFromConfig(getString func(string, string) string, getBool func(string, string) bool, getInt func(string, string) int) conceptSession {
 	state := conceptSession{
-		Enabled:           getBool("kugou", "concept_enabled"),
+		Enabled:           true,
 		AutoRefresh:       getBool("kugou", "concept_auto_refresh_enabled"),
 		AutoRefreshPeriod: time.Duration(getInt("kugou", "concept_auto_refresh_interval_sec")) * time.Second,
 		Token:             strings.TrimSpace(getString("kugou", "concept_token")),

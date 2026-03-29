@@ -165,11 +165,9 @@ func buildConceptAdminHelp(adminCommands []admincmd.Command) string {
 
 func conceptAdminCommandNames() map[string]struct{} {
 	return map[string]struct{}{
-		"kgqr":       {},
-		"kgqrstatus": {},
-		"kgstatus":   {},
-		"kgrenew":    {},
-		"kgsign":     {},
+		"kgqr":     {},
+		"kgstatus": {},
+		"kgsign":   {},
 	}
 }
 

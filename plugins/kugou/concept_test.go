@@ -83,11 +83,21 @@ func TestConceptCreateQRCodeAndCheck(t *testing.T) {
 }
 
 func TestBuildQRStatusCaption(t *testing.T) {
-	caption := buildQRStatusCaption(conceptQRCheckData{Status: 2, Nickname: conceptJSONText("tester"), UserID: conceptJSONText("12345")})
+	caption := buildQRStatusCaption(conceptQRCheckData{Status: 2, Nickname: conceptJSONText("tester"), UserID: conceptJSONText("12345")}, false)
 	for _, want := range []string{"二维码状态: 已扫码，待确认", "昵称: tester", "用户ID: 12345", "已扫码，等待确认"} {
 		if !strings.Contains(caption, want) {
 			t.Fatalf("caption=%q missing %q", caption, want)
 		}
+	}
+}
+
+func TestBuildQRStatusCaptionMasked(t *testing.T) {
+	caption := buildQRStatusCaption(conceptQRCheckData{Status: 2, Nickname: conceptJSONText("tester"), UserID: conceptJSONText("123456789")}, true)
+	if !strings.Contains(caption, "昵称: tester") {
+		t.Fatalf("caption=%q missing nickname", caption)
+	}
+	if strings.Contains(caption, "用户ID: 123456789") {
+		t.Fatalf("caption=%q should mask user id", caption)
 	}
 }
 
@@ -286,7 +296,7 @@ func TestConceptStatusSummaryIncludesMoreFields(t *testing.T) {
 		},
 	})
 	summary := mgr.StatusSummary()
-	for _, want := range []string{"酷狗概念版状态", "- 会话: 可用", "- Token: 已存在", "- T1: 已存在", "- VIP到期: 2099-01-01", "DFID: dfid", "MID: mid", "DEV: DEV1234567", "- 来源: concept_qr"} {
+	for _, want := range []string{"酷狗概念版状态", "- 会话: 可用", "- Token: tok", "- T1: t1", "- VIP到期: 2099-01-01", "DFID: dfid", "MID: mid", "DEV: DEV1234567", "- 来源: concept_qr"} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("StatusSummary()=%q missing %q", summary, want)
 		}

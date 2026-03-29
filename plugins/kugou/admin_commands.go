@@ -12,7 +12,7 @@ import (
 )
 
 func BuildAdminCommands(client *Client) []admincmd.Command {
-	if client == nil || client.Concept() == nil || !client.Concept().Enabled() {
+	if client == nil || client.Concept() == nil {
 		return nil
 	}
 	return []admincmd.Command{
@@ -51,15 +51,28 @@ func BuildAdminCommands(client *Client) []admincmd.Command {
 					if manager == nil {
 						return
 					}
-					pollCtx := context.Background()
+					pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					_ = pollCancel
+					maskSensitive := sent.Chat.ID < 0
 					manager.StartQRCodePolling(pollCtx, time.Second, func(status conceptQRCheckData, err error) {
 						if err != nil {
+							if err == context.DeadlineExceeded {
+								edit := &telego.EditMessageCaptionParams{
+									ChatID:      telego.ChatID{ID: sent.Chat.ID},
+									MessageID:   sent.MessageID,
+									Caption:     "酷狗概念版二维码已超时，请重新执行 /kgqr",
+									ReplyMarkup: &telego.InlineKeyboardMarkup{},
+								}
+								editCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+								defer cancel()
+								_, _ = telegram.EditMessageCaptionWithBestEffort(editCtx, nil, b, edit)
+							}
 							return
 						}
-						text := buildQRStatusCaption(status)
+						text := buildQRStatusCaption(status, maskSensitive)
 						if status.Status == 4 {
 							if _, _, statusErr := manager.FetchAccountStatus(context.Background()); statusErr == nil {
-								text = manager.StatusSummary()
+								text = manager.StatusSummaryForChat(maskSensitive)
 							}
 						}
 						edit := &telego.EditMessageCaptionParams{
@@ -96,37 +109,15 @@ func BuildAdminCommands(client *Client) []admincmd.Command {
 			},
 		},
 		{
-			Name:        "kgqrstatus",
-			Description: "检查酷狗概念版扫码状态",
-			Handler: func(ctx context.Context, args string) (string, error) {
-				_ = args
-				data, err := client.Concept().CheckQRCode(ctx)
-				if err != nil {
-					return "", err
-				}
-				if data.Status == 4 {
-					if _, _, statusErr := client.Concept().FetchAccountStatus(ctx); statusErr == nil {
-						return client.Concept().StatusSummary(), nil
-					}
-				}
-				return buildQRStatusCaption(data), nil
-			},
-		},
-		{
 			Name:        "kgstatus",
 			Description: "查看酷狗概念版会话状态",
 			Handler: func(ctx context.Context, args string) (string, error) {
-				_ = ctx
+				maskSensitive := false
+				if chatID, ok := admincmd.ChatIDFromContext(ctx); ok && chatID < 0 {
+					maskSensitive = true
+				}
 				_ = args
-				return client.Concept().StatusSummary(), nil
-			},
-		},
-		{
-			Name:        "kgrenew",
-			Description: "手动续期酷狗概念版会话",
-			Handler: func(ctx context.Context, args string) (string, error) {
-				_ = args
-				return client.Concept().ManualRenew(ctx)
+				return client.Concept().StatusSummaryForChat(maskSensitive), nil
 			},
 		},
 		{
@@ -148,13 +139,13 @@ func decodeBase64PNG(encoded string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(encoded)
 }
 
-func buildQRStatusCaption(data conceptQRCheckData) string {
+func buildQRStatusCaption(data conceptQRCheckData, maskSensitive bool) string {
 	parts := []string{"酷狗概念版二维码轮询中", "二维码状态: " + describeQRStatus(data.Status)}
 	if nickname := strings.TrimSpace(string(data.Nickname)); nickname != "" {
 		parts = append(parts, "昵称: "+nickname)
 	}
 	if userID := strings.TrimSpace(string(data.UserID)); userID != "" {
-		parts = append(parts, "用户ID: "+userID)
+		parts = append(parts, "用户ID: "+maskConceptValue(userID, maskSensitive))
 	}
 	if data.Status == 2 {
 		parts = append(parts, "已扫码，等待确认")

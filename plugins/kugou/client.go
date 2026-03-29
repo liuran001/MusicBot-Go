@@ -28,13 +28,25 @@ const (
 	kugouGatewaySongInfoURL = "https://gateway.kugou.com/v3/album_audio/audio"
 	kugouGatewayPlayURL     = "https://gateway.kugou.com/v5/url"
 	kugouPlayDataURL        = "https://wwwapi.kugou.com/yy/index.php"
+	kugouPlaylistInfoV2URL  = "https://mobiles.kugou.com/api/v5/special/info_v2"
+	kugouPlaylistSongV2URL  = "https://mobiles.kugou.com/api/v5/special/song_v2"
+	kugouPlaylistDecodeURL  = "https://t.kugou.com/v1/songlist/batch_decode"
+	kugouPlaylistLegacyURL  = "https://pubsongscdn.kugou.com/v2/get_other_list_file"
+	kugouPlaylistSpecialURL = "http://mobilecdnbj.kugou.com/api/v5/special/info"
 	kugouGatewayAppID       = "1005"
 	kugouGatewayClientVer   = "11451"
 	kugouPlayClientVer      = "20349"
 	kugouGatewayMid         = "211008"
-	kugouGatewaySignKey     = "OIlwlieks28dk2k092lksi2UIkp"
+	kugouGatewaySignKey     = "OIlwieks28dk2k092lksi2UIkp"
 	kugouPlaySignKey        = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
 	kugouPlayPidVerSec      = "57ae12eb6890223e355ccfcb74edf70d"
+	kugouPlaylistWebAppID   = "1058"
+	kugouPlaylistSrcAppID   = "2919"
+	kugouPlaylistClientVer  = "20000"
+	kugouPlaylistAndroidCV  = "20109"
+	kugouPlaylistAndroidUA  = "Mozilla/5.0 (Linux; Android 10; HUAWEI HMA-AL00) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36"
+	kugouPlaylistWebUA      = "Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1"
+	kugouPlaylistReferer    = "https://m3ws.kugou.com/share/index.php"
 )
 
 type Client struct {
@@ -189,31 +201,10 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string) (*model.So
 	if err == nil && resolved != nil && strings.TrimSpace(resolved.URL) != "" {
 		return resolved, nil
 	}
-	if strings.TrimSpace(song.URL) == "" {
-		url, songInfoErr := c.api.GetDownloadURLBySonginfo(song)
-		if songInfoErr == nil && strings.TrimSpace(url) != "" {
-			song.URL = strings.TrimSpace(url)
-			ensureSongExtra(song)["play_url"] = song.URL
-			if strings.TrimSpace(song.Ext) == "" {
-				song.Ext = detectExtFromURL(song.URL)
-			}
-		}
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(song.URL) == "" {
-		url, downloadErr := c.api.GetDownloadURL(song)
-		if downloadErr != nil {
-			return nil, wrapError("kugou", "track", normalizeHash(trackID), downloadErr)
-		}
-		if strings.TrimSpace(url) == "" {
-			return nil, platform.NewUnavailableError("kugou", "track", normalizeHash(trackID))
-		}
-		song.URL = strings.TrimSpace(url)
-		ensureSongExtra(song)["play_url"] = song.URL
-		if strings.TrimSpace(song.Ext) == "" {
-			song.Ext = detectExtFromURL(song.URL)
-		}
-	}
-	return song, nil
+	return nil, platform.NewUnavailableError("kugou", "track", normalizeHash(trackID))
 }
 
 func (c *Client) ResolveDownloadByQuality(ctx context.Context, song *model.Song, requested platform.Quality) (*model.Song, error) {
@@ -222,60 +213,30 @@ func (c *Client) ResolveDownloadByQuality(ctx context.Context, song *model.Song,
 	}
 	plans := buildDownloadPlans(song, requested)
 	var lastErr error
-	if c.concept != nil && c.concept.HasUsableSession() {
-		for _, plan := range plans {
-			resolved, err := c.fetchConceptSongURL(ctx, song, plan)
-			if err == nil && resolved != nil && strings.TrimSpace(resolved.URL) != "" {
-				return resolved, nil
-			}
-			if err != nil {
-				lastErr = preferKugouDownloadError(lastErr, wrapError("kugou", "track", strings.TrimSpace(song.ID), err))
-			}
-			if newResp, newErr := c.concept.FetchSongURLNew(ctx, song, plan); newErr != nil {
-				lastErr = preferKugouDownloadError(lastErr, wrapError("kugou", "track", strings.TrimSpace(song.ID), newErr))
-			} else if resolvedNew, ok := c.resolveConceptSongURLNew(song, plan, newResp); ok {
-				return resolvedNew, nil
-			} else if authErr := conceptSongURLNewAuthError(newResp); authErr != nil {
-				lastErr = preferKugouDownloadError(lastErr, authErr)
-			}
-		}
+	if c.concept == nil || !c.concept.HasUsableSession() {
+		return nil, platform.NewAuthRequiredError("kugou")
 	}
 	for _, plan := range plans {
-		resolved := cloneSongWithHash(song, plan.Hash)
-		if resolved == nil {
-			continue
-		}
-		ensureSongExtra(resolved)["resolved_quality"] = plan.Quality.String()
-		if urlValue, err := c.fetchSignedPlayURL(ctx, resolved, plan); err == nil && strings.TrimSpace(urlValue) != "" {
-			resolved.URL = strings.TrimSpace(urlValue)
-			applyPlanMetadata(resolved, plan)
-			ensureSongExtra(resolved)["play_url"] = resolved.URL
-			return resolved, nil
-		} else if err != nil {
-			lastErr = preferKugouDownloadError(lastErr, wrapError("kugou", "track", strings.TrimSpace(song.ID), err))
-		}
-		if info, err := c.fetchPlayData(ctx, resolved, plan); err == nil && info != nil && strings.TrimSpace(info.URL) != "" {
-			applyResolvedSongMetadata(resolved, info, plan)
-			return resolved, nil
-		} else if err != nil {
-			lastErr = preferKugouDownloadError(lastErr, wrapError("kugou", "track", strings.TrimSpace(song.ID), err))
-		}
-		if info, err := c.fetchMobilePlayInfo(ctx, resolved, plan); err == nil && info != nil {
-			if strings.TrimSpace(info.URL) != "" {
-				applyMobilePlayInfoMetadata(resolved, info, plan)
-				return resolved, nil
+		resolved, err := c.fetchConceptSongURL(ctx, song, plan)
+		if err == nil && resolved != nil && strings.TrimSpace(resolved.URL) != "" {
+			if c != nil && c.logger != nil {
+				c.logger.Debug("kugou: download resolved via concept old", "track_id", strings.TrimSpace(song.ID), "requested", requested.String(), "resolved_quality", plan.Quality.String(), "hash", plan.Hash, "url", resolved.URL)
 			}
-			if mobilePlayInfoRequiresAuth(info) {
-				lastErr = preferKugouDownloadError(lastErr, platform.NewAuthRequiredError("kugou"))
-			}
-		} else if err != nil {
+			return resolved, nil
+		}
+		if err != nil {
 			lastErr = preferKugouDownloadError(lastErr, wrapError("kugou", "track", strings.TrimSpace(song.ID), err))
 		}
-	}
-	if strings.TrimSpace(song.URL) != "" {
-		clone := cloneSongWithHash(song, strings.TrimSpace(song.ID))
-		ensureSongExtra(clone)["resolved_quality"] = requested.String()
-		return clone, nil
+		if newResp, newErr := c.concept.FetchSongURLNew(ctx, song, plan); newErr != nil {
+			lastErr = preferKugouDownloadError(lastErr, wrapError("kugou", "track", strings.TrimSpace(song.ID), newErr))
+		} else if resolvedNew, ok := c.resolveConceptSongURLNew(song, plan, newResp); ok {
+			if c != nil && c.logger != nil {
+				c.logger.Debug("kugou: download resolved via concept new", "track_id", strings.TrimSpace(song.ID), "requested", requested.String(), "resolved_quality", plan.Quality.String(), "hash", plan.Hash, "url", resolvedNew.URL)
+			}
+			return resolvedNew, nil
+		} else if authErr := conceptSongURLNewAuthError(newResp); authErr != nil {
+			lastErr = preferKugouDownloadError(lastErr, authErr)
+		}
 	}
 	if lastErr != nil {
 		return nil, lastErr
@@ -284,10 +245,156 @@ func (c *Client) ResolveDownloadByQuality(ctx context.Context, song *model.Song,
 }
 
 func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*model.Playlist, []model.Song, error) {
-	_ = ctx
 	playlistID = strings.TrimSpace(playlistID)
 	if playlistID == "" {
 		return nil, nil, platform.NewNotFoundError("kugou", "playlist", "")
+	}
+	kind, rawID := parseCollectionID(playlistID)
+	switch kind {
+	case "album":
+		return c.GetAlbumPlaylist(ctx, rawID)
+	case "playlist_url":
+		return c.parsePlaylistFromURL(ctx, rawID)
+	}
+	return c.parsePlaylistByID(ctx, rawID)
+}
+
+func (c *Client) GetAlbumPlaylist(ctx context.Context, albumID string) (*model.Playlist, []model.Song, error) {
+	albumID = strings.TrimSpace(albumID)
+	if albumID == "" {
+		return nil, nil, platform.NewNotFoundError("kugou", "album", "")
+	}
+	meta, err := c.fetchAlbumInfo(ctx, albumID)
+	if err != nil {
+		return nil, nil, err
+	}
+	songs, total, err := c.fetchAlbumSongs(ctx, albumID)
+	if err != nil {
+		return nil, nil, err
+	}
+	playlist := &model.Playlist{
+		ID:          albumID,
+		Name:        strings.TrimSpace(meta.Data.AlbumName),
+		Cover:       strings.TrimSpace(meta.Data.ImgURL),
+		TrackCount:  total,
+		Creator:     strings.TrimSpace(meta.Data.Author),
+		Description: strings.TrimSpace(meta.Data.Intro),
+		Source:      "kugou",
+		Link:        buildAlbumURL(albumID),
+		Extra: map[string]string{
+			"collection_type": "album",
+			"album_id":        albumID,
+			"publish_time":    strings.TrimSpace(meta.Data.Publish),
+		},
+	}
+	if playlist.Name == "" && len(songs) > 0 {
+		playlist.Name = strings.TrimSpace(songs[0].Album)
+	}
+	for i := range songs {
+		if strings.TrimSpace(songs[i].Album) == "" {
+			songs[i].Album = playlist.Name
+		}
+		if strings.TrimSpace(songs[i].AlbumID) == "" {
+			songs[i].AlbumID = albumID
+		}
+		if strings.TrimSpace(songs[i].Cover) == "" {
+			songs[i].Cover = playlist.Cover
+		}
+	}
+	if playlist.TrackCount <= 0 {
+		playlist.TrackCount = len(songs)
+	}
+	return playlist, songs, nil
+}
+
+func (c *Client) parsePlaylistFromURL(ctx context.Context, rawURL string) (*model.Playlist, []model.Song, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, nil, platform.NewNotFoundError("kugou", "playlist", "")
+	}
+	if collectionID, ok := NewURLMatcher().MatchPlaylistURL(rawURL); ok {
+		kind, id := parseCollectionID(collectionID)
+		switch kind {
+		case "album":
+			return c.GetAlbumPlaylist(ctx, id)
+		case "playlist":
+			return c.parsePlaylistByID(ctx, id)
+		}
+	}
+	if resolvedID, err := c.resolvePlaylistCollectionID(ctx, rawURL); err == nil && strings.TrimSpace(resolvedID) != "" {
+		kind, id := parseCollectionID(resolvedID)
+		switch kind {
+		case "album":
+			return c.GetAlbumPlaylist(ctx, id)
+		case "playlist":
+			return c.parsePlaylistByID(ctx, id)
+		}
+	}
+	return c.parsePlaylistRaw(rawURL)
+}
+
+func (c *Client) parsePlaylistByID(ctx context.Context, playlistID string) (*model.Playlist, []model.Song, error) {
+	playlistID = strings.TrimSpace(playlistID)
+	if playlistID == "" {
+		return nil, nil, platform.NewNotFoundError("kugou", "playlist", "")
+	}
+	if c != nil && c.logger != nil {
+		c.logger.Debug("kugou: parse playlist by id", "playlist_id", playlistID)
+	}
+	identity := kugouPlaylistIdentity{InputID: playlistID}
+	if isGlobalCollectionID(playlistID) {
+		identity.GlobalCollectionID = playlistID
+		identity.ResolvePath = "input:global_collection_id"
+		if c != nil && c.logger != nil {
+			c.logger.Debug("kugou: playlist resolved as global collection", "playlist_id", playlistID, "global_collection_id", identity.GlobalCollectionID)
+		}
+		return c.fetchGlobalCollectionPlaylist(ctx, identity)
+	}
+	if strings.HasPrefix(strings.ToLower(playlistID), "gcid_") {
+		if decodedIdentity, err := c.decodePlaylistGCID(ctx, playlistID); err == nil && strings.TrimSpace(decodedIdentity.GlobalCollectionID) != "" {
+			identity.GlobalCollectionID = strings.TrimSpace(decodedIdentity.GlobalCollectionID)
+			identity.SpecialID = firstNonEmpty(identity.SpecialID, strings.TrimSpace(decodedIdentity.SpecialID))
+			identity.GlobalSpecialID = firstNonEmpty(strings.TrimSpace(decodedIdentity.GlobalSpecialID), strings.TrimSpace(decodedIdentity.GlobalCollectionID))
+			identity.ResolvePath = "gcid->global_collection_id"
+			if c != nil && c.logger != nil {
+				c.logger.Debug("kugou: playlist gcid decoded", "playlist_id", playlistID, "global_collection_id", identity.GlobalCollectionID, "global_specialid", identity.GlobalSpecialID, "specialid", identity.SpecialID, "resolve_path", identity.ResolvePath)
+			}
+			return c.fetchGlobalCollectionPlaylist(ctx, identity)
+		} else {
+			if c != nil && c.logger != nil {
+				c.logger.Warn("kugou: playlist gcid decode failed, trying resolve fallback", "playlist_id", playlistID, "err", err)
+			}
+			if resolvedID, resolveErr := c.resolvePlaylistCollectionID(ctx, buildPlaylistLink(playlistID)); resolveErr == nil && strings.TrimSpace(resolvedID) != "" && !strings.EqualFold(strings.TrimSpace(resolvedID), strings.TrimSpace(playlistID)) {
+				if c != nil && c.logger != nil {
+					c.logger.Debug("kugou: playlist gcid resolved via URL fallback", "playlist_id", playlistID, "resolved_id", resolvedID)
+				}
+				return c.parsePlaylistByID(ctx, resolvedID)
+			} else if c != nil && c.logger != nil {
+				c.logger.Warn("kugou: playlist gcid resolve fallback failed", "playlist_id", playlistID, "resolved_id", resolvedID, "err", resolveErr)
+			}
+		}
+	}
+	if isNumericText(playlistID) {
+		if globalID, err := c.resolveGlobalSpecialID(ctx, playlistID); err == nil && globalID != "" {
+			identity.SpecialID = playlistID
+			identity.GlobalSpecialID = globalID
+			identity.ResolvePath = "specialid->global_specialid"
+			if c != nil && c.logger != nil {
+				c.logger.Debug("kugou: numeric playlist resolved to global specialid", "playlist_id", playlistID, "global_specialid", identity.GlobalSpecialID)
+			}
+			if playlist, songs, err := c.fetchGlobalCollectionPlaylist(ctx, identity); err == nil && playlist != nil {
+				return playlist, songs, nil
+			}
+		}
+		if playlist, songs, err := c.fetchLegacySpecialPlaylist(ctx, playlistID); err == nil && playlist != nil {
+			if c != nil && c.logger != nil {
+				c.logger.Debug("kugou: numeric playlist fell back to legacy special", "playlist_id", playlistID, "song_count", len(songs))
+			}
+			return playlist, songs, nil
+		}
+	}
+	if c != nil && c.logger != nil {
+		c.logger.Debug("kugou: playlist falling back to music-lib ParsePlaylist", "playlist_id", playlistID)
 	}
 	playlist, songs, err := c.api.ParsePlaylist(buildPlaylistLink(playlistID))
 	if err != nil {
@@ -306,6 +413,114 @@ func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*model.Pla
 		playlist.Link = buildPlaylistLink(playlist.ID)
 	}
 	return playlist, songs, nil
+}
+
+func (c *Client) parsePlaylistRaw(rawURL string) (*model.Playlist, []model.Song, error) {
+	playlist, songs, err := c.api.ParsePlaylist(rawURL)
+	if err != nil {
+		return nil, nil, wrapError("kugou", "playlist", rawURL, err)
+	}
+	if playlist == nil {
+		return nil, nil, platform.NewNotFoundError("kugou", "playlist", rawURL)
+	}
+	if playlist.Source == "" {
+		playlist.Source = "kugou"
+	}
+	if strings.TrimSpace(playlist.ID) == "" {
+		playlist.ID = rawURL
+	}
+	if strings.TrimSpace(playlist.Link) == "" {
+		playlist.Link = rawURL
+	}
+	if playlist.Extra == nil {
+		playlist.Extra = map[string]string{}
+	}
+	playlist.Extra["collection_type"] = "playlist"
+	playlist.Extra["source_url"] = strings.TrimSpace(rawURL)
+	playlist.Extra["resolved_url"] = strings.TrimSpace(playlist.Link)
+	applyPlaylistSongContext(playlist, songs)
+	return playlist, songs, nil
+}
+
+func (c *Client) resolvePlaylistCollectionID(ctx context.Context, rawURL string) (string, error) {
+	if collectionID, ok := NewURLMatcher().MatchPlaylistURL(rawURL); ok {
+		kind, id := parseCollectionID(collectionID)
+		if kind == "playlist" && (isGlobalCollectionID(id) || strings.HasPrefix(strings.ToLower(id), "gcid_") || isNumericText(id)) {
+			return id, nil
+		}
+	}
+	if parsed, err := url.Parse(rawURL); err == nil {
+		query := parsed.Query()
+		if globalID := strings.TrimSpace(firstNonEmpty(query.Get("global_collection_id"), query.Get("global_specialid"))); globalID != "" {
+			return globalID, nil
+		}
+		for _, key := range []string{"gcid", "encode_gic", "encode_src_gid"} {
+			if gcid := strings.TrimSpace(query.Get(key)); strings.HasPrefix(strings.ToLower(gcid), "gcid_") {
+				return strings.ToLower(gcid), nil
+			}
+		}
+		for _, key := range []string{"specialid", "specialId"} {
+			if value := strings.TrimSpace(query.Get(key)); value != "" && isNumericText(value) {
+				return value, nil
+			}
+		}
+	}
+	if resolvedID, err := c.resolvePlaylistCollectionIDFromRedirect(ctx, rawURL); err == nil && strings.TrimSpace(resolvedID) != "" {
+		return resolvedID, nil
+	}
+	return c.resolvePlaylistCollectionIDFromHTML(ctx, rawURL)
+}
+
+func (c *Client) resolvePlaylistCollectionIDFromRedirect(ctx context.Context, rawURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.Request != nil && resp.Request.URL != nil {
+		if collectionID, ok := NewURLMatcher().MatchPlaylistURL(resp.Request.URL.String()); ok {
+			kind, _ := parseCollectionID(collectionID)
+			if kind != "playlist_url" {
+				return collectionID, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func (c *Client) resolvePlaylistCollectionIDFromHTML(ctx context.Context, rawURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	text := string(bodyBytes)
+	if globalID := extractPlaylistGlobalCollectionID(text); globalID != "" {
+		return globalID, nil
+	}
+	if gcid := extractPlaylistGCID(text); gcid != "" {
+		return gcid, nil
+	}
+	if specialID := extractPlaylistSpecialID(text); specialID != "" {
+		return specialID, nil
+	}
+	return "", nil
 }
 
 func (c *Client) CheckCookie(ctx context.Context) (bool, error) {
@@ -492,6 +707,114 @@ type kugouDownloadPlan struct {
 	Size    int64
 }
 
+type kugouAlbumInfoResponse struct {
+	Data struct {
+		SongCount int    `json:"songcount"`
+		Intro     string `json:"intro"`
+		ImgURL    string `json:"imgurl"`
+		Publish   string `json:"publishtime"`
+		AlbumName string `json:"albumname"`
+		Author    string `json:"author_name"`
+	} `json:"data"`
+}
+
+type kugouAlbumSongsResponse struct {
+	Data struct {
+		Total int `json:"total"`
+		Info  []struct {
+			Hash         string `json:"hash"`
+			SQHash       string `json:"sqhash"`
+			Hash320      string `json:"320hash"`
+			AlbumID      string `json:"album_id"`
+			AlbumAudioID any    `json:"album_audio_id"`
+			AudioID      any    `json:"audio_id"`
+			SongName     string `json:"filename"`
+			SongTitle    string `json:"songname"`
+			AuthorName   string `json:"author_name"`
+			Duration     int    `json:"duration"`
+			Bitrate      int    `json:"bitrate"`
+			ExtName      string `json:"extname"`
+			FileSize     int64  `json:"filesize"`
+			Cover        string `json:"img"`
+			Privilege    any    `json:"privilege"`
+			TransParam   struct {
+				Ogg320Hash string      `json:"ogg_320_hash"`
+				Ogg128Hash string      `json:"ogg_128_hash"`
+				SingerID   interface{} `json:"singerid"`
+				UnionCover string      `json:"union_cover"`
+				HashOffset struct {
+					ClipHash string `json:"clip_hash"`
+				} `json:"hash_offset"`
+			} `json:"trans_param"`
+		} `json:"info"`
+	} `json:"data"`
+}
+
+type kugouPlaylistBaseResponse struct {
+	Status  int    `json:"status"`
+	ErrCode int    `json:"errcode,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type kugouPlaylistInfoV2Response struct {
+	kugouPlaylistBaseResponse
+	Data struct {
+		GlobalSpecialID string `json:"global_specialid"`
+		SpecialName     string `json:"specialname"`
+		ImgURL          string `json:"imgurl"`
+		Intro           string `json:"intro"`
+		Nickname        string `json:"nickname"`
+		SongCount       int    `json:"songcount"`
+		PlayCount       int    `json:"playcount"`
+	} `json:"data"`
+}
+
+type kugouPlaylistSongsV2Response struct {
+	kugouPlaylistBaseResponse
+	Data struct {
+		Total int              `json:"total"`
+		Info  []map[string]any `json:"info"`
+		List  []map[string]any `json:"list"`
+		Data  []map[string]any `json:"data"`
+	} `json:"data"`
+}
+
+type kugouPlaylistDecodeResponse struct {
+	kugouPlaylistBaseResponse
+	Data struct {
+		List []struct {
+			GlobalCollectionID string `json:"global_collection_id"`
+			Info               struct {
+				SpecialID any `json:"specialid"`
+			} `json:"info"`
+		} `json:"list"`
+	} `json:"data"`
+}
+
+type kugouLegacyPlaylistSongsResponse struct {
+	kugouPlaylistBaseResponse
+	Info []map[string]any `json:"info"`
+	Data struct {
+		Info []map[string]any `json:"info"`
+	} `json:"data"`
+}
+
+type kugouPlaylistSpecialInfoResponse struct {
+	kugouPlaylistBaseResponse
+	Data struct {
+		GlobalSpecialID string `json:"global_specialid"`
+	} `json:"data"`
+}
+
+type kugouPlaylistIdentity struct {
+	InputID            string
+	SpecialID          string
+	GlobalSpecialID    string
+	GlobalCollectionID string
+	ResolvePath        string
+}
+
 func (c *Client) fetchGatewayTrackInfo(ctx context.Context, hash string) (*model.Song, error) {
 	bodyMap := map[string]any{
 		"area_code":       "1",
@@ -563,6 +886,89 @@ func (c *Client) fetchGatewayTrackInfo(ctx context.Context, hash string) (*model
 	return song, nil
 }
 
+func (c *Client) fetchAlbumInfo(ctx context.Context, albumID string) (*kugouAlbumInfoResponse, error) {
+	apiURL := "http://mobilecdnbj.kugou.com/api/v3/album/info?albumid=" + url.QueryEscape(strings.TrimSpace(albumID))
+	var resp kugouAlbumInfoResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, apiURL, nil, nil, map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	}, &resp); err != nil {
+		return nil, wrapError("kugou", "album", albumID, err)
+	}
+	return &resp, nil
+}
+
+func (c *Client) fetchAlbumSongs(ctx context.Context, albumID string) ([]model.Song, int, error) {
+	params := url.Values{}
+	params.Set("albumid", strings.TrimSpace(albumID))
+	params.Set("page", "1")
+	params.Set("pagesize", "500")
+	apiURL := "http://mobilecdnbj.kugou.com/api/v3/album/song?" + params.Encode()
+	var resp kugouAlbumSongsResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, apiURL, nil, nil, map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	}, &resp); err != nil {
+		return nil, 0, wrapError("kugou", "album", albumID, err)
+	}
+	results := make([]model.Song, 0, len(resp.Data.Info))
+	for _, item := range resp.Data.Info {
+		primaryHash := firstNonEmpty(item.Hash, item.Hash320, item.SQHash, item.TransParam.Ogg320Hash, item.TransParam.Ogg128Hash, item.TransParam.HashOffset.ClipHash)
+		if normalizeHash(primaryHash) == "" {
+			continue
+		}
+		songName := strings.TrimSpace(firstNonEmpty(item.SongTitle, item.SongName))
+		artistName := strings.TrimSpace(item.AuthorName)
+		if title, parsedArtist := splitKugouSongDisplayName(songName); title != "" {
+			songName = title
+			if artistName == "" {
+				artistName = parsedArtist
+			}
+		}
+		if artistName == "" {
+			if title, parsedArtist := splitKugouSongDisplayName(strings.TrimSpace(item.SongName)); title != "" {
+				if songName == "" {
+					songName = title
+				}
+				artistName = parsedArtist
+			}
+		}
+		shareChain := resolveSongShareChain(formatAnyNumericString(item.AlbumAudioID), formatAnyNumericString(item.AudioID))
+		cover := normalizeSizedCover(strings.TrimSpace(firstNonEmpty(item.TransParam.UnionCover, item.Cover)))
+		singerIDs := formatKugouIDList(firstNonEmpty(formatAnyIDList(item.TransParam.SingerID)))
+		song := model.Song{
+			Source:   "kugou",
+			ID:       normalizeHash(primaryHash),
+			Name:     songName,
+			Artist:   artistName,
+			AlbumID:  strings.TrimSpace(item.AlbumID),
+			Duration: item.Duration,
+			Size:     item.FileSize,
+			Bitrate:  item.Bitrate,
+			Ext:      strings.TrimSpace(item.ExtName),
+			Cover:    cover,
+			Link:     buildShareTrackLink(shareChain, primaryHash, item.AlbumID, formatAnyNumericString(item.AlbumAudioID)),
+			Extra: map[string]string{
+				"hash":           normalizeHash(primaryHash),
+				"file_hash":      normalizeHash(item.Hash),
+				"hq_hash":        normalizeHash(item.Hash320),
+				"sq_hash":        normalizeHash(item.SQHash),
+				"ogg_320_hash":   normalizeHash(item.TransParam.Ogg320Hash),
+				"ogg_128_hash":   normalizeHash(item.TransParam.Ogg128Hash),
+				"album_id":       strings.TrimSpace(item.AlbumID),
+				"album_audio_id": formatAnyNumericString(item.AlbumAudioID),
+				"audio_id":       formatAnyNumericString(item.AudioID),
+				"share_chain":    shareChain,
+				"privilege":      formatAnyNumericString(item.Privilege),
+				"singer_ids":     singerIDs,
+			},
+		}
+		if enriched := c.enrichGatewaySongMeta(ctx, &song); enriched != nil {
+			song = *enriched
+		}
+		results = append(results, song)
+	}
+	return results, resp.Data.Total, nil
+}
+
 func (c *Client) enrichGatewaySongMeta(ctx context.Context, song *model.Song) *model.Song {
 	if song == nil {
 		return song
@@ -594,6 +1000,802 @@ func (c *Client) enrichGatewaySongMeta(ctx context.Context, song *model.Song) *m
 		}
 	}
 	return song
+}
+
+func (c *Client) fetchGlobalCollectionPlaylist(ctx context.Context, identity kugouPlaylistIdentity) (*model.Playlist, []model.Song, error) {
+	globalID := firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID, identity.InputID)
+	v2ID := firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID, globalID)
+	if c != nil && c.logger != nil {
+		c.logger.Debug("kugou: fetch global collection playlist", "input_id", identity.InputID, "global_collection_id", identity.GlobalCollectionID, "global_specialid", identity.GlobalSpecialID, "specialid", identity.SpecialID, "global_id", globalID, "v2_id", v2ID, "resolve_path", identity.ResolvePath)
+	}
+	info, err := c.fetchPlaylistInfoV2(ctx, v2ID)
+	if err != nil {
+		if c != nil && c.logger != nil {
+			c.logger.Warn("kugou: v2 playlist info fetch failed, continuing with fallback metadata", "v2_id", v2ID, "err", err)
+		}
+	}
+	songs, total, err := c.fetchPlaylistSongsV2(ctx, v2ID)
+	if err != nil {
+		if c != nil && c.logger != nil {
+			c.logger.Warn("kugou: v2 playlist song fetch failed, trying legacy", "v2_id", v2ID, "err", err)
+		}
+		legacy, legacySongs, legacyErr := c.fetchLegacyCollectionPlaylist(ctx, identity)
+		if legacyErr == nil && legacy != nil {
+			if c != nil && c.logger != nil {
+				c.logger.Debug("kugou: legacy playlist fallback succeeded", "song_count", len(legacySongs), "track_count", legacy.TrackCount)
+			}
+			return legacy, legacySongs, nil
+		}
+		return nil, nil, err
+	}
+	metaSongCount := 0
+	metaPlayCount := 0
+	metaName := ""
+	metaCover := ""
+	metaCreator := ""
+	metaIntro := ""
+	metaGlobalSpecialID := ""
+	if info != nil {
+		metaSongCount = info.Data.SongCount
+		metaPlayCount = info.Data.PlayCount
+		metaName = strings.TrimSpace(info.Data.SpecialName)
+		metaCover = strings.TrimSpace(info.Data.ImgURL)
+		metaCreator = strings.TrimSpace(info.Data.Nickname)
+		metaIntro = strings.TrimSpace(info.Data.Intro)
+		metaGlobalSpecialID = strings.TrimSpace(info.Data.GlobalSpecialID)
+	}
+	if c != nil && c.logger != nil {
+		c.logger.Debug("kugou: v2 playlist fetch result", "v2_id", v2ID, "song_count", len(songs), "track_count", choosePositiveInt(metaSongCount, total, len(songs)), "meta_song_count", metaSongCount, "api_total", total)
+	}
+	if supplemental, supplementErr := c.fetchLegacyCollectionSongsForMetadata(ctx, identity); supplementErr == nil && len(supplemental) > 0 {
+		if c != nil && c.logger != nil {
+			c.logger.Debug("kugou: fetched legacy supplemental playlist songs", "count", len(supplemental))
+		}
+		songs = mergePlaylistSongs(songs, supplemental)
+	}
+	playlist := &model.Playlist{
+		ID:          firstNonEmpty(metaGlobalSpecialID, globalID),
+		Name:        metaName,
+		Cover:       metaCover,
+		TrackCount:  choosePositiveInt(metaSongCount, total, len(songs)),
+		PlayCount:   metaPlayCount,
+		Creator:     metaCreator,
+		Description: metaIntro,
+		Source:      "kugou",
+		Link:        buildPlaylistLink(firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID, globalID)),
+		Extra: map[string]string{
+			"collection_type":      "playlist",
+			"input_playlist_id":    strings.TrimSpace(identity.InputID),
+			"global_collection_id": strings.TrimSpace(identity.GlobalCollectionID),
+			"global_specialid":     strings.TrimSpace(identity.GlobalSpecialID),
+			"specialid":            strings.TrimSpace(identity.SpecialID),
+			"id_resolve_path":      strings.TrimSpace(identity.ResolvePath),
+		},
+	}
+	if info == nil {
+		applyPlaylistSongMetadataFallback(playlist, songs)
+	}
+	if strings.TrimSpace(playlist.Name) == "" && len(songs) > 0 {
+		playlist.Name = strings.TrimSpace(songs[0].Album)
+	}
+	if strings.TrimSpace(playlist.Cover) == "" && len(songs) > 0 {
+		playlist.Cover = strings.TrimSpace(songs[0].Cover)
+	}
+	for i := range songs {
+		if strings.TrimSpace(songs[i].Album) == "" {
+			songs[i].Album = playlist.Name
+		}
+		if strings.TrimSpace(songs[i].AlbumID) == "" {
+			songs[i].AlbumID = firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID)
+		}
+		if strings.TrimSpace(songs[i].Cover) == "" {
+			songs[i].Cover = playlist.Cover
+		}
+	}
+	applyPlaylistSongContext(playlist, songs)
+	return playlist, songs, nil
+}
+
+func (c *Client) fetchLegacyCollectionPlaylist(ctx context.Context, identity kugouPlaylistIdentity) (*model.Playlist, []model.Song, error) {
+	globalID := firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID, identity.InputID)
+	songs, err := c.fetchLegacyPlaylistSongs(ctx, map[string]string{
+		"need_sort":            "1",
+		"module":               "CloudMusic",
+		"clientver":            "11589",
+		"pagesize":             "500",
+		"page":                 "1",
+		"global_collection_id": globalID,
+		"userid":               "0",
+		"type":                 "0",
+		"area_code":            "1",
+		"appid":                kugouGatewayAppID,
+	}, kugouGatewaySignKey, kugouPlaylistAndroidUA)
+	if err != nil {
+		return nil, nil, err
+	}
+	playlist := &model.Playlist{
+		ID:     globalID,
+		Name:   globalID,
+		Source: "kugou",
+		Link:   buildPlaylistLink(firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID, globalID)),
+		Extra: map[string]string{
+			"collection_type":      "playlist",
+			"input_playlist_id":    strings.TrimSpace(identity.InputID),
+			"global_collection_id": strings.TrimSpace(identity.GlobalCollectionID),
+			"global_specialid":     strings.TrimSpace(identity.GlobalSpecialID),
+			"specialid":            strings.TrimSpace(identity.SpecialID),
+			"id_resolve_path":      firstNonEmpty(strings.TrimSpace(identity.ResolvePath), "legacy:global_collection"),
+		},
+		TrackCount: len(songs),
+	}
+	if metaID := firstNonEmpty(identity.GlobalSpecialID, identity.GlobalCollectionID); metaID != "" {
+		if info, infoErr := c.fetchPlaylistInfoV2(ctx, metaID); infoErr == nil && info != nil {
+			applyPlaylistInfoMetadata(playlist, info)
+		}
+	}
+	applyPlaylistSongMetadataFallback(playlist, songs)
+	applyPlaylistSongContext(playlist, songs)
+	return playlist, songs, nil
+}
+
+func (c *Client) fetchLegacyCollectionSongsForMetadata(ctx context.Context, identity kugouPlaylistIdentity) ([]model.Song, error) {
+	globalID := firstNonEmpty(identity.GlobalCollectionID, identity.GlobalSpecialID, identity.InputID)
+	if strings.TrimSpace(globalID) == "" {
+		return nil, nil
+	}
+	return c.fetchLegacyPlaylistSongs(ctx, map[string]string{
+		"need_sort":            "1",
+		"module":               "CloudMusic",
+		"clientver":            "11589",
+		"pagesize":             "500",
+		"page":                 "1",
+		"global_collection_id": globalID,
+		"userid":               "0",
+		"type":                 "0",
+		"area_code":            "1",
+		"appid":                kugouGatewayAppID,
+	}, kugouGatewaySignKey, kugouPlaylistAndroidUA)
+}
+
+func (c *Client) fetchLegacySpecialPlaylist(ctx context.Context, specialID string) (*model.Playlist, []model.Song, error) {
+	identity := kugouPlaylistIdentity{InputID: specialID, SpecialID: specialID, ResolvePath: "specialid->legacy"}
+	if globalID, err := c.resolveGlobalSpecialID(ctx, specialID); err == nil && globalID != "" {
+		identity.GlobalSpecialID = globalID
+	}
+	songs, err := c.fetchLegacyPlaylistSongs(ctx, map[string]string{
+		"srcappid":  kugouPlaylistSrcAppID,
+		"clientver": kugouPlaylistClientVer,
+		"appid":     kugouPlaylistWebAppID,
+		"type":      "0",
+		"module":    "playlist",
+		"page":      "1",
+		"pagesize":  "500",
+		"specialid": specialID,
+	}, kugouPlaySignKey, kugouPlaylistWebUA)
+	if err != nil {
+		return nil, nil, err
+	}
+	playlist := &model.Playlist{
+		ID:     specialID,
+		Name:   specialID,
+		Source: "kugou",
+		Link:   buildPlaylistLink(specialID),
+		Extra: map[string]string{
+			"collection_type":      "playlist",
+			"input_playlist_id":    strings.TrimSpace(identity.InputID),
+			"specialid":            strings.TrimSpace(identity.SpecialID),
+			"global_specialid":     strings.TrimSpace(identity.GlobalSpecialID),
+			"global_collection_id": strings.TrimSpace(identity.GlobalCollectionID),
+			"id_resolve_path":      strings.TrimSpace(identity.ResolvePath),
+		},
+		TrackCount: len(songs),
+	}
+	if identity.GlobalSpecialID != "" {
+		if info, infoErr := c.fetchPlaylistInfoV2(ctx, identity.GlobalSpecialID); infoErr == nil && info != nil {
+			applyPlaylistInfoMetadata(playlist, info)
+		}
+	}
+	applyPlaylistSongMetadataFallback(playlist, songs)
+	applyPlaylistSongContext(playlist, songs)
+	return playlist, songs, nil
+}
+
+func (c *Client) decodePlaylistGCID(ctx context.Context, gcid string) (kugouPlaylistIdentity, error) {
+	gcid = strings.TrimSpace(strings.ToLower(gcid))
+	if !strings.HasPrefix(gcid, "gcid_") {
+		return kugouPlaylistIdentity{}, nil
+	}
+	type decodeItem struct {
+		ID     string `json:"id"`
+		IDType int    `json:"id_type"`
+	}
+	type decodeBody struct {
+		RetInfo int          `json:"ret_info"`
+		Data    []decodeItem `json:"data"`
+	}
+	bodyJSON, err := json.Marshal(decodeBody{
+		RetInfo: 1,
+		Data: []decodeItem{{
+			ID:     gcid,
+			IDType: 2,
+		}},
+	})
+	if err != nil {
+		return kugouPlaylistIdentity{}, err
+	}
+	query := url.Values{}
+	query.Set("dfid", "-")
+	query.Set("appid", kugouGatewayAppID)
+	query.Set("mid", "0")
+	query.Set("clientver", kugouPlaylistAndroidCV)
+	query.Set("clienttime", "640612895")
+	query.Set("uuid", "-")
+	query.Set("signature", signPlaylistQuery(query, kugouGatewaySignKey, string(bodyJSON)))
+	var resp kugouPlaylistDecodeResponse
+	if err := c.doJSONRequest(ctx, http.MethodPost, kugouPlaylistDecodeURL, query, bytes.NewReader(bodyJSON), map[string]string{
+		"Content-Type": "application/json",
+		"User-Agent":   kugouPlaylistAndroidUA,
+		"Referer":      "https://m.kugou.com/",
+	}, &resp); err != nil {
+		return kugouPlaylistIdentity{}, err
+	}
+	if len(resp.Data.List) == 0 {
+		return kugouPlaylistIdentity{}, fmt.Errorf("kugou batch_decode empty for %s", gcid)
+	}
+	decoded := resp.Data.List[0]
+	identity := kugouPlaylistIdentity{
+		InputID:            gcid,
+		GlobalCollectionID: strings.TrimSpace(decoded.GlobalCollectionID),
+		SpecialID:          formatAnyNumericString(decoded.Info.SpecialID),
+	}
+	identity.GlobalSpecialID = strings.TrimSpace(decoded.GlobalCollectionID)
+	return identity, nil
+}
+
+func (c *Client) resolveGlobalSpecialID(ctx context.Context, specialID string) (string, error) {
+	specialID = strings.TrimSpace(specialID)
+	if !isNumericText(specialID) {
+		return "", nil
+	}
+	query := url.Values{}
+	query.Set("specialid", specialID)
+	var resp kugouPlaylistSpecialInfoResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, kugouPlaylistSpecialURL, query, nil, map[string]string{
+		"User-Agent": "Mozilla/5.0",
+	}, &resp); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resp.Data.GlobalSpecialID), nil
+}
+
+func (c *Client) fetchPlaylistInfoV2(ctx context.Context, globalID string) (*kugouPlaylistInfoV2Response, error) {
+	query := buildPlaylistWebQuery(time.Now())
+	query.Set("specialid", "0")
+	query.Set("global_specialid", strings.TrimSpace(globalID))
+	query.Set("format", "jsonp")
+	query.Set("signature", signPlaylistQuery(query, kugouPlaySignKey, ""))
+	var resp kugouPlaylistInfoV2Response
+	if err := c.doJSONRequest(ctx, http.MethodGet, kugouPlaylistInfoV2URL, query, nil, map[string]string{
+		"User-Agent": kugouPlaylistWebUA,
+		"Referer":    kugouPlaylistReferer,
+		"mid":        query.Get("mid"),
+		"clienttime": query.Get("clienttime"),
+		"dfid":       query.Get("dfid"),
+	}, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Status != 1 && strings.TrimSpace(resp.Data.SpecialName) == "" {
+		return nil, fmt.Errorf("kugou playlist info unavailable: %s", firstNonEmpty(resp.Error, resp.Message, strconv.Itoa(resp.ErrCode)))
+	}
+	return &resp, nil
+}
+
+func (c *Client) fetchPlaylistSongsV2(ctx context.Context, globalID string) ([]model.Song, int, error) {
+	const pageSize = 300
+	allEntries := make([]map[string]any, 0, pageSize)
+	total := 0
+	for page := 1; ; page++ {
+		query := buildPlaylistWebQuery(time.Now())
+		query.Set("global_specialid", strings.TrimSpace(globalID))
+		query.Set("specialid", "0")
+		query.Set("plat", "0")
+		query.Set("version", "8000")
+		query.Set("page", strconv.Itoa(page))
+		query.Set("pagesize", strconv.Itoa(pageSize))
+		query.Set("signature", signPlaylistQuery(query, kugouPlaySignKey, ""))
+		var resp kugouPlaylistSongsV2Response
+		if err := c.doJSONRequest(ctx, http.MethodGet, kugouPlaylistSongV2URL, query, nil, map[string]string{
+			"User-Agent": kugouPlaylistWebUA,
+			"Referer":    kugouPlaylistReferer,
+			"mid":        query.Get("mid"),
+			"clienttime": query.Get("clienttime"),
+			"dfid":       query.Get("dfid"),
+		}, &resp); err != nil {
+			return nil, 0, err
+		}
+		entries := resp.Data.Info
+		if len(entries) == 0 {
+			entries = resp.Data.List
+		}
+		if len(entries) == 0 {
+			entries = resp.Data.Data
+		}
+		if total <= 0 {
+			total = resp.Data.Total
+		}
+		if c != nil && c.logger != nil {
+			c.logger.Debug("kugou: fetched playlist songs v2 page", "global_specialid", globalID, "page", page, "entries_info", len(resp.Data.Info), "entries_list", len(resp.Data.List), "entries_data", len(resp.Data.Data), "entries_selected", len(entries), "api_total", resp.Data.Total)
+		}
+		if len(entries) == 0 {
+			if page == 1 {
+				return nil, 0, fmt.Errorf("kugou playlist songs empty: %s", firstNonEmpty(resp.Error, resp.Message, strconv.Itoa(resp.ErrCode)))
+			}
+			break
+		}
+		allEntries = append(allEntries, entries...)
+		if total > 0 && len(allEntries) >= total {
+			break
+		}
+		if total <= 0 && len(entries) < pageSize {
+			break
+		}
+	}
+	songs := convertPlaylistSongEntries(allEntries)
+	if c != nil && c.logger != nil {
+		c.logger.Debug("kugou: converted playlist songs v2", "global_specialid", globalID, "raw_entries", len(allEntries), "songs_after_convert", len(songs), "total", choosePositiveInt(total, len(allEntries)))
+	}
+	return songs, choosePositiveInt(total, len(allEntries)), nil
+}
+
+func (c *Client) fetchLegacyPlaylistSongs(ctx context.Context, params map[string]string, secret, userAgent string) ([]model.Song, error) {
+	page := 1
+	if rawPage := strings.TrimSpace(params["page"]); rawPage != "" {
+		if parsed, err := strconv.Atoi(rawPage); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	pageSize := 500
+	if rawPageSize := strings.TrimSpace(params["pagesize"]); rawPageSize != "" {
+		if parsed, err := strconv.Atoi(rawPageSize); err == nil && parsed > 0 {
+			pageSize = parsed
+		}
+	}
+	allEntries := make([]map[string]any, 0, pageSize)
+	seenPageKeys := make(map[string]struct{})
+	for {
+		query := url.Values{}
+		for key, value := range params {
+			query.Set(key, value)
+		}
+		query.Set("page", strconv.Itoa(page))
+		query.Set("pagesize", strconv.Itoa(pageSize))
+		query.Set("signature", signPlaylistQuery(query, secret, ""))
+		var resp kugouLegacyPlaylistSongsResponse
+		if err := c.doJSONRequest(ctx, http.MethodGet, kugouPlaylistLegacyURL, query, nil, map[string]string{
+			"User-Agent": userAgent,
+			"Referer":    kugouPlaylistReferer,
+			"dfid":       "-",
+		}, &resp); err != nil {
+			return nil, err
+		}
+		entries := resp.Info
+		if len(entries) == 0 {
+			entries = resp.Data.Info
+		}
+		if c != nil && c.logger != nil {
+			c.logger.Debug("kugou: fetched legacy playlist page", "page", page, "entries_info", len(resp.Info), "entries_data_info", len(resp.Data.Info), "entries_selected", len(entries))
+		}
+		if len(entries) == 0 {
+			if page == 1 {
+				return nil, fmt.Errorf("kugou legacy playlist empty: %s", firstNonEmpty(resp.Error, resp.Message, strconv.Itoa(resp.ErrCode)))
+			}
+			break
+		}
+		pageKey := playlistEntryPageKey(entries)
+		if _, exists := seenPageKeys[pageKey]; exists {
+			if c != nil && c.logger != nil {
+				c.logger.Warn("kugou: legacy playlist page repeated, stopping pagination", "page", page, "entries", len(entries))
+			}
+			break
+		}
+		seenPageKeys[pageKey] = struct{}{}
+		allEntries = append(allEntries, entries...)
+		if len(entries) < pageSize {
+			break
+		}
+		page++
+	}
+	songs := convertPlaylistSongEntries(allEntries)
+	if c != nil && c.logger != nil {
+		c.logger.Debug("kugou: converted legacy playlist songs", "raw_entries", len(allEntries), "songs_after_convert", len(songs))
+	}
+	return songs, nil
+}
+
+func buildPlaylistWebQuery(now time.Time) url.Values {
+	ts := strconv.FormatInt(now.UnixMilli(), 10)
+	query := url.Values{}
+	query.Set("appid", kugouPlaylistWebAppID)
+	query.Set("srcappid", kugouPlaylistSrcAppID)
+	query.Set("clientver", kugouPlaylistClientVer)
+	query.Set("clienttime", ts)
+	query.Set("mid", ts)
+	query.Set("uuid", ts)
+	query.Set("dfid", "-")
+	return query
+}
+
+func signPlaylistQuery(query url.Values, secret, body string) string {
+	keys := sortedQueryKeys(query)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if strings.EqualFold(key, "signature") {
+			continue
+		}
+		for _, value := range query[key] {
+			parts = append(parts, key+"="+value)
+		}
+	}
+	sort.Strings(parts)
+	return conceptMD5(secret + strings.Join(parts, "") + body + secret)
+}
+
+func isGlobalCollectionID(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return strings.HasPrefix(value, "collection_")
+}
+
+func extractPlaylistGlobalCollectionID(text string) string {
+	patterns := []string{
+		`global_collection_id["'=: ]+(collection_[A-Za-z0-9_\-]+)`,
+	}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		match := re.FindStringSubmatch(text)
+		if len(match) == 2 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
+}
+
+func convertPlaylistSongEntries(entries []map[string]any) []model.Song {
+	results := make([]model.Song, 0, len(entries))
+	skippedWithoutID := 0
+	for _, entry := range entries {
+		song := convertPlaylistSongEntry(entry)
+		if strings.TrimSpace(song.ID) == "" {
+			skippedWithoutID++
+			continue
+		}
+		results = append(results, song)
+	}
+	_ = skippedWithoutID
+	return results
+}
+
+func convertPlaylistSongEntry(entry map[string]any) model.Song {
+	hash := normalizeHash(firstNonEmpty(
+		valueString(entry["hash"]),
+		valueString(entry["audio_id"]),
+		valueString(entry["320hash"]),
+		valueString(entry["sqhash"]),
+	))
+	relateGoods := mapRelateGoods(entry["relate_goods"])
+	hash = firstNonEmpty(hash, normalizeHash(relateGoods["128"]), normalizeHash(relateGoods["320"]), normalizeHash(relateGoods["flac"]), normalizeHash(relateGoods["high"]))
+	albumInfo := mapValueAny(entry, "albuminfo")
+	albumID := firstNonEmpty(valueString(entry["album_id"]), valueString(albumInfo["id"]))
+	albumName := firstNonEmpty(valueString(entry["album_name"]), valueString(albumInfo["name"]))
+	singerInfo := mapSlice(entry["singerinfo"])
+	artistNames, singerIDs := extractSingerInfo(singerInfo)
+	artist := firstNonEmpty(strings.Join(artistNames, "、"), valueString(entry["author_name"]), valueString(entry["singername"]))
+	name := strings.TrimSpace(valueString(entry["songname"]))
+	if name == "" {
+		name = strings.TrimSpace(valueString(entry["name"]))
+	}
+	if name == "" {
+		name = strings.TrimSpace(valueString(entry["filename"]))
+	}
+	if title, parsedArtist := splitKugouSongDisplayName(name); title != "" {
+		name = title
+		if strings.TrimSpace(artist) == "" {
+			artist = parsedArtist
+		}
+	}
+	if strings.TrimSpace(artist) == "" {
+		if title, parsedArtist := splitKugouSongDisplayName(strings.TrimSpace(valueString(entry["filename"]))); title != "" {
+			if strings.TrimSpace(name) == "" {
+				name = title
+			}
+			artist = parsedArtist
+		}
+	}
+	albumAudioID := firstNonEmpty(valueString(entry["album_audio_id"]), valueString(entry["mixsongid"]), valueString(entry["mix_song_id"]))
+	audioID := firstNonEmpty(valueString(entry["audio_id"]))
+	shareChain := resolveSongShareChain(albumAudioID, audioID)
+	bitrate := parseKugouInt(firstNonEmptyAny(entry["bitrate"], entry["bit_rate"]))
+	extName := firstNonEmpty(valueString(entry["extname"]), valueString(entry["ext_name"]))
+	if extName == "" {
+		extName = guessPlaylistEntryFormat(relateGoods)
+	}
+	cover := normalizeSizedCover(firstNonEmpty(valueString(entry["imgurl"]), valueString(entry["cover"]), valueString(entry["img"]), valueString(albumInfo["imgurl"])))
+	extra := map[string]string{
+		"hash":           hash,
+		"file_hash":      hash,
+		"hq_hash":        normalizeHash(firstNonEmpty(relateGoods["320"], valueString(entry["320hash"]))),
+		"sq_hash":        normalizeHash(firstNonEmpty(relateGoods["flac"], valueString(entry["sqhash"]))),
+		"res_hash":       normalizeHash(relateGoods["high"]),
+		"album_id":       albumID,
+		"album_audio_id": albumAudioID,
+		"audio_id":       audioID,
+		"mix_song_id":    firstNonEmpty(valueString(entry["mixsongid"]), valueString(entry["mix_song_id"])),
+		"share_chain":    shareChain,
+		"singer_ids":     strings.Join(singerIDs, ","),
+		"privilege":      valueString(entry["privilege"]),
+	}
+	for level, qualityHash := range relateGoods {
+		switch level {
+		case "128":
+			extra["hash"] = firstNonEmpty(extra["hash"], qualityHash)
+		case "320":
+			extra["hq_hash"] = firstNonEmpty(extra["hq_hash"], qualityHash)
+		case "flac":
+			extra["sq_hash"] = firstNonEmpty(extra["sq_hash"], qualityHash)
+		case "high", "flac24bit":
+			extra["res_hash"] = firstNonEmpty(extra["res_hash"], qualityHash)
+		}
+		if size := valueString(relateGoodsSize(entry["relate_goods"], level)); size != "" {
+			extra[level+"_filesize"] = size
+		}
+	}
+	return model.Song{
+		Source:   "kugou",
+		ID:       hash,
+		Name:     name,
+		Artist:   artist,
+		Album:    albumName,
+		AlbumID:  albumID,
+		Duration: normalizeGatewayDuration(parseKugouInt(firstNonEmptyAny(entry["timelen"], entry["duration"]))),
+		Size:     parseKugouInt64(firstNonEmptyAny(entry["filesize"], entry["size"])),
+		Bitrate:  bitrate,
+		Ext:      extName,
+		Cover:    cover,
+		Link:     buildShareTrackLink(shareChain, hash, albumID, albumAudioID),
+		Extra:    extra,
+	}
+}
+
+func mapRelateGoods(value any) map[string]string {
+	result := map[string]string{}
+	for _, item := range mapSlice(value) {
+		level := strings.ToLower(strings.TrimSpace(valueString(item["level"])))
+		hash := normalizeHash(valueString(item["hash"]))
+		if level == "" || hash == "" {
+			continue
+		}
+		result[level] = hash
+	}
+	return result
+}
+
+func relateGoodsSize(value any, level string) string {
+	for _, item := range mapSlice(value) {
+		itemLevel := strings.ToLower(strings.TrimSpace(valueString(item["level"])))
+		if itemLevel != strings.ToLower(strings.TrimSpace(level)) {
+			continue
+		}
+		return valueString(firstNonEmptyAny(item["size"], item["filesize"]))
+	}
+	return ""
+}
+
+func mapValueAny(entry map[string]any, key string) map[string]any {
+	if entry == nil {
+		return nil
+	}
+	if value, ok := entry[key].(map[string]any); ok {
+		return value
+	}
+	return nil
+}
+
+func mapSlice(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if mapped, ok := item.(map[string]any); ok {
+			result = append(result, mapped)
+		}
+	}
+	return result
+}
+
+func extractSingerInfo(items []map[string]any) ([]string, []string) {
+	names := make([]string, 0, len(items))
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if name := strings.TrimSpace(firstNonEmpty(valueString(item["name"]), valueString(item["author_name"]))); name != "" {
+			names = append(names, name)
+		}
+		if id := strings.TrimSpace(firstNonEmpty(valueString(item["id"]), valueString(item["author_id"]), valueString(item["singerid"]))); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return names, ids
+}
+
+func splitKugouSongDisplayName(value string) (title, artist string) {
+	value = strings.TrimSpace(value)
+	for _, sep := range []string{" - ", "-", "－", "—", "–"} {
+		parts := strings.SplitN(value, sep, 2)
+		if len(parts) != 2 {
+			continue
+		}
+		left := strings.TrimSpace(parts[0])
+		right := strings.TrimSpace(parts[1])
+		if left == "" || right == "" {
+			continue
+		}
+		return right, left
+	}
+	return "", ""
+}
+
+func guessPlaylistEntryFormat(relateGoods map[string]string) string {
+	if normalizeHash(relateGoods["flac"]) != "" || normalizeHash(relateGoods["high"]) != "" {
+		return "flac"
+	}
+	if normalizeHash(relateGoods["320"]) != "" {
+		return "mp3"
+	}
+	return "mp3"
+}
+
+func firstNonEmptyAny(values ...any) any {
+	for _, value := range values {
+		if strings.TrimSpace(valueString(value)) != "" {
+			return value
+		}
+	}
+	return nil
+}
+
+func choosePositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func playlistEntryPageKey(entries []map[string]any) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		parts = append(parts, firstNonEmpty(
+			normalizeHash(valueString(entry["hash"])),
+			strings.TrimSpace(valueString(entry["mixsongid"])),
+			strings.TrimSpace(valueString(entry["mix_song_id"])),
+			strings.TrimSpace(valueString(entry["audio_id"])),
+			strings.TrimSpace(valueString(entry["songname"])),
+			strings.TrimSpace(valueString(entry["filename"])),
+		))
+	}
+	return strings.Join(parts, "|")
+}
+
+func applyPlaylistInfoMetadata(playlist *model.Playlist, info *kugouPlaylistInfoV2Response) {
+	if playlist == nil || info == nil {
+		return
+	}
+	if strings.TrimSpace(playlist.Name) == "" {
+		playlist.Name = strings.TrimSpace(info.Data.SpecialName)
+	}
+	if strings.TrimSpace(playlist.Cover) == "" {
+		playlist.Cover = strings.TrimSpace(info.Data.ImgURL)
+	}
+	if strings.TrimSpace(playlist.Description) == "" {
+		playlist.Description = strings.TrimSpace(info.Data.Intro)
+	}
+	if strings.TrimSpace(playlist.Creator) == "" {
+		playlist.Creator = strings.TrimSpace(info.Data.Nickname)
+	}
+	playlist.PlayCount = choosePositiveInt(playlist.PlayCount, info.Data.PlayCount)
+	playlist.TrackCount = choosePositiveInt(playlist.TrackCount, info.Data.SongCount)
+	if playlist.Extra == nil {
+		playlist.Extra = map[string]string{}
+	}
+	if strings.TrimSpace(playlist.Extra["global_specialid"]) == "" {
+		playlist.Extra["global_specialid"] = strings.TrimSpace(info.Data.GlobalSpecialID)
+	}
+}
+
+func applyPlaylistSongMetadataFallback(playlist *model.Playlist, songs []model.Song) {
+	if playlist == nil || len(songs) == 0 {
+		return
+	}
+	if strings.TrimSpace(playlist.Name) == "" {
+		playlist.Name = strings.TrimSpace(firstNonEmpty(songs[0].Album, songs[0].Name))
+	}
+	if strings.TrimSpace(playlist.Cover) == "" {
+		playlist.Cover = strings.TrimSpace(songs[0].Cover)
+	}
+	playlist.TrackCount = choosePositiveInt(playlist.TrackCount, len(songs))
+	for i := range songs {
+		if strings.TrimSpace(songs[i].Album) == "" {
+			songs[i].Album = playlist.Name
+		}
+		if strings.TrimSpace(songs[i].Cover) == "" {
+			songs[i].Cover = playlist.Cover
+		}
+	}
+}
+
+func applyPlaylistSongContext(playlist *model.Playlist, songs []model.Song) {
+	if playlist == nil {
+		return
+	}
+	playlistURL := strings.TrimSpace(playlist.Link)
+	playlistName := strings.TrimSpace(playlist.Name)
+	playlistID := strings.TrimSpace(playlist.ID)
+	for i := range songs {
+		extra := ensureSongExtra(&songs[i])
+		extra["playlist_id"] = playlistID
+		extra["playlist_url"] = playlistURL
+		extra["playlist_name"] = playlistName
+	}
+}
+
+func mergePlaylistSongs(primary, supplemental []model.Song) []model.Song {
+	if len(primary) == 0 || len(supplemental) == 0 {
+		return primary
+	}
+	index := make(map[string]model.Song, len(supplemental))
+	for _, song := range supplemental {
+		key := normalizeHash(firstNonEmpty(song.ID, song.Extra["hash"], song.Extra["file_hash"]))
+		if key == "" {
+			continue
+		}
+		index[key] = song
+	}
+	for i := range primary {
+		key := normalizeHash(firstNonEmpty(primary[i].ID, primary[i].Extra["hash"], primary[i].Extra["file_hash"]))
+		if key == "" {
+			continue
+		}
+		supplement, ok := index[key]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(primary[i].Artist) == "" {
+			primary[i].Artist = strings.TrimSpace(supplement.Artist)
+		}
+		if strings.TrimSpace(primary[i].Album) == "" {
+			primary[i].Album = strings.TrimSpace(supplement.Album)
+		}
+		if strings.TrimSpace(primary[i].AlbumID) == "" {
+			primary[i].AlbumID = strings.TrimSpace(supplement.AlbumID)
+		}
+		if strings.TrimSpace(primary[i].Cover) == "" {
+			primary[i].Cover = strings.TrimSpace(supplement.Cover)
+		}
+		if strings.TrimSpace(primary[i].Link) == "" {
+			primary[i].Link = strings.TrimSpace(supplement.Link)
+		}
+		primaryExtra := ensureSongExtra(&primary[i])
+		for key, value := range supplement.Extra {
+			if strings.TrimSpace(primaryExtra[key]) == "" && strings.TrimSpace(value) != "" {
+				primaryExtra[key] = value
+			}
+		}
+	}
+	return primary
 }
 
 func findMatchingSearchSong(results []model.Song, primaryHash, albumID, name, artist string) *model.Song {
@@ -814,6 +2016,41 @@ func extractHTMLValue(text, pattern string) string {
 	match := re.FindStringSubmatch(text)
 	if len(match) == 2 {
 		return strings.TrimSpace(match[1])
+	}
+	return ""
+}
+
+func extractPlaylistGCID(text string) string {
+	patterns := []string{
+		`gcid_[A-Za-z0-9]+`,
+		`"encode_gic"\s*:\s*"(gcid_[A-Za-z0-9]+)"`,
+		`"encode_src_gid"\s*:\s*"(gcid_[A-Za-z0-9]+)"`,
+	}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		match := re.FindStringSubmatch(text)
+		if len(match) == 1 {
+			return strings.TrimSpace(match[0])
+		}
+		if len(match) == 2 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
+}
+
+func extractPlaylistSpecialID(text string) string {
+	patterns := []string{
+		`specialid[^\d]{0,16}(\d{3,})`,
+		`"special_id"\s*:\s*"?(\d{3,})"?`,
+		`"specialid"\s*:\s*"?(\d{3,})"?`,
+	}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		match := re.FindStringSubmatch(text)
+		if len(match) == 2 {
+			return strings.TrimSpace(match[1])
+		}
 	}
 	return ""
 }

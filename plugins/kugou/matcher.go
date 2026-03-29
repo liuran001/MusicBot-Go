@@ -14,6 +14,7 @@ var (
 	kugouPathHashPattern     = regexp.MustCompile(`(?i)/(?:song|share)/(?:[^/?#]+/)?([a-f0-9]{32})(?:[/?#]|$)`)
 	kugouSharePathPattern    = regexp.MustCompile(`(?i)^/share/([a-z0-9]+)\.html$`)
 	kugouWCShortPathPattern  = regexp.MustCompile(`(?i)^/wc/s/([a-z0-9]+)$`)
+	kugouAlbumPathPattern    = regexp.MustCompile(`(?i)^/album/(\d+)\.html$`)
 	kugouPlaylistPattern     = regexp.MustCompile(`(?i)special/single/(\d+)\.html`)
 	kugouPlaylistPathPattern = regexp.MustCompile(`(?i)/(?:special|playlist)/(?:single/)?(\d+)(?:\.html)?(?:[/?#]|$)`)
 	kugouSonglistPattern     = regexp.MustCompile(`(?i)songlist/(gcid_[a-z0-9]+)/?`)
@@ -84,6 +85,9 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 	if host == "" || !strings.Contains(host, "kugou.com") {
 		return "", false
 	}
+	if matches := kugouAlbumPathPattern.FindStringSubmatch(parsed.Path); len(matches) == 2 {
+		return encodeAlbumCollectionID(matches[1]), true
+	}
 	if matches := kugouPlaylistPattern.FindStringSubmatch(trimmed); len(matches) == 2 {
 		return matches[1], true
 	}
@@ -94,6 +98,17 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 		return strings.ToLower(matches[1]), true
 	}
 	query := parsed.Query()
+	if strings.Contains(strings.ToLower(parsed.Path), "/share/zlist.html") || strings.TrimSpace(query.Get("global_collection_id")) != "" {
+		return encodePlaylistURLCollectionID(trimmed), true
+	}
+	if strings.Contains(host, "m.kugou.com") && strings.TrimSpace(query.Get("chain")) != "" && !strings.Contains(strings.ToLower(parsed.Path), "/share/song") {
+		return encodePlaylistURLCollectionID(trimmed), true
+	}
+	for _, key := range []string{"albumid", "albumId"} {
+		if value := strings.TrimSpace(query.Get(key)); value != "" && isNumericText(value) {
+			return encodeAlbumCollectionID(value), true
+		}
+	}
 	for _, key := range []string{"specialid", "specialId", "plistid", "listid", "id"} {
 		if value := strings.TrimSpace(query.Get(key)); value != "" && isNumericText(value) {
 			return value, true
