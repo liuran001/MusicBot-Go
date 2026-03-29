@@ -14,7 +14,7 @@ FROM node:20-bookworm-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tzdata git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
