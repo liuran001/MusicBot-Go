@@ -129,8 +129,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
+      - name: Extract Docker metadata (full)
+        id: meta_full
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/musicbot-go
@@ -140,17 +140,67 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
+      - name: Extract Docker metadata (lite)
+        id: meta_lite
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/musicbot-go
+          flavor: |
+            latest=false
+          tags: |
+            type=ref,event=branch,suffix=-lite
+            type=ref,event=tag,suffix=-lite
+            type=sha,suffix=-lite
+            type=raw,value=lite,enable={{is_default_branch}}
+
+      - name: Derive build metadata
+        id: docker_build_meta
+        run: |
+          TAG=$(git tag --points-at HEAD | head -n 1)
+          if [ -z "$TAG" ]; then
+            VERSION=$(git rev-parse --short=7 HEAD)
+          else
+            VERSION="$TAG"
+          fi
+          COMMIT=$(git rev-parse HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "build_time=$BUILD_TIME" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image (full)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
+          target: full
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta_full.outputs.tags }}
+          labels: ${{ steps.meta_full.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.docker_build_meta.outputs.version }}
+            COMMIT_SHA=${{ steps.docker_build_meta.outputs.commit }}
+            BUILD_TIME=${{ steps.docker_build_meta.outputs.build_time }}
+          cache-from: type=gha,scope=docker-full
+          cache-to: type=gha,mode=max,scope=docker-full
+
+      - name: Build and push Docker image (lite)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          target: lite
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta_lite.outputs.tags }}
+          labels: ${{ steps.meta_lite.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.docker_build_meta.outputs.version }}
+            COMMIT_SHA=${{ steps.docker_build_meta.outputs.commit }}
+            BUILD_TIME=${{ steps.docker_build_meta.outputs.build_time }}
+          cache-from: type=gha,scope=docker-lite
+          cache-to: type=gha,mode=max,scope=docker-lite
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
