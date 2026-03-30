@@ -1,15 +1,23 @@
+# Keep git metadata and local runtime state out of image builds
 .git
 .github
 .idea
 .vscode
+.opencode-ref
+
+# Local build outputs / runtime files
 MusicBot-Go
 Music163bot-Go
+dist
+cache
+tmp
+docker-data
 *.db
 *.db-shm
 *.db-wal
 *.log
-cache/
-tmp/
 config.ini
-node_modules/
-plugins/netease/recognize/service/node_modules/
+
+# Node install artifacts are produced in a build stage
+node_modules
+plugins/netease/recognize/service/node_modules

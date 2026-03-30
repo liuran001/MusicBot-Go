@@ -36,9 +36,17 @@
 
 GitHub Actions 会自动构建并推送镜像到 GHCR：
 
-- `ghcr.io/liuran001/musicbot-go:latest`（默认分支）
-- `ghcr.io/liuran001/musicbot-go:<tag>`（打 tag 时）
-- `ghcr.io/liuran001/musicbot-go:sha-xxxxxxx`
+- `ghcr.io/liuran001/musicbot-go:latest`（**full 完整版**，默认分支；包含 `/recognize` 需要的 Node.js + ffmpeg）
+- `ghcr.io/liuran001/musicbot-go:lite`（**lite 精简版**，不包含 `/recognize` 依赖）
+- `ghcr.io/liuran001/musicbot-go:<tag>`（full，打 tag 时）
+- `ghcr.io/liuran001/musicbot-go:<tag>-lite`（lite，打 tag 时）
+- `ghcr.io/liuran001/musicbot-go:sha-xxxxxxx` / `sha-xxxxxxx-lite`
+
+如果你不需要 `/recognize`，推荐直接使用 `lite`，并在配置中显式设置：
+
+```ini
+EnableRecognize = false
+```
 
 ### 1. 准备目录
 
