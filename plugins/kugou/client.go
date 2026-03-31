@@ -50,10 +50,11 @@ const (
 )
 
 type Client struct {
-	api     *kugoulib.Kugou
-	cookie  string
-	logger  bot.Logger
-	concept *ConceptSessionManager
+	api              *kugoulib.Kugou
+	cookie           string
+	logger           bot.Logger
+	concept          *ConceptSessionManager
+	searchHTTPClient *http.Client
 }
 
 func (c *Client) HasCookie() bool {
@@ -75,6 +76,24 @@ func NewClient(cookie string, logger bot.Logger) *Client {
 		cookie: trimmed,
 		logger: logger,
 	}
+}
+
+func (c *Client) SetSearchProxy(rawProxy string) error {
+	if c == nil {
+		return nil
+	}
+	rawProxy = strings.TrimSpace(rawProxy)
+	if rawProxy == "" {
+		c.searchHTTPClient = nil
+		return nil
+	}
+	proxyURL, err := url.Parse(rawProxy)
+	if err != nil {
+		return fmt.Errorf("invalid kugou search proxy: %w", err)
+	}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	c.searchHTTPClient = &http.Client{Transport: transport, Timeout: 20 * time.Second}
+	return nil
 }
 
 func (c *Client) AttachConcept(manager *ConceptSessionManager) {
@@ -2167,7 +2186,11 @@ func (c *Client) doJSONRequest(ctx context.Context, method, rawURL string, query
 			req.Header.Set(key, value)
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := http.DefaultClient
+	if c != nil && c.searchHTTPClient != nil && isKugouSearchRequest(rawURL) {
+		client = c.searchHTTPClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -2177,6 +2200,17 @@ func (c *Client) doJSONRequest(ctx context.Context, method, rawURL string, query
 		return fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func isKugouSearchRequest(rawURL string) bool {
+	return strings.Contains(rawURL, "songsearch.kugou.com/song_search_v2") ||
+		strings.Contains(rawURL, "complexsearch.kugou.com/v2/search/song") ||
+		strings.Contains(rawURL, "mobilecdn.kugou.com/api/v3/search/special") ||
+		strings.Contains(rawURL, "mobiles.kugou.com/api/v5/special/info_v2") ||
+		strings.Contains(rawURL, "mobiles.kugou.com/api/v5/special/song_v2") ||
+		strings.Contains(rawURL, "mobilecdnbj.kugou.com/api/v5/special/info") ||
+		strings.Contains(rawURL, "pubsongscdn.kugou.com/v2/get_other_list_file") ||
+		strings.Contains(rawURL, "t.kugou.com/v1/songlist/batch_decode")
 }
 
 func buildDownloadPlans(song *model.Song, requested platform.Quality) []kugouDownloadPlan {
