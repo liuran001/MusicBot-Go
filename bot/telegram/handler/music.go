@@ -578,7 +578,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		songInfo.Quality = actualQuality
 	}
 	songInfo.FileExt = info.Format
-	songInfo.MusicSize = int(info.Size)
+	songInfo.MusicSize = 0
 	songInfo.BitRate = info.Bitrate * 1000
 
 	if actualQuality != qualityStr {
@@ -1309,7 +1309,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	}
 
 	songInfo.FileExt = info.Format
-	songInfo.MusicSize = int(info.Size)
+	songInfo.MusicSize = 0
 	songInfo.BitRate = info.Bitrate * 1000
 	if songInfo.Quality == "" {
 		songInfo.Quality = info.Quality.String()
@@ -1338,6 +1338,9 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 		if total <= 0 {
 			text = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB", track.Title, writtenMB)
 		} else {
+			if songInfo != nil && total > 0 {
+				songInfo.MusicSize = int(total)
+			}
 			totalMB := float64(total) / 1024 / 1024
 			progressPct := float64(written) * 100 / float64(total)
 			text = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
@@ -2357,7 +2360,7 @@ func (h *MusicHandler) prepareInlineSong(
 	}
 	songInfo.Quality = actualQuality
 	songInfo.FileExt = info.Format
-	songInfo.MusicSize = int(info.Size)
+	songInfo.MusicSize = 0
 	songInfo.BitRate = info.Bitrate * 1000
 
 	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, progress)
@@ -2392,6 +2395,9 @@ func (h *MusicHandler) prepareInlineSong(
 		if total <= 0 {
 			suffix = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB", track.Title, writtenMB)
 		} else {
+			if songInfo.MusicSize <= 0 {
+				songInfo.MusicSize = int(total)
+			}
 			totalMB := float64(total) / 1024 / 1024
 			progressPct := float64(written) * 100 / float64(total)
 			suffix = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
