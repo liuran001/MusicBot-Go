@@ -269,6 +269,8 @@ func extractChatID(chatID any) int64 {
 }
 
 func SendMessageWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.SendMessageParams) (*telego.Message, error) {
+	maybeApplyAprilFoolsTextPrankToSendMessage(b.Username(), params)
+
 	var result *telego.Message
 	var lastErr error
 
@@ -297,6 +299,8 @@ func SendMessageWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, p
 }
 
 func EditMessageTextWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageTextParams) (*telego.Message, error) {
+	maybeApplyAprilFoolsTextPrankWithMarkup(b.Username(), &params.Text, &params.ParseMode, &params.ReplyMarkup)
+
 	var result *telego.Message
 	var lastErr error
 
@@ -327,6 +331,8 @@ func EditMessageTextWithRetry(ctx context.Context, rl *RateLimiter, b *telego.Bo
 // EditMessageTextBestEffort edits message text with rate-limit wait but drops 429 retries.
 // Suitable for high-frequency progress updates where stale updates can be skipped.
 func EditMessageTextBestEffort(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageTextParams) (*telego.Message, error) {
+	maybeApplyAprilFoolsTextPrankWithMarkup(b.Username(), &params.Text, &params.ParseMode, &params.ReplyMarkup)
+
 	chatID := extractChatID(params.ChatID)
 	if rl != nil {
 		if err := rl.Wait(ctx, chatID); err != nil {
@@ -376,6 +382,8 @@ func EditMessageReplyMarkupWithRetry(ctx context.Context, rl *RateLimiter, b *te
 }
 
 func EditMessageCaptionWithBestEffort(ctx context.Context, rl *RateLimiter, b *telego.Bot, params *telego.EditMessageCaptionParams) (*telego.Message, error) {
+	maybeApplyAprilFoolsTextPrankWithMarkup(b.Username(), &params.Caption, &params.ParseMode, &params.ReplyMarkup)
+
 	chatID := extractChatID(params.ChatID)
 	if rl != nil {
 		if err := rl.Wait(ctx, chatID); err != nil {

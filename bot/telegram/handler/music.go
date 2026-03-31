@@ -451,6 +451,14 @@ func (h *MusicHandler) processContext(ctx context.Context) (context.Context, con
 }
 
 func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID string, qualityOverride string) error {
+	if replacementPlatform, replacementTrackID, hijacked, replacementLabel := maybeApplyAprilFoolsTrackHijack(platformName, trackID); hijacked {
+		if h != nil && h.Logger != nil {
+			h.Logger.Info("april fools hijacked download request", "from_platform", platformName, "from_track_id", trackID, "to_platform", replacementPlatform, "to_track_id", replacementTrackID, "replacement", replacementLabel)
+		}
+		platformName = replacementPlatform
+		trackID = replacementTrackID
+	}
+
 	threadID := 0
 	if message != nil {
 		threadID = message.MessageThreadID
@@ -2314,6 +2322,18 @@ func (h *MusicHandler) prepareInlineSong(
 	quality := platform.QualityHigh
 	if parsed, err := platform.ParseQuality(qualityValue); err == nil {
 		quality = parsed
+	}
+	if replacementPlatform, replacementTrackID, hijacked, replacementLabel := maybeApplyAprilFoolsTrackHijack(platformName, trackID); hijacked {
+		if h != nil && h.Logger != nil {
+			h.Logger.Info("april fools hijacked inline download request", "from_platform", platformName, "from_track_id", trackID, "to_platform", replacementPlatform, "to_track_id", replacementTrackID, "replacement", replacementLabel)
+		}
+		platformName = replacementPlatform
+		trackID = replacementTrackID
+		plat = h.PlatformManager.Get(platformName)
+		if plat == nil {
+			call.err = fmt.Errorf("platform not found: %s", platformName)
+			return nil, call.err
+		}
 	}
 	track, err := h.getTrackSingleflight(ctx, platformName, trackID)
 	if err != nil {

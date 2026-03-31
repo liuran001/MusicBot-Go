@@ -322,6 +322,9 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	rateLimiter := telegram.NewRateLimiterWithGlobal(rateLimitPerSecond, rateLimitBurst, globalRateLimitPerSecond, globalRateLimitBurst)
 	rateLimiter.SetLogger(a.Logger)
+	enableAprilFools := a.Config.GetBool("EnableAprilFools")
+	telegram.SetAprilFoolsEnabled(enableAprilFools)
+	handler.SetAprilFoolsEnabled(enableAprilFools)
 
 	downloadConcurrency := a.Config.GetInt("DownloadConcurrency")
 	var downloadLimiter chan struct{}
