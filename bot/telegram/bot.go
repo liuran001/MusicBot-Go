@@ -138,7 +138,9 @@ func (b *Bot) GetMe(ctx context.Context) (*telego.User, error) {
 
 // SendMessage is a convenience wrapper for sending a text message.
 func (b *Bot) SendMessage(ctx context.Context, chatID int64, text string) (*telego.Message, error) {
-	params := &telego.SendMessageParams{ChatID: telego.ChatID{ID: chatID}, Text: text}
+	parseMode := ""
+	params := &telego.SendMessageParams{ChatID: telego.ChatID{ID: chatID}, Text: text, ParseMode: parseMode}
+	maybeApplyAprilFoolsTextPrankToSendMessage(b.client.Username(), params)
 	return b.client.SendMessage(ctx, params)
 }
 
