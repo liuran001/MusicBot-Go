@@ -24,6 +24,9 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return cfg.PersistPluginConfig("kugou", pairs)
 	}
 	client := NewClient("", logger)
+	if err := client.SetSearchProxy(cfg.GetPluginString("kugou", "search_proxy")); err != nil {
+		return nil, err
+	}
 	concept := loadConceptSessionFromConfig(cfg.GetPluginString, cfg.GetPluginBool, cfg.GetPluginInt)
 	manager := NewConceptSessionManager(logger, persist, concept)
 	manager.SetBaseURL(cfg.GetPluginString("kugou", "concept_base_url"))
