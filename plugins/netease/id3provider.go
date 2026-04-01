@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	marker "github.com/XiaoMengXinX/163KeyMarker"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
@@ -69,7 +68,8 @@ func (p *ID3Provider) GetTagData(ctx context.Context, track *platform.Track, inf
 		}
 	}
 
-	markerData := marker.CreateMarker(songDetail.Songs[0], songURL.Data[0])
+	markerData := CreateMarker(songDetail.Songs[0], songURL.Data[0])
+	key163 := Create163KeyStr(markerData)
 
 	artists := make([]string, 0, len(track.Artists))
 	for _, artist := range track.Artists {
@@ -104,14 +104,12 @@ func (p *ID3Provider) GetTagData(ctx context.Context, track *platform.Track, inf
 		Title:       track.Title,
 		Artist:      strings.Join(artists, ", "),
 		Album:       albumName,
+		Comment:     key163,
 		CoverURL:    track.CoverURL,
 		Lyrics:      lyrics,
 		Year:        year,
 		TrackNumber: trackNumber,
 		DiscNumber:  discNumber,
-		Extra: map[string]any{
-			"netease_marker": markerData,
-		},
 	}, nil
 }
 

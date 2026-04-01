@@ -34,6 +34,9 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return cfg.PersistPluginConfig("qqmusic", pairs)
 	}
 	client := NewClient(cookie, time.Duration(timeoutSec)*time.Second, logger, autoRenewEnabled, interval, persist)
+	if err := client.SetAPIProxy(cfg.ResolveAPIProxyConfig("qqmusic")); err != nil {
+		return nil, err
+	}
 	platform := NewPlatform(client)
 	return &platformplugins.Contribution{Platform: platform}, nil
 }

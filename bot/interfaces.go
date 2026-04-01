@@ -48,14 +48,6 @@ type SongRepository interface {
 	SetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string, value string) error
 }
 
-// NeteaseClient defines the NetEase API operations used by the bot.
-type NeteaseClient interface {
-	GetSongDetail(ctx context.Context, musicID int) (*SongDetail, error)
-	GetSongURL(ctx context.Context, musicID int, quality string) (*SongURL, error)
-	Search(ctx context.Context, keyword string, limit int) (*SearchResult, error)
-	GetLyric(ctx context.Context, musicID int) (*Lyric, error)
-}
-
 // WorkerPool limits concurrency for background tasks.
 type WorkerPool interface {
 	Submit(task func()) error

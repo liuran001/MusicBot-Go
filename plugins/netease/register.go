@@ -29,6 +29,9 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		}
 	}
 	client := New(musicU, spoofIP, logger)
+	if err := client.SetAPIProxy(cfg.ResolveAPIProxyConfig("netease")); err != nil {
+		return nil, err
+	}
 	disableRadar := true
 	if pluginCfg, ok := cfg.GetPluginConfig("netease"); ok {
 		if _, exists := pluginCfg["disable_radar"]; exists {

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XiaoMengXinX/Music163Api-Go/types"
-	"github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
@@ -369,7 +367,7 @@ func (n *NeteasePlatform) getAlbumAsPlaylist(ctx context.Context, albumID string
 	if err != nil {
 		return nil, fmt.Errorf("netease: failed to get album detail: %w", err)
 	}
-	if detail == nil || detail.Album.ID == 0 {
+	if detail == nil || detail.Album.Id == 0 {
 		return nil, platform.NewNotFoundError("netease", "album", albumID)
 	}
 
@@ -417,15 +415,15 @@ func (n *NeteasePlatform) getAlbumAsPlaylist(ctx context.Context, albumID string
 	}
 
 	return &platform.Playlist{
-		ID:          strconv.Itoa(detail.Album.ID),
+		ID:          strconv.Itoa(detail.Album.Id),
 		Platform:    "netease",
 		Title:       strings.TrimSpace(detail.Album.Name),
 		Description: description,
-		CoverURL:    strings.TrimSpace(detail.Album.PicURL),
+		CoverURL:    strings.TrimSpace(detail.Album.PicUrl),
 		Creator:     creator,
 		TrackCount:  trackCount,
 		Tracks:      tracks,
-		URL:         fmt.Sprintf("https://music.163.com/album?id=%d", detail.Album.ID),
+		URL:         fmt.Sprintf("https://music.163.com/album?id=%d", detail.Album.Id),
 	}, nil
 }
 
@@ -462,7 +460,7 @@ func (n *NeteasePlatform) bitrateToQuality(bitrate int) platform.Quality {
 }
 
 // convertSongDetailToTrack converts NetEase SongDetailData to platform Track.
-func (n *NeteasePlatform) convertSongDetailToTrack(song bot.SongDetail) platform.Track {
+func (n *NeteasePlatform) convertSongDetailToTrack(song SongsDetailData) platform.Track {
 	if len(song.Songs) == 0 {
 		return platform.Track{}
 	}
@@ -514,7 +512,7 @@ func (n *NeteasePlatform) convertSongDetailToTrack(song bot.SongDetail) platform
 	}
 }
 
-func (n *NeteasePlatform) convertSongDetailDataToTrack(song types.SongDetailData) platform.Track {
+func (n *NeteasePlatform) convertSongDetailDataToTrack(song SongDetailData) platform.Track {
 	artists := make([]platform.Artist, 0, len(song.Ar))
 	for _, ar := range song.Ar {
 		artists = append(artists, platform.Artist{
@@ -555,52 +553,7 @@ func (n *NeteasePlatform) convertSongDetailDataToTrack(song types.SongDetailData
 }
 
 // convertSearchSongToTrack converts search result song to platform Track.
-func (n *NeteasePlatform) convertSearchSongToTrack(song struct {
-	Id      int    `json:"id"`
-	Name    string `json:"name"`
-	Artists []struct {
-		Id        int           `json:"id"`
-		Name      string        `json:"name"`
-		PicUrl    interface{}   `json:"picUrl"`
-		Alias     []interface{} `json:"alias"`
-		AlbumSize int           `json:"albumSize"`
-		PicId     int           `json:"picId"`
-		Img1V1Url string        `json:"img1v1Url"`
-		Img1V1    int           `json:"img1v1"`
-		Trans     interface{}   `json:"trans"`
-	} `json:"artists"`
-	Album struct {
-		Id     int    `json:"id"`
-		Name   string `json:"name"`
-		Artist struct {
-			Id        int           `json:"id"`
-			Name      string        `json:"name"`
-			PicUrl    interface{}   `json:"picUrl"`
-			Alias     []interface{} `json:"alias"`
-			AlbumSize int           `json:"albumSize"`
-			PicId     int           `json:"picId"`
-			Img1V1Url string        `json:"img1v1Url"`
-			Img1V1    int           `json:"img1v1"`
-			Trans     interface{}   `json:"trans"`
-		} `json:"artist"`
-		PublishTime int64 `json:"publishTime"`
-		Size        int   `json:"size"`
-		CopyrightId int   `json:"copyrightId"`
-		Status      int   `json:"status"`
-		PicId       int64 `json:"picId"`
-		Mark        int   `json:"mark"`
-	} `json:"album"`
-	Duration    int           `json:"duration"`
-	CopyrightId int           `json:"copyrightId"`
-	Status      int           `json:"status"`
-	Alias       []interface{} `json:"alias"`
-	Rtype       int           `json:"rtype"`
-	Ftype       int           `json:"ftype"`
-	Mvid        int           `json:"mvid"`
-	Fee         int           `json:"fee"`
-	RUrl        interface{}   `json:"rUrl"`
-	Mark        int           `json:"mark"`
-}) platform.Track {
+func (n *NeteasePlatform) convertSearchSongToTrack(song SearchSongItem) platform.Track {
 	// Convert artists
 	artists := make([]platform.Artist, 0, len(song.Artists))
 	for _, ar := range song.Artists {
@@ -679,7 +632,7 @@ func neteaseDiscNumber(disc string) int {
 }
 
 // convertLyrics converts NetEase lyrics to platform Lyrics.
-func (n *NeteasePlatform) convertLyrics(lyricData *bot.Lyric) *platform.Lyrics {
+func (n *NeteasePlatform) convertLyrics(lyricData *SongLyricData) *platform.Lyrics {
 	lyrics := &platform.Lyrics{
 		Plain: lyricData.Lrc.Lyric,
 	}

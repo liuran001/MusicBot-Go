@@ -3,25 +3,21 @@ package netease
 import (
 	"context"
 	crand "crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/XiaoMengXinX/Music163Api-Go/api"
-	"github.com/XiaoMengXinX/Music163Api-Go/types"
-	"github.com/XiaoMengXinX/Music163Api-Go/utils"
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	"github.com/sony/gobreaker"
 )
 
 // Client provides resilient NetEase API calls.
 type Client struct {
-	baseData   utils.RequestData
+	baseData   RequestData
 	spoofIP    bool
 	retry      *retryablehttp.Client
 	breaker    *gobreaker.CircuitBreaker
@@ -36,30 +32,6 @@ var mainlandIPPrefixes = [][2]uint8{
 	{118, 122}, {119, 112}, {211, 161}, {221, 238},
 	{116, 224}, {222, 128}, {183, 128}, {116, 128},
 	{101, 226}, {61, 128},
-}
-
-type neteaseAlbumDetail struct {
-	Code          int                    `json:"code"`
-	ResourceState bool                   `json:"resourceState"`
-	Album         neteaseAlbumMetadata   `json:"album"`
-	Songs         []types.SongDetailData `json:"songs"`
-}
-
-type neteaseAlbumMetadata struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	PicURL      string `json:"picUrl"`
-	Description string `json:"description"`
-	BriefDesc   string `json:"briefDesc"`
-	Size        int    `json:"size"`
-	Artist      struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-	} `json:"artist"`
-	Artists []struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-	} `json:"artists"`
 }
 
 // New creates a NetEase client with retry and circuit breaker.
@@ -80,7 +52,7 @@ func New(musicU string, spoofIP bool, logger bot.Logger) *Client {
 		},
 	}
 
-	data := utils.RequestData{}
+	data := RequestData{}
 	if musicU != "" {
 		data.Cookies = []*http.Cookie{{Name: "MUSIC_U", Value: musicU}}
 		if logger != nil {
@@ -91,6 +63,7 @@ func New(musicU string, spoofIP bool, logger bot.Logger) *Client {
 			logger.Warn("netease client initialized WITHOUT MUSIC_U cookie - lossless download may fail")
 		}
 	}
+	data.Client = &http.Client{}
 
 	return &Client{
 		baseData:   data,
@@ -104,15 +77,30 @@ func New(musicU string, spoofIP bool, logger bot.Logger) *Client {
 	}
 }
 
+func (c *Client) SetAPIProxy(cfg httpproxy.Config) error {
+	if c == nil {
+		return nil
+	}
+	client, err := httpproxy.NewHTTPClient(cfg, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		client = &http.Client{}
+	}
+	c.baseData.Client = client
+	return nil
+}
+
 // GetSongDetail retrieves song detail data.
-func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*bot.SongDetail, error) {
+func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*SongsDetailData, error) {
 	if c.logger != nil {
 		c.logger.Debug("fetching song detail", "music_id", musicID)
 	}
 
-	var result bot.SongDetail
+	var result SongsDetailData
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongDetail(c.requestData(), []int{musicID})
+		data, err := GetSongDetail(c.requestData(), []int{musicID})
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetSongDetail failed", "music_id", musicID, "error", err)
@@ -132,16 +120,16 @@ func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*bot.SongDetai
 }
 
 // GetSongDetailBatch retrieves song detail data for multiple song IDs.
-func (c *Client) GetSongDetailBatch(ctx context.Context, musicIDs []int) (*bot.SongDetail, error) {
+func (c *Client) GetSongDetailBatch(ctx context.Context, musicIDs []int) (*SongsDetailData, error) {
 	if len(musicIDs) == 0 {
 		return nil, nil
 	}
 	if c.logger != nil {
 		c.logger.Debug("fetching song detail batch", "count", len(musicIDs))
 	}
-	var result bot.SongDetail
+	var result SongsDetailData
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongDetail(c.requestData(), musicIDs)
+		data, err := GetSongDetail(c.requestData(), musicIDs)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetSongDetail batch failed", "count", len(musicIDs), "error", err)
@@ -158,13 +146,13 @@ func (c *Client) GetSongDetailBatch(ctx context.Context, musicIDs []int) (*bot.S
 }
 
 // GetPlaylistDetail retrieves playlist detail data.
-func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*bot.PlaylistDetail, error) {
+func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*PlaylistDetailData, error) {
 	if c.logger != nil {
 		c.logger.Debug("fetching playlist detail", "playlist_id", playlistID)
 	}
-	var result bot.PlaylistDetail
+	var result PlaylistDetailData
 	err := c.execute(ctx, func() error {
-		data, err := api.GetPlaylistDetail(c.requestData(), playlistID)
+		data, err := GetPlaylistDetail(c.requestData(), playlistID)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetPlaylistDetail failed", "playlist_id", playlistID, "error", err)
@@ -181,33 +169,21 @@ func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*bot.Pl
 }
 
 // GetAlbumDetail retrieves album detail data.
-func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*neteaseAlbumDetail, error) {
+func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*AlbumDetailData, error) {
 	if c.logger != nil {
 		c.logger.Debug("fetching album detail", "album_id", albumID)
 	}
 
-	var result neteaseAlbumDetail
+	var result AlbumDetailData
 	err := c.execute(ctx, func() error {
-		data, err := api.GetAlbumDetail(c.requestData(), albumID)
+		data, err := GetAlbumDetail(c.requestData(), albumID)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetAlbumDetail failed", "album_id", albumID, "error", err)
 			}
 			return err
 		}
-
-		raw := strings.TrimSpace(data.RawJson)
-		if raw == "" {
-			rawBytes, marshalErr := json.Marshal(data)
-			if marshalErr != nil {
-				return fmt.Errorf("netease: marshal album detail: %w", marshalErr)
-			}
-			raw = string(rawBytes)
-		}
-
-		if err := json.Unmarshal([]byte(raw), &result); err != nil {
-			return fmt.Errorf("netease: decode album detail: %w", err)
-		}
+		result = data
 		return nil
 	})
 	if err != nil {
@@ -217,10 +193,10 @@ func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*neteaseAlbum
 }
 
 // GetSongURL retrieves song URL data.
-func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*bot.SongURL, error) {
-	var result bot.SongURL
+func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*SongsURLData, error) {
+	var result SongsURLData
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongURL(c.requestData(), api.SongURLConfig{Ids: []int{musicID}, Level: quality})
+		data, err := GetSongURL(c.requestData(), SongURLConfig{IDs: []int{musicID}, Level: quality})
 		if err != nil {
 			return err
 		}
@@ -234,10 +210,10 @@ func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*
 }
 
 // Search searches songs by keyword.
-func (c *Client) Search(ctx context.Context, keyword string, limit int) (*bot.SearchResult, error) {
-	var result bot.SearchResult
+func (c *Client) Search(ctx context.Context, keyword string, limit int) (*SearchSongData, error) {
+	var result SearchSongData
 	err := c.execute(ctx, func() error {
-		data, err := api.SearchSong(c.requestData(), api.SearchSongConfig{Keyword: keyword, Limit: limit})
+		data, err := SearchSong(c.requestData(), SearchSongConfig{Keyword: keyword, Limit: limit})
 		if err != nil {
 			return err
 		}
@@ -251,10 +227,26 @@ func (c *Client) Search(ctx context.Context, keyword string, limit int) (*bot.Se
 }
 
 // GetLyric retrieves lyric data.
-func (c *Client) GetLyric(ctx context.Context, musicID int) (*bot.Lyric, error) {
-	var result bot.Lyric
+func (c *Client) GetLyric(ctx context.Context, musicID int) (*SongLyricData, error) {
+	var result SongLyricData
 	err := c.execute(ctx, func() error {
-		data, err := api.GetSongLyric(c.requestData(), musicID)
+		data, err := GetSongLyric(c.requestData(), musicID)
+		if err != nil {
+			return err
+		}
+		result = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) GetProgramDetail(ctx context.Context, programID int) (*ProgramDetailData, error) {
+	var result ProgramDetailData
+	err := c.execute(ctx, func() error {
+		data, err := GetProgramDetail(c.requestData(), programID)
 		if err != nil {
 			return err
 		}
@@ -313,10 +305,13 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 	return lastErr
 }
 
-func (c *Client) requestData() utils.RequestData {
+func (c *Client) requestData() RequestData {
 	data := c.baseData
+	if data.Client == nil {
+		data.Client = &http.Client{}
+	}
 
-	headers := make(utils.Headers, 0, len(c.baseData.Headers)+4)
+	headers := make(Headers, 0, len(c.baseData.Headers)+4)
 	headers = append(headers, c.baseData.Headers...)
 
 	if c.spoofIP {

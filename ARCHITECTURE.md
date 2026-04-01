@@ -312,7 +312,7 @@ CREATE TABLE group_settings (
 - **日志**: slog
 - **HTTP 客户端**: hashicorp/go-retryablehttp
 - **熔断器**: sony/gobreaker
-- **网易云 API**: github.com/XiaoMengXinX/Music163Api-Go
+- **网易云 API**: 网易云私有 EAPI 实现位于 `plugins/netease`
 
 ## 注意事项
 

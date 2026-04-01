@@ -61,6 +61,17 @@ func NewConceptAPIClient(_ string, state *ConceptSessionManager) *ConceptAPIClie
 	}
 }
 
+func (c *ConceptAPIClient) SetHTTPClient(client *http.Client) {
+	if c == nil {
+		return
+	}
+	if client == nil {
+		c.http = http.DefaultClient
+		return
+	}
+	c.http = client
+}
+
 func (c *ConceptAPIClient) Enabled() bool {
 	return c != nil && c.state != nil && c.state.Enabled()
 }

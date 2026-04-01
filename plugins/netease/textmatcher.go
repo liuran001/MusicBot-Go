@@ -1,13 +1,11 @@
 package netease
 
 import (
+	"context"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/XiaoMengXinX/Music163Api-Go/api"
-	"github.com/XiaoMengXinX/Music163Api-Go/utils"
 )
 
 var (
@@ -30,7 +28,7 @@ func (n *NeteasePlatform) MatchText(text string) (trackID string, matched bool) 
 	}
 
 	if programID := parseProgramID(cleaned); programID != 0 {
-		if realID := getProgramRealID(programID); realID != 0 {
+		if realID := n.getProgramRealID(programID); realID != 0 {
 			return strconv.Itoa(realID), true
 		}
 	}
@@ -104,13 +102,16 @@ func isDigits(text string) bool {
 	return true
 }
 
-func getProgramRealID(programID int) int {
-	programDetail, err := api.GetProgramDetail(utils.RequestData{}, programID)
+func (n *NeteasePlatform) getProgramRealID(programID int) int {
+	if n == nil || n.client == nil {
+		return 0
+	}
+	programDetail, err := n.client.GetProgramDetail(context.Background(), programID)
 	if err != nil {
 		return 0
 	}
-	if programDetail.Program.MainSong.ID != 0 {
-		return programDetail.Program.MainSong.ID
+	if programDetail.Program.MainSong.Id != 0 {
+		return programDetail.Program.MainSong.Id
 	}
 	return 0
 }

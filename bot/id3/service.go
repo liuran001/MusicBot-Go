@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	marker "github.com/XiaoMengXinX/163KeyMarker"
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"go.senan.xyz/taglib"
@@ -35,13 +34,6 @@ func (s *ID3Service) EmbedTags(audioPath string, tag *TagData, coverPath string)
 	workingTag := cloneTagData(tag)
 	if workingTag == nil {
 		workingTag = &TagData{}
-	}
-
-	if markerData, ok := extractNeteaseMarker(workingTag); ok {
-		applyMarkerToTagData(workingTag, markerData)
-		if s.logger != nil {
-			s.logger.Debug("embedded 163key marker", "format", ext, "key_length", len(marker.Create163KeyStr(markerData)))
-		}
 	}
 
 	if err := s.writeTagsWithTaglib(audioPath, workingTag); err != nil {
@@ -147,29 +139,6 @@ func cloneTagData(tagData *TagData) *TagData {
 		}
 	}
 	return &cloned
-}
-
-func extractNeteaseMarker(tagData *TagData) (marker.MarkerData, bool) {
-	if tagData == nil || tagData.Extra == nil {
-		return marker.MarkerData{}, false
-	}
-	markerData, ok := tagData.Extra["netease_marker"].(marker.MarkerData)
-	if !ok {
-		return marker.MarkerData{}, false
-	}
-	return markerData, true
-}
-
-func applyMarkerToTagData(tagData *TagData, markerData marker.MarkerData) {
-	if tagData == nil {
-		return
-	}
-	key163 := marker.Create163KeyStr(markerData)
-	if strings.TrimSpace(tagData.Comment) == "" {
-		tagData.Comment = key163
-		return
-	}
-	tagData.Comment = tagData.Comment + "\n" + key163
 }
 
 func readCoverWithLimit(path string, maxSize int64) ([]byte, error) {
