@@ -3,13 +3,13 @@ module github.com/liuran001/MusicBot-Go
 go 1.26.0
 
 require (
-	github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936
-	github.com/XiaoMengXinX/Music163Api-Go v0.1.30
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-flac/go-flac v1.0.0
+	github.com/guohuiyuan/music-lib v1.0.6-0.20260308165809-ea321c84b16a
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/mymmrac/telego v1.5.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -23,7 +23,6 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/bogem/id3v2 v1.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -32,12 +31,9 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
-	github.com/go-flac/flacpicture v0.3.0 // indirect
-	github.com/go-flac/flacvorbis v0.2.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grbit/go-json v0.11.0 // indirect
-	github.com/guohuiyuan/music-lib v1.0.6-0.20260308165809-ea321c84b16a // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -50,7 +46,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
-	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

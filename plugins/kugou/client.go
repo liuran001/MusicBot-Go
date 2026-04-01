@@ -21,6 +21,7 @@ import (
 	kugoulib "github.com/guohuiyuan/music-lib/kugou"
 	"github.com/guohuiyuan/music-lib/model"
 	"github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
@@ -54,6 +55,7 @@ type Client struct {
 	cookie           string
 	logger           bot.Logger
 	concept          *ConceptSessionManager
+	apiHTTPClient    *http.Client
 	searchHTTPClient *http.Client
 }
 
@@ -93,6 +95,18 @@ func (c *Client) SetSearchProxy(rawProxy string) error {
 	}
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
 	c.searchHTTPClient = &http.Client{Transport: transport, Timeout: 20 * time.Second}
+	return nil
+}
+
+func (c *Client) SetAPIProxy(cfg httpproxy.Config) error {
+	if c == nil {
+		return nil
+	}
+	client, err := httpproxy.NewHTTPClient(cfg, defaultKugouProxyTimeout)
+	if err != nil {
+		return err
+	}
+	c.apiHTTPClient = client
 	return nil
 }
 
@@ -497,7 +511,7 @@ func (c *Client) resolvePlaylistCollectionIDFromRedirect(ctx context.Context, ra
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.htmlHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -520,7 +534,7 @@ func (c *Client) resolvePlaylistCollectionIDFromHTML(ctx context.Context, rawURL
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.htmlHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1978,7 +1992,8 @@ func (c *Client) resolveShareChainURL(ctx context.Context, chain string) (string
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	client := c.htmlHTTPClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -2186,10 +2201,7 @@ func (c *Client) doJSONRequest(ctx context.Context, method, rawURL string, query
 			req.Header.Set(key, value)
 		}
 	}
-	client := http.DefaultClient
-	if c != nil && c.searchHTTPClient != nil && isKugouSearchRequest(rawURL) {
-		client = c.searchHTTPClient
-	}
+	client := c.apiRequestHTTPClient(rawURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -2200,6 +2212,42 @@ func (c *Client) doJSONRequest(ctx context.Context, method, rawURL string, query
 		return fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (c *Client) apiRequestHTTPClient(rawURL string) *http.Client {
+	if c != nil {
+		if c.apiHTTPClient != nil && shouldProxyKugouAPIRequest(rawURL) {
+			return c.apiHTTPClient
+		}
+		if c.searchHTTPClient != nil && isKugouSearchRequest(rawURL) {
+			return c.searchHTTPClient
+		}
+	}
+	return http.DefaultClient
+}
+
+func (c *Client) htmlHTTPClient() *http.Client {
+	if c != nil && c.apiHTTPClient != nil {
+		return c.apiHTTPClient
+	}
+	return &http.Client{Timeout: 8 * time.Second}
+}
+
+func shouldProxyKugouAPIRequest(rawURL string) bool {
+	return isKugouSearchRequest(rawURL) ||
+		strings.Contains(rawURL, "www.kugou.com/share/") ||
+		strings.Contains(rawURL, "www2.kugou.kugou.com/share/") ||
+		strings.Contains(rawURL, "www.kugou.com/yy/special/single/") ||
+		strings.Contains(rawURL, "mobilecdnbj.kugou.com/api/v3/album/info") ||
+		strings.Contains(rawURL, "mobilecdnbj.kugou.com/api/v3/album/song") ||
+		strings.Contains(rawURL, "wwwapi.kugou.com/yy/index.php") ||
+		strings.Contains(rawURL, "m.kugou.com/app/i/getSongInfo.php") ||
+		strings.Contains(rawURL, "gateway.kugou.com/") ||
+		strings.Contains(rawURL, "kugouvip.kugou.com/") ||
+		strings.Contains(rawURL, "tracker.kugou.com/") ||
+		strings.Contains(rawURL, "userservice.kugou.com/") ||
+		strings.Contains(rawURL, "login-user.kugou.com/") ||
+		strings.Contains(rawURL, "login.user.kugou.com/")
 }
 
 func isKugouSearchRequest(rawURL string) bool {

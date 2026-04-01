@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,13 @@ func (m *ConceptSessionManager) API() *ConceptAPIClient {
 
 func (m *ConceptSessionManager) SetBaseURL(baseURL string) {
 	_ = baseURL
+}
+
+func (m *ConceptSessionManager) SetHTTPClient(client *http.Client) {
+	if m == nil || m.client == nil {
+		return
+	}
+	m.client.SetHTTPClient(client)
 }
 
 func (m *ConceptSessionManager) Enabled() bool {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	"github.com/spf13/viper"
 	"gopkg.in/ini.v1"
 )
@@ -510,6 +511,42 @@ func (c *Config) GetPluginBool(plugin, key string) bool {
 	default:
 		return false
 	}
+}
+
+// ResolveAPIProxyConfig returns effective API proxy config for a plugin.
+// Plugin-level api_proxy_* overrides global ApiProxy* only when explicitly set.
+func (c *Config) ResolveAPIProxyConfig(plugin string) httpproxy.Config {
+	resolved := httpproxy.Config{
+		Enabled: c.GetBool("ApiProxyEnabled"),
+		Type:    c.GetString("ApiProxyType"),
+		Host:    c.GetString("ApiProxyHost"),
+		Port:    c.GetInt("ApiProxyPort"),
+		Auth:    c.GetString("ApiProxyAuth"),
+		Headers: httpproxy.ParseHeaders(c.GetString("ApiProxyHeaders")),
+	}
+	pluginCfg, ok := c.GetPluginConfig(plugin)
+	if !ok {
+		return resolved.Normalized()
+	}
+	if _, exists := pluginCfg["api_proxy_enabled"]; exists {
+		resolved.Enabled = c.GetPluginBool(plugin, "api_proxy_enabled")
+	}
+	if _, exists := pluginCfg["api_proxy_type"]; exists {
+		resolved.Type = c.GetPluginString(plugin, "api_proxy_type")
+	}
+	if _, exists := pluginCfg["api_proxy_host"]; exists {
+		resolved.Host = c.GetPluginString(plugin, "api_proxy_host")
+	}
+	if _, exists := pluginCfg["api_proxy_port"]; exists {
+		resolved.Port = c.GetPluginInt(plugin, "api_proxy_port")
+	}
+	if _, exists := pluginCfg["api_proxy_auth"]; exists {
+		resolved.Auth = c.GetPluginString(plugin, "api_proxy_auth")
+	}
+	if _, exists := pluginCfg["api_proxy_headers"]; exists {
+		resolved.Headers = httpproxy.ParseHeaders(c.GetPluginString(plugin, "api_proxy_headers"))
+	}
+	return resolved.Normalized()
 }
 
 func loadINI(v *viper.Viper, path string) (*ini.File, error) {

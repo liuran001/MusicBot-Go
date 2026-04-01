@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
@@ -64,6 +65,26 @@ func NewClient(cookie string, timeout time.Duration, logger bot.Logger, autoRene
 		client.startAutoRenew()
 	}
 	return client
+}
+
+func (c *Client) SetAPIProxy(cfg httpproxy.Config) error {
+	if c == nil {
+		return nil
+	}
+	timeout := 10 * time.Second
+	if c.httpClient != nil && c.httpClient.Timeout > 0 {
+		timeout = c.httpClient.Timeout
+	}
+	proxiedClient, err := httpproxy.NewHTTPClient(cfg, timeout)
+	if err != nil {
+		return err
+	}
+	if proxiedClient == nil {
+		c.httpClient = &http.Client{Timeout: timeout}
+		return nil
+	}
+	c.httpClient = proxiedClient
+	return nil
 }
 
 func (c *Client) Search(ctx context.Context, keyword string, limit int) ([]qqSearchSong, error) {

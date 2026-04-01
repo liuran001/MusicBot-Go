@@ -2,8 +2,6 @@ package bot
 
 import (
 	"time"
-
-	"github.com/XiaoMengXinX/Music163Api-Go/types"
 )
 
 // SongInfo represents cached song metadata.
@@ -38,21 +36,6 @@ type SongInfo struct {
 	FromChatID      int64
 	FromChatName    string
 }
-
-// SongDetail represents NetEase song detail response.
-type SongDetail = types.SongsDetailData
-
-// PlaylistDetail represents NetEase playlist detail response.
-type PlaylistDetail = types.PlaylistDetailData
-
-// SongURL represents NetEase song URL response.
-type SongURL = types.SongsURLData
-
-// SearchResult represents NetEase search response.
-type SearchResult = types.SearchSongData
-
-// Lyric represents NetEase lyric response.
-type Lyric = types.SongLyricData
 
 // UserSettings represents user preferences for the bot.
 type UserSettings struct {
