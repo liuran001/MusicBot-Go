@@ -2,18 +2,16 @@ package handler
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"sync/atomic"
 	"time"
 )
 
-const (
-	aprilFoolsTrackHijackProbability = 0.10
-)
-
 var (
-	aprilFoolsTimezone = time.FixedZone("UTC+8", 8*60*60)
-	aprilFoolsEnabled  atomic.Bool
+	aprilFoolsTimezone                = time.FixedZone("UTC+8", 8*60*60)
+	aprilFoolsEnabled                 atomic.Bool
+	aprilFoolsTrackHijackProbability atomic.Uint64
 )
 
 var aprilFoolsReplacementTracks = []struct {
@@ -30,6 +28,20 @@ func SetAprilFoolsEnabled(enabled bool) {
 	aprilFoolsEnabled.Store(enabled)
 }
 
+func SetAprilFoolsTrackHijackProbability(prob float64) {
+	if prob < 0 {
+		prob = 0
+	}
+	if prob > 1 {
+		prob = 1
+	}
+	aprilFoolsTrackHijackProbability.Store(math.Float64bits(prob))
+}
+
+func getAprilFoolsTrackHijackProbability() float64 {
+	return math.Float64frombits(aprilFoolsTrackHijackProbability.Load())
+}
+
 func isAprilFoolsDayNow() bool {
 	now := time.Now().In(aprilFoolsTimezone)
 	return now.Month() == time.April && now.Day() == 1
@@ -39,7 +51,7 @@ func shouldApplyAprilFoolsTrackHijack() bool {
 	if !aprilFoolsEnabled.Load() || !isAprilFoolsDayNow() {
 		return false
 	}
-	return rand.Float64() < aprilFoolsTrackHijackProbability
+	return rand.Float64() < getAprilFoolsTrackHijackProbability()
 }
 
 func pickAprilFoolsReplacementTrack() (string, string) {
