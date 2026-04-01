@@ -323,8 +323,12 @@ func (a *App) Start(ctx context.Context) error {
 	rateLimiter := telegram.NewRateLimiterWithGlobal(rateLimitPerSecond, rateLimitBurst, globalRateLimitPerSecond, globalRateLimitBurst)
 	rateLimiter.SetLogger(a.Logger)
 	enableAprilFools := a.Config.GetBool("EnableAprilFools")
+	aprilFoolsTextPrankProbability := a.Config.GetFloat64("AprilFoolsTextPrankProbability")
+	aprilFoolsTrackHijackProbability := a.Config.GetFloat64("AprilFoolsTrackHijackProbability")
 	telegram.SetAprilFoolsEnabled(enableAprilFools)
+	telegram.SetAprilFoolsTextPrankProbability(aprilFoolsTextPrankProbability)
 	handler.SetAprilFoolsEnabled(enableAprilFools)
+	handler.SetAprilFoolsTrackHijackProbability(aprilFoolsTrackHijackProbability)
 
 	downloadConcurrency := a.Config.GetInt("DownloadConcurrency")
 	var downloadLimiter chan struct{}

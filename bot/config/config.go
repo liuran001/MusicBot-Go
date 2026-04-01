@@ -398,6 +398,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("UploadQueueSize", 20)
 	v.SetDefault("InlineUploadChatID", 0)
 	v.SetDefault("EnableAprilFools", false)
+	v.SetDefault("AprilFoolsTextPrankProbability", 0.01)
+	v.SetDefault("AprilFoolsTrackHijackProbability", 0.15)
 	v.SetDefault("PluginScriptDir", "./plugins/scripts")
 }
 

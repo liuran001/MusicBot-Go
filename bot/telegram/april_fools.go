@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync/atomic"
@@ -10,15 +11,30 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-const aprilFoolsTOSMessage = "This message couldn't be displayed on your device because it violates the Telegram Terms of Service."
+const aprilFoolsTOSMessage = "<i>This message couldn't be displayed on your device because it violates the Telegram Terms of Service.</i>"
 
 var (
-	aprilFoolsTZ      = time.FixedZone("UTC+8", 8*60*60)
-	aprilFoolsEnabled atomic.Bool
+	aprilFoolsTZ                    = time.FixedZone("UTC+8", 8*60*60)
+	aprilFoolsEnabled               atomic.Bool
+	aprilFoolsTextPrankProbability atomic.Uint64
 )
 
 func SetAprilFoolsEnabled(enabled bool) {
 	aprilFoolsEnabled.Store(enabled)
+}
+
+func SetAprilFoolsTextPrankProbability(prob float64) {
+	if prob < 0 {
+		prob = 0
+	}
+	if prob > 1 {
+		prob = 1
+	}
+	aprilFoolsTextPrankProbability.Store(math.Float64bits(prob))
+}
+
+func getAprilFoolsTextPrankProbability() float64 {
+	return math.Float64frombits(aprilFoolsTextPrankProbability.Load())
 }
 
 func isAprilFoolsDayNow() bool {
@@ -30,7 +46,7 @@ func shouldApplyAprilFoolsTextPrank() bool {
 	if !aprilFoolsEnabled.Load() || !isAprilFoolsDayNow() {
 		return false
 	}
-	return rand.Float64() < 0.01
+	return rand.Float64() < getAprilFoolsTextPrankProbability()
 }
 
 func buildAprilFoolsFeedbackMarkup(botUsername string, existing *telego.InlineKeyboardMarkup) *telego.InlineKeyboardMarkup {

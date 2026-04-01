@@ -62,10 +62,14 @@ func (s *RecognizeService) Start(ctx context.Context) error {
 		return nil
 	}
 
-	serviceDir := filepath.Join("plugins", "netease", "recognize", "service")
+	serviceDir := filepath.Join("/app", "plugins", "netease", "recognize", "service")
 
 	if _, err := os.Stat(filepath.Join(serviceDir, "node_modules")); os.IsNotExist(err) {
-		return fmt.Errorf("node_modules not found, please run: cd %s && npm install", serviceDir)
+		fallbackDir := filepath.Join("plugins", "netease", "recognize", "service")
+		if _, fallbackErr := os.Stat(filepath.Join(fallbackDir, "node_modules")); os.IsNotExist(fallbackErr) {
+			return fmt.Errorf("node_modules not found in %s or %s, please run: cd %s && npm install", serviceDir, fallbackDir, fallbackDir)
+		}
+		serviceDir = fallbackDir
 	}
 
 	s.cmd = exec.CommandContext(ctx, "node", "server.js")
