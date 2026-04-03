@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	platformplugins "github.com/liuran001/MusicBot-Go/bot/platform/plugins"
@@ -37,11 +36,6 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	manager.SetBaseURL(cfg.GetPluginString("kugou", "concept_base_url"))
 	manager.StartAutoRefreshDaemon(context.Background())
 	client.AttachConcept(manager)
-	commands := BuildAdminCommands(client)
 	contrib := &platformplugins.Contribution{Platform: NewPlatform(client)}
-	if len(commands) > 0 {
-		contrib.Commands = make([]admincmd.Command, 0, len(commands))
-		contrib.Commands = append(contrib.Commands, commands...)
-	}
 	return contrib, nil
 }

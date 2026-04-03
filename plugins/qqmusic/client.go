@@ -3,7 +3,9 @@ package qqmusic
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,6 +42,7 @@ type Client struct {
 type autoRenewConfig struct {
 	enabled  bool
 	interval time.Duration
+	started  bool
 }
 
 func NewClient(cookie string, timeout time.Duration, logger bot.Logger, autoRenewEnabled bool, autoRenewInterval time.Duration, persist func(map[string]string) error) *Client {
@@ -742,60 +745,136 @@ func (c *Client) GetSongFileInfo(ctx context.Context, songMid string) (*qqFileIn
 }
 
 func (c *Client) GetVKey(ctx context.Context, songMid, mediaMid, qualityCode, ext, uin, authst string) (string, error) {
-	filename := qualityCode + mediaMid + "." + ext
-	payload := map[string]interface{}{
-		"req": map[string]interface{}{
-			"module": "music.vkey.GetVkey",
-			"method": "UrlGetVkey",
-			"param": map[string]interface{}{
-				"filename":  []string{filename},
-				"guid":      "114514",
-				"songmid":   []string{songMid},
-				"songtype":  []int{0},
-				"uin":       uin,
-				"loginflag": 1,
-				"platform":  "20",
+	guid := randomHex32()
+	filenames := buildVKeyFilenames(songMid, mediaMid, qualityCode, ext)
+	endpointBase := musicsEndpoint + "?format=json"
+	for _, filename := range filenames {
+		payload := map[string]interface{}{
+			"req": map[string]interface{}{
+				"module": "music.vkey.GetVkey",
+				"method": "UrlGetVkey",
+				"param": map[string]interface{}{
+					"filename":  []string{filename},
+					"guid":      guid,
+					"songmid":   []string{songMid},
+					"songtype":  []int{0},
+					"uin":       uin,
+					"loginflag": 1,
+					"platform":  "20",
+				},
 			},
-		},
-		"comm": map[string]interface{}{
-			"qq":     uin,
-			"authst": authst,
-			"ct":     "26",
-			"cv":     "2010101",
-			"v":      "2010101",
-		},
+			"comm": map[string]interface{}{
+				"qq":           uin,
+				"uin":          uin,
+				"authst":       authst,
+				"tmeLoginType": 2,
+				"ct":           19,
+				"cv":           13020508,
+				"v":            13020508,
+				"format":       "json",
+			},
+		}
+		jsonBody, err := json.Marshal(payload)
+		if err != nil {
+			return "", fmt.Errorf("qqmusic: encode vkey payload: %w", err)
+		}
+		sign := tencentSign(string(jsonBody), true)
+		endpoint := endpointBase + "&sign=" + url.QueryEscape(sign)
+		body, err := c.postJSONRaw(ctx, endpoint, jsonBody)
+		if err != nil {
+			return "", err
+		}
+		var resp struct {
+			Code int `json:"code"`
+			Req  struct {
+				Code int `json:"code"`
+				Data struct {
+					MidURLInfo []struct {
+						Purl    string `json:"purl"`
+						Vkey    string `json:"vkey"`
+						WifiURL string `json:"wifiurl"`
+					} `json:"midurlinfo"`
+				} `json:"data"`
+			} `json:"req"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return "", fmt.Errorf("qqmusic: decode vkey: %w", err)
+		}
+		if len(resp.Req.Data.MidURLInfo) == 0 {
+			c.logVKeyUnavailable(songMid, mediaMid, qualityCode, uin, authst, len(resp.Req.Data.MidURLInfo), resp.Code, resp.Req.Code)
+			continue
+		}
+		info := resp.Req.Data.MidURLInfo[0]
+		if resolved := resolveVKeyURL(info.Purl, info.WifiURL, info.Vkey); resolved != "" {
+			return resolved, nil
+		}
+		c.logVKeyUnavailable(songMid, mediaMid, qualityCode, uin, authst, len(resp.Req.Data.MidURLInfo), resp.Code, resp.Req.Code)
 	}
-	jsonBody, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("qqmusic: encode vkey payload: %w", err)
+	return "", platform.NewUnavailableError("qqmusic", "track", songMid)
+}
+
+func buildVKeyFilenames(songMid, mediaMid, qualityCode, ext string) []string {
+	songMid = strings.TrimSpace(songMid)
+	mediaMid = strings.TrimSpace(mediaMid)
+	qualityCode = strings.TrimSpace(qualityCode)
+	ext = strings.TrimSpace(ext)
+	if qualityCode == "" || ext == "" {
+		return nil
 	}
-	sign := tencentSign(string(jsonBody), true)
-	endpoint := musicsEndpoint + "?format=json&sign=" + url.QueryEscape(sign)
-	body, err := c.postJSONRaw(ctx, endpoint, jsonBody)
-	if err != nil {
-		return "", err
+	base := []string{
+		qualityCode + mediaMid + "." + ext,
+		qualityCode + songMid + songMid + "." + ext,
 	}
-	var resp struct {
-		Req struct {
-			Data struct {
-				MidURLInfo []struct {
-					Purl string `json:"purl"`
-					Vkey string `json:"vkey"`
-				} `json:"midurlinfo"`
-			} `json:"data"`
-		} `json:"req"`
+	seen := make(map[string]struct{}, len(base))
+	result := make([]string, 0, len(base))
+	for _, item := range base {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", fmt.Errorf("qqmusic: decode vkey: %w", err)
+	return result
+}
+
+func resolveVKeyURL(purl, wifiURL, vkey string) string {
+	trimmedPurl := strings.TrimSpace(purl)
+	if trimmedPurl != "" && strings.TrimSpace(vkey) != "" {
+		return trimmedPurl
 	}
-	if len(resp.Req.Data.MidURLInfo) == 0 {
-		return "", platform.NewUnavailableError("qqmusic", "track", songMid)
+	return strings.TrimSpace(wifiURL)
+}
+
+func randomHex32() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "11451411451411451411451411451411"
 	}
-	info := resp.Req.Data.MidURLInfo[0]
-	if strings.TrimSpace(info.Purl) == "" || strings.TrimSpace(info.Vkey) == "" {
-		return "", platform.NewUnavailableError("qqmusic", "track", songMid)
+	return hex.EncodeToString(buf)
+}
+
+func (c *Client) logVKeyUnavailable(songMid, mediaMid, qualityCode, uin, authst string, midURLInfoCount, code, reqCode int) {
+	authSource := ""
+	if _, _, source := parseQQAuthDetails(c.Cookie()); source != "" && authst != "" {
+		authSource = source
 	}
-	return info.Purl, nil
+	c.logWarn(fmt.Sprintf(
+		"qqmusic: vkey unavailable songMid=%s mediaMid=%s qualityCode=%s uinZero=%t authEmpty=%t authLen=%d authSource=%s midurlinfo=%d code=%d reqCode=%d",
+		strings.TrimSpace(songMid),
+		strings.TrimSpace(mediaMid),
+		strings.TrimSpace(qualityCode),
+		strings.TrimSpace(uin) == "" || strings.TrimSpace(uin) == "0",
+		strings.TrimSpace(authst) == "",
+		len(strings.TrimSpace(authst)),
+		authSource,
+		midURLInfoCount,
+		code,
+		reqCode,
+	))
 }
 
 func (c *Client) postJSON(ctx context.Context, endpoint string, payload interface{}) ([]byte, error) {

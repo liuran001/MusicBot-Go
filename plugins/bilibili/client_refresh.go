@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
+	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
 var correspondPathPublicKey *rsa.PublicKey
@@ -64,6 +65,16 @@ type CookieRefreshConfirm struct {
 
 // StartAutoRefreshDaemon runs a background loop to automatically refresh the bilibili cookie.
 func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	c.cookieMutex.Lock()
+	if c.autoRenew.started {
+		c.cookieMutex.Unlock()
+		return
+	}
+	c.autoRenew.started = true
+	c.cookieMutex.Unlock()
 	if c.cookie == "" {
 		return
 	}
@@ -101,6 +112,47 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 			c.logger.Error("bilibili: initial check cookie failed", "err", err)
 		}
 	}()
+}
+
+func (c *Client) AutoRenewStatus() platform.AutoRenewStatus {
+	if c == nil {
+		return platform.AutoRenewStatus{}
+	}
+	interval := c.autoRenew.interval
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	return platform.AutoRenewStatus{Enabled: c.autoRenew.enabled, Interval: interval}
+}
+
+func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
+	if c == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("bilibili client unavailable")
+	}
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	c.autoRenew.enabled = enabled
+	c.autoRenew.interval = interval
+	if c.persistFunc != nil {
+		if err := c.persistFunc(map[string]string{
+			"auto_renew_enabled":      boolStringBilibili(enabled),
+			"auto_renew_interval_sec": fmt.Sprintf("%d", int(interval/time.Second)),
+		}); err != nil {
+			return platform.AutoRenewStatus{}, err
+		}
+	}
+	if enabled {
+		c.StartAutoRefreshDaemon(context.Background())
+	}
+	return c.AutoRenewStatus(), nil
+}
+
+func boolStringBilibili(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }
 
 // ManualRenew executes cookie refresh immediately and returns a human readable result.

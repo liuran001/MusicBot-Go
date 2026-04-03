@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -17,14 +18,25 @@ import (
 
 // Client provides resilient NetEase API calls.
 type Client struct {
-	baseData   RequestData
-	spoofIP    bool
-	retry      *retryablehttp.Client
-	breaker    *gobreaker.CircuitBreaker
-	maxRetries int
-	minBackoff time.Duration
-	maxBackoff time.Duration
-	logger     bot.Logger
+	baseData    RequestData
+	spoofIP     bool
+	retry       *retryablehttp.Client
+	breaker     *gobreaker.CircuitBreaker
+	maxRetries  int
+	minBackoff  time.Duration
+	maxBackoff  time.Duration
+	logger      bot.Logger
+	persistFunc func(map[string]string) error
+	autoRenew   neteaseAutoRenewConfig
+	autoRenewMu sync.RWMutex
+}
+
+type neteaseAutoRenewConfig struct {
+	enabled         bool
+	interval        time.Duration
+	started         bool
+	consecutiveFail int
+	lastError       string
 }
 
 var mainlandIPPrefixes = [][2]uint8{
@@ -35,7 +47,11 @@ var mainlandIPPrefixes = [][2]uint8{
 }
 
 // New creates a NetEase client with retry and circuit breaker.
-func New(musicU string, spoofIP bool, logger bot.Logger) *Client {
+func New(musicU string, spoofIP bool, logger bot.Logger, persist ...func(map[string]string) error) *Client {
+	persistFunc := (func(map[string]string) error)(nil)
+	if len(persist) > 0 {
+		persistFunc = persist[0]
+	}
 	client := retryablehttp.NewClient()
 	client.RetryMax = 3
 	client.RetryWaitMin = 200 * time.Millisecond
@@ -66,14 +82,15 @@ func New(musicU string, spoofIP bool, logger bot.Logger) *Client {
 	data.Client = &http.Client{}
 
 	return &Client{
-		baseData:   data,
-		spoofIP:    spoofIP,
-		retry:      client,
-		breaker:    gobreaker.NewCircuitBreaker(settings),
-		maxRetries: client.RetryMax,
-		minBackoff: client.RetryWaitMin,
-		maxBackoff: client.RetryWaitMax,
-		logger:     logger,
+		baseData:    data,
+		spoofIP:     spoofIP,
+		retry:       client,
+		breaker:     gobreaker.NewCircuitBreaker(settings),
+		maxRetries:  client.RetryMax,
+		minBackoff:  client.RetryWaitMin,
+		maxBackoff:  client.RetryWaitMax,
+		logger:      logger,
+		persistFunc: persistFunc,
 	}
 }
 

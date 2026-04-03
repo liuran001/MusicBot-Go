@@ -227,6 +227,22 @@ func (b *BilibiliPlatform) ManualRenew(ctx context.Context) (string, error) {
 	return b.client.ManualRenew(ctx)
 }
 
+func (b *BilibiliPlatform) GetAutoRenewStatus(ctx context.Context) (platform.AutoRenewStatus, error) {
+	_ = ctx
+	if b == nil || b.client == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("bilibili client unavailable")
+	}
+	return b.client.AutoRenewStatus(), nil
+}
+
+func (b *BilibiliPlatform) SetAutoRenew(ctx context.Context, enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
+	_ = ctx
+	if b == nil || b.client == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("bilibili client unavailable")
+	}
+	return b.client.SetAutoRenew(enabled, interval)
+}
+
 func (b *BilibiliPlatform) Capabilities() platform.Capabilities {
 	return platform.Capabilities{
 		Download:    true,

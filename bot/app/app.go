@@ -356,6 +356,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
 	adminCommands = append(adminCommands,
+		handler.BuildAccountLoginCommand(a.PlatformManager),
 		handler.BuildCheckCookieCommand(a.PlatformManager),
 		handler.BuildCookieRenewCommand(a.PlatformManager),
 	)
@@ -446,7 +447,7 @@ func (a *App) Start(ctx context.Context) error {
 		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Recognize:                recognizeHandler,
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
-		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
 		Settings:                 settingsHandler,
 		RmCache:                  &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
 		Callback:                 &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},

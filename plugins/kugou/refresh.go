@@ -2,31 +2,36 @@ package kugou
 
 import (
 	"context"
+	"sync"
 	"time"
 )
+
+var kugouAutoRefreshStart sync.Once
 
 func (m *ConceptSessionManager) StartAutoRefreshDaemon(ctx context.Context) {
 	if m == nil || !m.Enabled() {
 		return
 	}
-	state := m.Snapshot()
-	if !state.AutoRefresh {
-		return
-	}
-	interval := state.AutoRefreshPeriod
-	if interval <= 0 {
-		interval = 6 * time.Hour
-	}
-	ticker := time.NewTicker(interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				_, _ = m.ManualRenew(ctx)
+	kugouAutoRefreshStart.Do(func() {
+		go func() {
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
+				}
+				state := m.Snapshot()
+				interval := state.AutoRefreshPeriod
+				if interval <= 0 {
+					interval = 6 * time.Hour
+				}
+				if state.AutoRefresh {
+					_, _ = m.ManualRenew(ctx)
+				}
+				timer.Reset(interval)
 			}
-		}
-	}()
+		}()
+	})
 }

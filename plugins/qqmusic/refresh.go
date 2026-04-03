@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
 const (
@@ -57,14 +59,65 @@ func (c *Client) persistCookie(cookie string) {
 }
 
 func (c *Client) startAutoRenew() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.autoRenew.started {
+		c.mu.Unlock()
+		return
+	}
+	c.autoRenew.started = true
+	c.mu.Unlock()
 	go c.autoRenewLoop()
+}
+
+func (c *Client) AutoRenewStatus() platform.AutoRenewStatus {
+	if c == nil {
+		return platform.AutoRenewStatus{}
+	}
+	interval := c.autoRenew.interval
+	if interval <= 0 {
+		interval = defaultAutoRenewInterval
+	}
+	return platform.AutoRenewStatus{Enabled: c.autoRenew.enabled, Interval: interval}
+}
+
+func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
+	if c == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("qqmusic client unavailable")
+	}
+	if interval <= 0 {
+		interval = defaultAutoRenewInterval
+	}
+	c.autoRenew.enabled = enabled
+	c.autoRenew.interval = interval
+	if c.persistFunc != nil {
+		if err := c.persistFunc(map[string]string{
+			"auto_renew_enabled":      boolStringQQ(enabled),
+			"auto_renew_interval_sec": fmt.Sprintf("%d", int(interval/time.Second)),
+		}); err != nil {
+			return platform.AutoRenewStatus{}, err
+		}
+	}
+	if enabled {
+		c.startAutoRenew()
+	}
+	return c.AutoRenewStatus(), nil
+}
+
+func boolStringQQ(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }
 
 func (c *Client) autoRenewLoop() {
 	for {
 		cookie := c.Cookie()
-		if !isCookieValid(cookie) {
-			c.logInfo("qqmusic: auto-renew skipped, cookie invalid")
+		if reason, ok := autoRenewSkipReason(cookie); !ok {
+			c.logInfo(fmt.Sprintf("qqmusic: auto-renew skipped, %s", reason))
 			time.Sleep(defaultRetryInterval)
 			continue
 		}
@@ -252,6 +305,17 @@ func nextCheckDelay(cookie string, interval time.Duration) time.Duration {
 		return 5 * time.Minute
 	}
 	return wait
+}
+
+func autoRenewSkipReason(cookie string) (string, bool) {
+	createTime := cookieCreateTime(cookie)
+	if createTime <= 0 {
+		return "missing or invalid musickey create time", false
+	}
+	if time.Now().Unix() >= createTime+int64(cookieMaxAge.Seconds()) {
+		return "musickey create time expired", false
+	}
+	return "", true
 }
 
 func cookieCreateTime(cookie string) int64 {
