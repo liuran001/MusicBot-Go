@@ -357,8 +357,6 @@ func (a *App) Start(ctx context.Context) error {
 	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
 	adminCommands = append(adminCommands,
 		handler.BuildAccountLoginCommand(a.PlatformManager),
-		handler.BuildCheckCookieCommand(a.PlatformManager),
-		handler.BuildCookieRenewCommand(a.PlatformManager),
 	)
 	if whitelist.Enabled() {
 		adminCommands = append(adminCommands, BuildWhitelistCommand(whitelist))
@@ -412,6 +410,7 @@ func (a *App) Start(ctx context.Context) error {
 		EnableQueueObservability: a.Config.GetBool("BotDebug"),
 		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
+	musicHandler.Artist = &handler.ArtistHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Logger: a.Logger}
 	musicHandler.StartWorker(ctx)
 
 	settingsHandler := &handler.SettingsHandler{
@@ -443,6 +442,7 @@ func (a *App) Start(ctx context.Context) error {
 	router := &handler.Router{
 		Music:                    musicHandler,
 		Playlist:                 playlistHandler,
+		Artist:                   musicHandler.Artist,
 		Search:                   searchHandler,
 		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Recognize:                recognizeHandler,

@@ -57,3 +57,12 @@ func TestFormatPlaylistInfoUsesCollectionLabelAndQuote(t *testing.T) {
 		t.Fatalf("expected expandable marker in playlist info, got %q", info)
 	}
 }
+
+func TestShouldLazyLoadCollectionIncludesSoda(t *testing.T) {
+	if !shouldLazyLoadCollection("soda") {
+		t.Fatal("shouldLazyLoadCollection() should lazy load soda")
+	}
+	if shouldLazyLoadCollection("bilibili") {
+		t.Fatal("shouldLazyLoadCollection() should not lazy load bilibili")
+	}
+}

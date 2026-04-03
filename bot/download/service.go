@@ -149,9 +149,11 @@ func (s *DownloadService) Download(ctx context.Context, info *platform.DownloadI
 	if destPath == "" {
 		return 0, errors.New("dest path missing")
 	}
-
 	if err := os.MkdirAll(filepath.Dir(destPath), os.ModePerm); err != nil {
 		return 0, err
+	}
+	if info.Downloader != nil {
+		return info.Downloader(ctx, info, destPath, progress)
 	}
 
 	key := strings.TrimSpace(rewriteNeteaseHost(info.URL))

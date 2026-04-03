@@ -18,7 +18,7 @@ import (
 func BuildAccountLoginCommand(manager platform.Manager) admincmd.Command {
 	return admincmd.Command{
 		Name:        "login",
-		Description: "统一账号登录（qr/cookie/renew/auto/help）",
+		Description: "统一账号登录（qr/cookie/check/renew/auto/help）",
 		RichHandler: func(ctx context.Context, args string) (*admincmd.Response, error) {
 			return handleAccountLogin(ctx, manager, args)
 		},
@@ -32,6 +32,12 @@ func BuildAccountLoginCommand(manager platform.Manager) admincmd.Command {
 func handleAccountLogin(ctx context.Context, manager platform.Manager, args string) (*admincmd.Response, error) {
 	if manager == nil {
 		return &admincmd.Response{Text: "平台管理器未初始化"}, nil
+	}
+	if text, ok, err := handleGlobalLoginActions(ctx, manager, args); ok {
+		if err != nil {
+			return nil, err
+		}
+		return &admincmd.Response{Text: text}, nil
 	}
 	platformName, action, payload, usage := parseLoginArgs(manager, args)
 	if usage != "" {
@@ -54,6 +60,15 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 		}
 		if strings.TrimSpace(message) == "" {
 			message = fmt.Sprintf("%s 当前不支持续期", platformDisplayName(manager, platformName))
+		}
+		return &admincmd.Response{Text: message}, nil
+	case "check":
+		message, err := checkCookieForPlatform(ctx, manager, platformName)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(message) == "" {
+			message = fmt.Sprintf("%s 当前不支持账号检查", platformDisplayName(manager, platformName))
 		}
 		return &admincmd.Response{Text: message}, nil
 	case "auto":
@@ -143,6 +158,30 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 	}
 }
 
+func handleGlobalLoginActions(ctx context.Context, manager platform.Manager, args string) (string, bool, error) {
+	fields := strings.Fields(strings.TrimSpace(args))
+	if len(fields) == 0 {
+		return "", false, nil
+	}
+	action := strings.ToLower(strings.TrimSpace(fields[0]))
+	switch action {
+	case "check":
+		if len(fields) == 1 {
+			text, err := checkCookies(ctx, manager, "")
+			return text, true, err
+		}
+	case "renew":
+		if len(fields) == 1 {
+			text, err := renewCookies(ctx, manager, "")
+			return text, true, err
+		}
+	case "auto":
+		text, err := handleAllPlatformAutoRenew(ctx, manager, strings.Join(fields[1:], " "))
+		return text, true, err
+	}
+	return "", false, nil
+}
+
 func handleAccountLoginCallback(ctx context.Context, manager platform.Manager, b *telego.Bot, query *telego.CallbackQuery) error {
 	if query == nil || manager == nil {
 		return nil
@@ -181,6 +220,13 @@ func parseLoginArgs(manager platform.Manager, args string) (platformName, action
 	if len(fields) == 0 {
 		return "", "", "", ""
 	}
+	if len(fields) == 1 {
+		single := strings.ToLower(strings.TrimSpace(fields[0]))
+		switch single {
+		case "help", "-h", "--help":
+			return "", "", "", ""
+		}
+	}
 	platformName = resolveCookiePlatform(manager, fields[0])
 	if platformName == "" {
 		return "", "", "", fmt.Sprintf("未识别的平台: %s\n\n%s", fields[0], loginUsage(manager))
@@ -213,8 +259,12 @@ func loginUsage(manager platform.Manager) string {
 		"/login <platform> help - 查看平台支持的登录方式\n" +
 		"/login <platform> qr - 扫码登录（如支持）\n" +
 		"/login <platform> cookie <cookie> - 导入 Cookie\n" +
+		"/login <platform> check - 检查平台账号状态\n" +
+		"/login check - 检查所有平台账号状态\n" +
 		"/login <platform> renew - 手动续期\n" +
+		"/login renew - 批量续期所有平台\n" +
 		"/login <platform> auto on|off|status [intervalSec] - 自动续期\n" +
+		"/login auto on|off|status [intervalSec] - 批量设置所有平台自动续期\n" +
 		"支持平台: " + joined
 }
 
@@ -241,8 +291,8 @@ func buildPlatformLoginHelp(manager platform.Manager, plat platform.Platform) st
 	if len(methods) == 0 {
 		methods = append(methods, "status")
 	}
-	return fmt.Sprintf("%s 支持: %s\n\n示例:\n/login %s qr\n/login %s cookie <cookie>\n/login %s renew\n/login %s auto on 21600\n/login %s auto status\n/status",
-		platformDisplayName(manager, name), strings.Join(methods, ", "), name, name, name, name, name)
+	return fmt.Sprintf("%s 支持: %s\n\n示例:\n/login %s qr\n/login %s cookie <cookie>\n/login %s check\n/login check\n/login %s renew\n/login renew\n/login %s auto on 21600\n/login %s auto status\n/login auto status\n/status",
+		platformDisplayName(manager, name), strings.Join(methods, ", "), name, name, name, name, name, name)
 }
 
 func handlePlatformAutoRenew(ctx context.Context, manager platform.Manager, platformName, payload string) (string, error) {
@@ -284,6 +334,74 @@ func handlePlatformAutoRenew(ctx context.Context, manager platform.Manager, plat
 	default:
 		return fmt.Sprintf("用法: /login %s auto on [intervalSec]\n/login %s auto off\n/login %s auto status", platformName, platformName, platformName), nil
 	}
+}
+
+func handleAllPlatformAutoRenew(ctx context.Context, manager platform.Manager, payload string) (string, error) {
+	if manager == nil {
+		return "平台管理器未初始化", nil
+	}
+	fields := strings.Fields(strings.TrimSpace(payload))
+	if len(fields) == 0 {
+		fields = []string{"status"}
+	}
+	sub := strings.ToLower(strings.TrimSpace(fields[0]))
+	platforms := manager.List()
+	if len(platforms) == 0 {
+		return "没有可用的平台", nil
+	}
+	sort.Strings(platforms)
+	lines := make([]string, 0, len(platforms)+1)
+	failures := 0
+	for _, name := range platforms {
+		plat := manager.Get(name)
+		autoRenewer, ok := plat.(platform.AutoRenewer)
+		if !ok {
+			continue
+		}
+		switch sub {
+		case "status":
+			status, err := autoRenewer.GetAutoRenewStatus(ctx)
+			if err != nil {
+				failures++
+				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+				continue
+			}
+			lines = append(lines, formatAutoRenewStatus(manager, name, status))
+		case "on":
+			interval := time.Duration(0)
+			if len(fields) >= 2 {
+				sec, err := parsePositiveSeconds(fields[1])
+				if err != nil {
+					return "", err
+				}
+				interval = time.Duration(sec) * time.Second
+			}
+			status, err := autoRenewer.SetAutoRenew(ctx, true, interval)
+			if err != nil {
+				failures++
+				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("✅ %s: 自动续期已开启，间隔 %d 秒", platformDisplayName(manager, name), int(status.Interval/time.Second)))
+		case "off":
+			status, err := autoRenewer.SetAutoRenew(ctx, false, 0)
+			if err != nil {
+				failures++
+				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("✅ %s: 自动续期已关闭（当前间隔 %d 秒）", platformDisplayName(manager, name), int(status.Interval/time.Second)))
+		default:
+			return "用法: /login auto on [intervalSec]\n/login auto off\n/login auto status", nil
+		}
+	}
+	if len(lines) == 0 {
+		return "没有支持自动续期的平台", nil
+	}
+	if failures > 0 {
+		lines = append(lines, fmt.Sprintf("\n完成（失败 %d 个平台）", failures))
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func formatAutoRenewStatus(manager platform.Manager, platformName string, status platform.AutoRenewStatus) string {

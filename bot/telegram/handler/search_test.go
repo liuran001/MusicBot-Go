@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +51,76 @@ func TestSearchHandler_searchLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSearchHandler_buildPlatformSwitchRowsWrapAtThree(t *testing.T) {
+	handler := &SearchHandler{PlatformManager: platform.NewManager()}
+	platforms := []platform.Platform{
+		stubSearchPlatform{name: "netease", displayName: "网易云音乐", emoji: "🎵"},
+		stubSearchPlatform{name: "qqmusic", displayName: "QQ音乐", emoji: "🎶"},
+		stubSearchPlatform{name: "kugou", displayName: "酷狗音乐", emoji: "🐶"},
+		stubSearchPlatform{name: "bilibili", displayName: "哔哩哔哩", emoji: "📺"},
+		stubSearchPlatform{name: "soda", displayName: "汽水音乐", emoji: "🥤"},
+	}
+	for _, plat := range platforms {
+		handler.PlatformManager.Register(plat)
+	}
+
+	rows := handler.buildPlatformSwitchRows("soda", 12345, 100, nil)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+	if len(rows[0]) != 3 {
+		t.Fatalf("expected first row has 3 buttons, got %d", len(rows[0]))
+	}
+	if len(rows[1]) != 2 {
+		t.Fatalf("expected second row has 2 buttons, got %d", len(rows[1]))
+	}
+	if rows[1][1].Text != "✅ 汽水" {
+		t.Fatalf("expected current platform short name in wrapped row, got %q", rows[1][1].Text)
+	}
+}
+
+type stubSearchPlatform struct {
+	name        string
+	displayName string
+	emoji       string
+}
+
+func (s stubSearchPlatform) Name() string              { return s.name }
+func (s stubSearchPlatform) SupportsDownload() bool    { return false }
+func (s stubSearchPlatform) SupportsSearch() bool      { return true }
+func (s stubSearchPlatform) SupportsLyrics() bool      { return false }
+func (s stubSearchPlatform) SupportsRecognition() bool { return false }
+func (s stubSearchPlatform) Capabilities() platform.Capabilities {
+	return platform.Capabilities{Search: true}
+}
+func (s stubSearchPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+	return nil, nil
+}
+func (s stubSearchPlatform) GetTrack(ctx context.Context, trackID string) (*platform.Track, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) GetLyrics(ctx context.Context, trackID string) (*platform.Lyrics, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*platform.Track, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) GetArtist(ctx context.Context, artistID string) (*platform.Artist, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) GetAlbum(ctx context.Context, albumID string) (*platform.Album, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s stubSearchPlatform) Metadata() platform.Meta {
+	return platform.Meta{Name: s.name, DisplayName: s.displayName, Emoji: s.emoji}
 }
 
 func TestParseSearchCallbackData(t *testing.T) {

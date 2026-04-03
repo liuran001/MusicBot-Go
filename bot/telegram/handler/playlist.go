@@ -421,7 +421,7 @@ func (h *PlaylistHandler) shouldLazyLoad(platformName string) bool {
 
 func shouldLazyLoadCollection(platformName string) bool {
 	name := strings.TrimSpace(platformName)
-	return name == "qqmusic" || name == "netease"
+	return name == "qqmusic" || name == "netease" || name == "soda"
 }
 
 func collectionChunkForPage(page, pageSize int) (int, int) {

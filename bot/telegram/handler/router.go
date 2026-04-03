@@ -14,6 +14,7 @@ import (
 type Router struct {
 	Music                    MessageHandler
 	Playlist                 MessageHandler
+	Artist                   MessageHandler
 	Search                   MessageHandler
 	Lyric                    MessageHandler
 	Recognize                MessageHandler
@@ -134,6 +135,34 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return false
 		}
 		platformName, _, matched := matchPlaylistURL(ctx, r.PlatformManager, baseText)
+		if !matched {
+			return false
+		}
+		if update.Message.Chat.Type != "private" {
+			return isAllowedGroupURLPlatform(platformName, r.PlatformManager)
+		}
+		return true
+	})
+
+	bh.Handle(r.wrapMessage(r.Artist), func(ctx context.Context, update telego.Update) bool {
+		if update.Message == nil || update.Message.Text == "" {
+			return false
+		}
+		if isCommandMessage(update.Message) {
+			return false
+		}
+		if update.Message.Voice != nil {
+			return false
+		}
+		if r.PlatformManager == nil {
+			return false
+		}
+		text := update.Message.Text
+		baseText, _, _ := parseTrailingOptions(text, r.PlatformManager)
+		if strings.TrimSpace(baseText) == "" {
+			return false
+		}
+		platformName, _, matched := matchArtistURL(ctx, r.PlatformManager, baseText)
 		if !matched {
 			return false
 		}

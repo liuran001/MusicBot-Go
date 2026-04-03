@@ -749,8 +749,8 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 		rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
 
-	if switchRow := h.buildPlatformSwitchRow(platformName, requesterID, messageID, unavailable); len(switchRow) > 0 {
-		rows = append(rows, switchRow)
+	if switchRows := h.buildPlatformSwitchRows(platformName, requesterID, messageID, unavailable); len(switchRows) > 0 {
+		rows = append(rows, switchRows...)
 	}
 
 	if strings.TrimSpace(filterLabel) != "" {
@@ -781,19 +781,19 @@ func (h *SearchHandler) buildNoResultsPage(state *searchState, messageID int) (s
 		text = fmt.Sprintf("未找到结果（%s）", platformDisplayName(h.PlatformManager, state.platform))
 	}
 	rows := make([][]telego.InlineKeyboardButton, 0, 2)
-	if switchRow := h.buildPlatformSwitchRow(state.platform, state.requesterID, messageID, state.unavailable); len(switchRow) > 0 {
-		rows = append(rows, switchRow)
+	if switchRows := h.buildPlatformSwitchRows(state.platform, state.requesterID, messageID, state.unavailable); len(switchRows) > 0 {
+		rows = append(rows, switchRows...)
 	}
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
 	return text, &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func (h *SearchHandler) buildPlatformSwitchRow(currentPlatform string, requesterID int64, messageID int, unavailable map[string]bool) []telego.InlineKeyboardButton {
+func (h *SearchHandler) buildPlatformSwitchRows(currentPlatform string, requesterID int64, messageID int, unavailable map[string]bool) [][]telego.InlineKeyboardButton {
 	platforms := h.searchPlatforms()
 	if len(platforms) <= 1 {
 		return nil
 	}
-	row := make([]telego.InlineKeyboardButton, 0, len(platforms))
+	buttons := make([]telego.InlineKeyboardButton, 0, len(platforms))
 	for _, name := range platforms {
 		if unavailable != nil && unavailable[name] {
 			continue
@@ -802,15 +802,24 @@ func (h *SearchHandler) buildPlatformSwitchRow(currentPlatform string, requester
 		if name == currentPlatform {
 			text = "✅ " + platformSearchShortName(name)
 		}
-		row = append(row, telego.InlineKeyboardButton{
+		buttons = append(buttons, telego.InlineKeyboardButton{
 			Text:         text,
 			CallbackData: fmt.Sprintf("search %d platform %s %d", messageID, name, requesterID),
 		})
 	}
-	if len(row) <= 1 {
+	if len(buttons) <= 1 {
 		return nil
 	}
-	return row
+	const maxButtonsPerRow = 3
+	rows := make([][]telego.InlineKeyboardButton, 0, (len(buttons)+maxButtonsPerRow-1)/maxButtonsPerRow)
+	for start := 0; start < len(buttons); start += maxButtonsPerRow {
+		end := start + maxButtonsPerRow
+		if end > len(buttons) {
+			end = len(buttons)
+		}
+		rows = append(rows, buttons[start:end])
+	}
+	return rows
 }
 
 func platformSearchShortName(name string) string {
@@ -823,6 +832,8 @@ func platformSearchShortName(name string) string {
 		return "Q音"
 	case "kugou":
 		return "酷狗"
+	case "soda":
+		return "汽水"
 	default:
 		trimmed := strings.TrimSpace(name)
 		if trimmed == "" {

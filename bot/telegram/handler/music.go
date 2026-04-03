@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -28,9 +29,16 @@ import (
 type musicDispatchContextKey string
 
 const forceNonSilentKey musicDispatchContextKey = "force_non_silent"
+const disableFallbackKey musicDispatchContextKey = "disable_fallback"
 
 const downloadProgressMinInterval = 2 * time.Second
 const defaultMusicProcessTimeout = 15 * time.Minute
+
+var (
+	probeExtractedAudioCodec = detectExtractedAudioCodec
+	extractEmbeddedFLAC      = extractEmbeddedFLACFromContainer
+	remuxExtractedAudioM4A   = remuxExtractedAudioToM4A
+)
 
 func withForceNonSilent(ctx context.Context) context.Context {
 	if ctx == nil {
@@ -44,6 +52,21 @@ func isForceNonSilent(ctx context.Context) bool {
 		return false
 	}
 	value, ok := ctx.Value(forceNonSilentKey).(bool)
+	return ok && value
+}
+
+func withDisableFallback(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, disableFallbackKey, true)
+}
+
+func isFallbackDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, ok := ctx.Value(disableFallbackKey).(bool)
 	return ok && value
 }
 
@@ -68,6 +91,7 @@ type MusicHandler struct {
 	AdminIDs           map[int64]struct{}
 	AdminCommands      []admincmd.Command
 	Playlist           *PlaylistHandler
+	Artist             *ArtistHandler
 	RecognizeEnabled   bool
 	Limiter            chan struct{}
 	UploadLimiter      chan struct{}
@@ -275,6 +299,11 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 		if h.Playlist != nil {
 			if h.Playlist.TryHandle(ctx, b, update) {
+				return
+			}
+		}
+		if h.Artist != nil {
+			if h.Artist.TryHandle(ctx, b, update) {
 				return
 			}
 		}
@@ -814,7 +843,7 @@ func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *teleg
 		if err == nil {
 			return track, plat, platformName, trackID, nil
 		}
-		if errors.Is(err, platform.ErrNotFound) {
+		if errors.Is(err, platform.ErrNotFound) && !isFallbackDisabled(ctx) {
 			if nextPlatform, nextTrackID, ok := h.resolveFallbackTrack(ctx, message, platformName, trackID); ok {
 				platformName = nextPlatform
 				trackID = nextTrackID
@@ -1390,6 +1419,16 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 		_ = os.Remove(filePath)
 		return "", "", cleanupList, err
 	}
+	if h != nil && h.Logger != nil {
+		h.Logger.Debug("prepared media downloaded", "initial_path", filePath, "initial_ext", songInfo.FileExt, "info_format", info.Format)
+	}
+	filePath, songInfo.FileExt = normalizeExtractedAudioPath(filePath, songInfo.FileExt)
+	if songInfo.FileExt != "" {
+		info.Format = songInfo.FileExt
+	}
+	if h != nil && h.Logger != nil {
+		h.Logger.Debug("prepared media normalized", "normalized_path", filePath, "normalized_ext", songInfo.FileExt, "info_format", info.Format)
+	}
 
 	// Derive bitrate from actual file size + duration (from track or FLAC streaminfo)
 	deriveBitrateFromFile(filePath, songInfo)
@@ -1420,6 +1459,9 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	finalPath := filepath.Join(finalDir, fileName)
 	if err := os.Rename(filePath, finalPath); err == nil {
 		filePath = finalPath
+	}
+	if h != nil && h.Logger != nil {
+		h.Logger.Debug("prepared media final path", "final_path", filePath, "final_ext", songInfo.FileExt)
 	}
 	cleanupList = append(cleanupList, filePath, finalDir)
 
@@ -2858,4 +2900,108 @@ func getFFprobeBitrate(filePath string) int {
 	}
 
 	return int(bitrateFloat)
+}
+
+func normalizeExtractedAudioPath(filePath, currentExt string) (string, string) {
+	trimmedPath := strings.TrimSpace(filePath)
+	if trimmedPath == "" {
+		return filePath, currentExt
+	}
+	if _, err := os.Stat(trimmedPath); err != nil {
+		base := strings.TrimSuffix(trimmedPath, filepath.Ext(trimmedPath))
+		for _, candidateExt := range []string{".flac", ".m4a", ".mp4", ".mp3"} {
+			candidate := base + candidateExt
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				return candidate, strings.TrimPrefix(candidateExt, ".")
+			}
+		}
+		return filePath, currentExt
+	}
+	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(trimmedPath)))
+	if ext == "" {
+		ext = strings.ToLower(strings.TrimSpace(currentExt))
+	}
+	if ext != ".mp4" && ext != ".m4a" {
+		if ext != "" {
+			return filePath, strings.TrimPrefix(ext, ".")
+		}
+		return filePath, currentExt
+	}
+	codec, err := probeExtractedAudioCodec(trimmedPath)
+	if err != nil {
+		return filePath, currentExt
+	}
+	codec = strings.ToLower(strings.TrimSpace(codec))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	switch codec {
+	case "flac":
+		newPath := strings.TrimSuffix(trimmedPath, filepath.Ext(trimmedPath)) + ".flac"
+		if newPath != trimmedPath {
+			if err := extractEmbeddedFLAC(ctx, trimmedPath, newPath); err == nil {
+				return newPath, "flac"
+			}
+		}
+		return trimmedPath, "flac"
+	case "aac", "alac":
+		newPath := strings.TrimSuffix(trimmedPath, filepath.Ext(trimmedPath)) + ".m4a"
+		if newPath != trimmedPath {
+			if err := remuxExtractedAudioM4A(ctx, trimmedPath, newPath); err == nil {
+				return newPath, "m4a"
+			}
+		}
+		return trimmedPath, "m4a"
+	default:
+		if ext != "" {
+			return trimmedPath, strings.TrimPrefix(ext, ".")
+		}
+		return trimmedPath, currentExt
+	}
+}
+
+func detectExtractedAudioCodec(filePath string) (string, error) {
+	ffprobePath, err := exec.LookPath("ffprobe")
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command(ffprobePath,
+		"-v", "error",
+		"-select_streams", "a:0",
+		"-show_entries", "stream=codec_name",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		filePath,
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func extractEmbeddedFLACFromContainer(ctx context.Context, srcPath, dstPath string) error {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-y", "-i", srcPath, "-vn", "-c:a", "copy", dstPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("extract flac from audio container: %w, stderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func remuxExtractedAudioToM4A(ctx context.Context, srcPath, dstPath string) error {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-y", "-i", srcPath, "-vn", "-c:a", "copy", dstPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("remux extracted audio container: %w, stderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }

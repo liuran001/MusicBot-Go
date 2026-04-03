@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 
@@ -28,14 +29,26 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	isPrivate := strings.EqualFold(strings.TrimSpace(string(message.Chat.Type)), "private")
 	isAdmin := message.From != nil && isBotAdmin(h.AdminIDs, message.From.ID)
 	showDetailedAccount := isPrivate && isAdmin
+	useHTML := showDetailedAccount
 
 	fromCount, _ := h.Repo.Count(ctx)
 	chatCount, _ := h.Repo.CountByChatID(ctx, message.Chat.ID)
 	chatInfo := mdV2Replacer.Replace(message.Chat.Title)
+	if useHTML {
+		chatInfo = html.EscapeString(message.Chat.Title)
+	}
 	if message.Chat.Username != "" && message.Chat.Title == "" {
-		chatInfo = fmt.Sprintf("[%s](tg://user?id=%d)", mdV2Replacer.Replace(message.Chat.Username), message.Chat.ID)
+		if useHTML {
+			chatInfo = fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, message.Chat.ID, html.EscapeString(message.Chat.Username))
+		} else {
+			chatInfo = fmt.Sprintf("[%s](tg://user?id=%d)", mdV2Replacer.Replace(message.Chat.Username), message.Chat.ID)
+		}
 	} else if message.Chat.Username != "" {
-		chatInfo = fmt.Sprintf("[%s](https://t.me/%s)", mdV2Replacer.Replace(message.Chat.Title), message.Chat.Username)
+		if useHTML {
+			chatInfo = fmt.Sprintf(`<a href="https://t.me/%s">%s</a>`, html.EscapeString(message.Chat.Username), html.EscapeString(message.Chat.Title))
+		} else {
+			chatInfo = fmt.Sprintf("[%s](https://t.me/%s)", mdV2Replacer.Replace(message.Chat.Title), message.Chat.Username)
+		}
 	}
 
 	userID := int64(0)
@@ -47,6 +60,11 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 
 	sendCount, _ := h.Repo.GetSendCount(ctx)
 	msgText := fmt.Sprintf(statusInfo, fromCount, chatInfo, chatCount, userID, userID, userCount, sendCount)
+	parseMode := telego.ModeMarkdownV2
+	if useHTML {
+		msgText = buildStatusInfoHTML(fromCount, chatInfo, chatCount, userID, userCount, sendCount)
+		parseMode = telego.ModeHTML
+	}
 
 	if platformCounts, err := h.Repo.CountByPlatform(ctx); err == nil && len(platformCounts) > 0 {
 		platformNames := make([]string, 0, len(platformCounts))
@@ -57,6 +75,9 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		lines := make([]string, 0, len(platformNames))
 		for _, name := range platformNames {
 			display := mdV2Replacer.Replace(platformDisplayName(h.PlatformManager, name))
+			if useHTML {
+				display = html.EscapeString(platformDisplayName(h.PlatformManager, name))
+			}
 			lines = append(lines, fmt.Sprintf("%s: %d", display, platformCounts[name]))
 		}
 		msgText += "\n缓存平台统计:\n" + strings.Join(lines, "\n")
@@ -70,6 +91,13 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 				displayNames = append(displayNames, platformDisplayName(h.PlatformManager, name))
 			}
 			platformsEscaped := mdV2Replacer.Replace(strings.Join(displayNames, ", "))
+			if useHTML {
+				escaped := make([]string, 0, len(displayNames))
+				for _, name := range displayNames {
+					escaped = append(escaped, html.EscapeString(name))
+				}
+				platformsEscaped = strings.Join(escaped, ", ")
+			}
 			msgText += fmt.Sprintf("\n\n📱 可用平台: %s", platformsEscaped)
 		}
 	}
@@ -81,7 +109,7 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	params := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		Text:            msgText,
-		ParseMode:       telego.ModeMarkdownV2,
+		ParseMode:       parseMode,
 		ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 	}
 	if h.RateLimiter != nil {
@@ -125,7 +153,7 @@ func (h *StatusHandler) buildAccountStatusSection(ctx context.Context, detailed 
 		return ""
 	}
 	if detailed {
-		return "\n\n🔐 账号状态:\n" + mdV2Replacer.Replace(renderDetailedAccountStatuses(statuses))
+		return "\n\n🔐 账号状态:\n" + renderDetailedAccountStatusesHTML(statuses)
 	}
 	return "\n\n🔐 账号状态:\n" + mdV2Replacer.Replace(renderSafeAccountStatuses(statuses))
 }
@@ -185,6 +213,103 @@ func renderDetailedAccountStatuses(statuses []platform.AccountStatus) string {
 		blocks = append(blocks, strings.Join(lines, "\n"))
 	}
 	return strings.Join(blocks, "\n\n")
+}
+
+func renderDetailedAccountStatusesMarkdown(statuses []platform.AccountStatus) string {
+	blocks := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		emoji := "❌"
+		if status.LoggedIn {
+			emoji = "✅"
+		}
+		header := emoji + " " + mdV2Replacer.Replace(strings.TrimSpace(status.DisplayName))
+		detailLines := make([]string, 0, 8)
+		if status.LoggedIn {
+			detailLines = append(detailLines, "状态: 已登录")
+		} else {
+			detailLines = append(detailLines, "状态: 未登录")
+		}
+		if strings.TrimSpace(status.Nickname) != "" {
+			detailLines = append(detailLines, "昵称: "+strings.TrimSpace(status.Nickname))
+		}
+		if strings.TrimSpace(status.UserID) != "" {
+			detailLines = append(detailLines, "用户ID: "+maskStatusUserID(status.UserID))
+		}
+		if strings.TrimSpace(status.AuthMode) != "" {
+			detailLines = append(detailLines, "登录方式: "+strings.TrimSpace(status.AuthMode))
+		}
+		if len(status.SupportedLogins) > 0 {
+			detailLines = append(detailLines, "支持: "+strings.Join(status.SupportedLogins, ", "))
+		}
+		if strings.TrimSpace(status.SessionSource) != "" {
+			detailLines = append(detailLines, "来源: "+strings.TrimSpace(status.SessionSource))
+		}
+		if strings.TrimSpace(status.Summary) != "" {
+			for _, line := range strings.Split(strings.TrimSpace(status.Summary), "\n") {
+				trimmed := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				if trimmed == "" || isRedundantStatusLine(detailLines, trimmed) {
+					continue
+				}
+				detailLines = append(detailLines, trimmed)
+			}
+		}
+		quoted := make([]string, 0, len(detailLines))
+		for _, line := range detailLines {
+			quoted = append(quoted, "> "+mdV2Replacer.Replace(strings.TrimSpace(line)))
+		}
+		blocks = append(blocks, header+"\n"+strings.Join(quoted, "\n"))
+	}
+	return strings.Join(blocks, "\n")
+}
+
+func renderDetailedAccountStatusesHTML(statuses []platform.AccountStatus) string {
+	blocks := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		emoji := "❌"
+		stateText := "未登录"
+		if status.LoggedIn {
+			emoji = "✅"
+			stateText = "已登录"
+		}
+		header := fmt.Sprintf("%s %s（%s）", emoji, html.EscapeString(strings.TrimSpace(status.DisplayName)), html.EscapeString(stateText))
+		detailLines := make([]string, 0, 8)
+		detailLines = append(detailLines, "状态: "+stateText)
+		if strings.TrimSpace(status.Nickname) != "" {
+			detailLines = append(detailLines, "昵称: "+strings.TrimSpace(status.Nickname))
+		}
+		if strings.TrimSpace(status.UserID) != "" {
+			detailLines = append(detailLines, "用户ID: "+maskStatusUserID(status.UserID))
+		}
+		if strings.TrimSpace(status.AuthMode) != "" {
+			detailLines = append(detailLines, "登录方式: "+strings.TrimSpace(status.AuthMode))
+		}
+		if len(status.SupportedLogins) > 0 {
+			detailLines = append(detailLines, "支持: "+strings.Join(status.SupportedLogins, ", "))
+		}
+		if strings.TrimSpace(status.SessionSource) != "" {
+			detailLines = append(detailLines, "来源: "+strings.TrimSpace(status.SessionSource))
+		}
+		if strings.TrimSpace(status.Summary) != "" {
+			for _, line := range strings.Split(strings.TrimSpace(status.Summary), "\n") {
+				trimmed := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				if trimmed == "" || isRedundantStatusLine(detailLines, trimmed) {
+					continue
+				}
+				detailLines = append(detailLines, trimmed)
+			}
+		}
+		escapedLines := make([]string, 0, len(detailLines))
+		for _, line := range detailLines {
+			escapedLines = append(escapedLines, html.EscapeString(strings.TrimSpace(line)))
+		}
+		blocks = append(blocks, header+"\n<blockquote expandable>"+strings.Join(escapedLines, "\n")+"</blockquote>")
+	}
+	return strings.Join(blocks, "\n")
+}
+
+func buildStatusInfoHTML(fromCount int64, chatInfo string, chatCount int64, userID int64, userCount int64, sendCount int64) string {
+	return fmt.Sprintf("<b>[统计信息]</b>\n数据库中总缓存歌曲数量: %d\n当前对话 %s 缓存歌曲数量: %d\n当前用户 <a href=\"tg://user?id=%d\">%d</a> 缓存歌曲数量: %d\n成功发送音乐次数: %d\n",
+		fromCount, chatInfo, chatCount, userID, userID, userCount, sendCount)
 }
 
 func classifySafeStatus(status platform.AccountStatus) string {

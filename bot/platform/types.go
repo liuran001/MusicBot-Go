@@ -1,6 +1,9 @@
 package platform
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Track represents a music track from any platform.
 // This is the unified representation that maps from platform-specific types.
@@ -76,6 +79,9 @@ type Album struct {
 
 	// CoverURL is the URL to the album's cover art.
 	CoverURL string `json:"cover_url,omitempty"`
+
+	// Description is the album description/introduction.
+	Description string `json:"description,omitempty"`
 
 	// ReleaseDate is the album release date (if available).
 	ReleaseDate *time.Time `json:"release_date,omitempty"`
@@ -175,7 +181,10 @@ type DownloadInfo struct {
 	MD5           string            `json:"md5,omitempty"`
 	Quality       Quality           `json:"quality"`
 	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
+	Downloader    DownloadFunc      `json:"-"`
 }
+
+type DownloadFunc func(ctx context.Context, info *DownloadInfo, destPath string, progress func(written, total int64)) (written int64, err error)
 
 type Capabilities struct {
 	Download    bool `json:"download"`

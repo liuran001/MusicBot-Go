@@ -99,6 +99,15 @@ type PlaylistURLMatcher interface {
 	MatchPlaylistURL(url string) (playlistID string, matched bool)
 }
 
+// ArtistURLMatcher defines the interface for platforms that support artist URL matching.
+// This allows extracting artist IDs from platform-specific artist profile URLs.
+type ArtistURLMatcher interface {
+	// MatchArtistURL attempts to extract an artist ID from a platform-specific URL.
+	// Returns the artist ID and true if the URL matches this platform's artist format,
+	// or an empty string and false if the URL is not recognized.
+	MatchArtistURL(url string) (artistID string, matched bool)
+}
+
 // ShortLinkProvider defines the interface for platforms that declare short-link hosts
 // which should be resolved before URL matching.
 type ShortLinkProvider interface {

@@ -616,7 +616,7 @@ func (b *BilibiliPlatform) getVideoDownloadInfo(ctx context.Context, trackID str
 		URL:           selectedURL,
 		CandidateURLs: candidates,
 		Size:          0, // the API does not always return raw sizes unless accessed with HEAD
-		Format:        "m4a",
+		Format:        bilibiliAudioFormat(selectedStream),
 		Quality:       resolvedQuality,
 		ExpiresAt:     &expiresAt,
 		Headers: map[string]string{
@@ -626,6 +626,23 @@ func (b *BilibiliPlatform) getVideoDownloadInfo(ctx context.Context, trackID str
 	}
 
 	return info, nil
+}
+
+func bilibiliAudioFormat(stream *VideoDashAudio) string {
+	if stream == nil {
+		return "m4a"
+	}
+	codec := strings.ToLower(strings.TrimSpace(stream.Codecs))
+	if strings.Contains(codec, "flac") {
+		return "flac"
+	}
+	if strings.Contains(codec, "mp4a") || strings.Contains(codec, "aac") {
+		return "m4a"
+	}
+	if strings.Contains(codec, "eac3") || strings.Contains(codec, "ec-3") {
+		return "m4a"
+	}
+	return "m4a"
 }
 
 func normalizeStreamURLPriority(raw string) string {

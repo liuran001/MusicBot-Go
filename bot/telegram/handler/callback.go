@@ -132,7 +132,7 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		if h.Music != nil {
-			h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, trackID, qualityOverride)
+			h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
 		}
 		if h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil) {
 			deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
@@ -160,7 +160,7 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 	autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
 	if h.Music != nil {
-		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, trackID, qualityOverride)
+		h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
 	}
 	if autoDelete {
 		deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
@@ -585,7 +585,7 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 		}
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
 		autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
-		h.Music.dispatch(withForceNonSilent(ctx), b, msgToUse, platformName, selectedTrackID, qualityValue)
+		h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, selectedTrackID, qualityValue)
 		if autoDelete {
 			deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
 			if h.RateLimiter != nil {

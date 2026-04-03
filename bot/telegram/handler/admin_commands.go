@@ -160,7 +160,9 @@ func (h *AdminCommandHandler) sendResponse(ctx context.Context, b *telego.Bot, c
 			ChatID:          telego.ChatID{ID: chatID},
 			Text:            text,
 			ReplyParameters: &telego.ReplyParameters{MessageID: replyID},
-			ReplyMarkup:     resp.ReplyMarkup,
+		}
+		if resp.ReplyMarkup != nil {
+			params.ReplyMarkup = resp.ReplyMarkup
 		}
 		sent, _ := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
 		if resp.AfterSend != nil && sent != nil {
@@ -171,7 +173,9 @@ func (h *AdminCommandHandler) sendResponse(ctx context.Context, b *telego.Bot, c
 			ChatID:          telego.ChatID{ID: chatID},
 			Text:            text,
 			ReplyParameters: &telego.ReplyParameters{MessageID: replyID},
-			ReplyMarkup:     resp.ReplyMarkup,
+		}
+		if resp.ReplyMarkup != nil {
+			params.ReplyMarkup = resp.ReplyMarkup
 		}
 		sent, _ := b.SendMessage(ctx, params)
 		if resp.AfterSend != nil && sent != nil {

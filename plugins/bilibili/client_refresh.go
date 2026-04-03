@@ -68,13 +68,6 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 	if c == nil {
 		return
 	}
-	c.cookieMutex.Lock()
-	if c.autoRenew.started {
-		c.cookieMutex.Unlock()
-		return
-	}
-	c.autoRenew.started = true
-	c.cookieMutex.Unlock()
 	if c.cookie == "" {
 		return
 	}
@@ -84,6 +77,13 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 		}
 		return
 	}
+	c.cookieMutex.Lock()
+	if c.autoRenew.started {
+		c.cookieMutex.Unlock()
+		return
+	}
+	c.autoRenew.started = true
+	c.cookieMutex.Unlock()
 
 	interval := c.autoRenew.interval
 	if interval <= 0 {
@@ -144,6 +144,11 @@ func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.Au
 	}
 	if enabled {
 		c.StartAutoRefreshDaemon(context.Background())
+		go func() {
+			if err := c.CheckAndRefreshCookie(context.Background()); err != nil && c.logger != nil {
+				c.logger.Debug("bilibili: immediate auto refresh check failed", "err", err)
+			}
+		}()
 	}
 	return c.AutoRenewStatus(), nil
 }

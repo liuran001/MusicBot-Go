@@ -28,9 +28,15 @@ func extractPlatformTrack(ctx context.Context, message *telego.Message, manager 
 	}
 
 	text := message.Text
+	if looksLikeCookiePayload(text) {
+		return "", "", false
+	}
 	args := commandArguments(message.Text)
 	if args != "" {
 		text = args
+		if looksLikeCookiePayload(text) {
+			return "", "", false
+		}
 		fields := strings.Fields(args)
 		if len(fields) >= 3 {
 			if _, err := platform.ParseQuality(fields[2]); err == nil {
@@ -65,6 +71,39 @@ func extractPlatformTrack(ctx context.Context, message *telego.Message, manager 
 	}
 
 	return "", "", false
+}
+
+func looksLikeCookiePayload(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	if strings.Count(text, "=") >= 3 && strings.Count(text, ";") >= 2 {
+		return true
+	}
+	markers := []string{
+		"sessionid=",
+		"sessionid_ss=",
+		"sid_tt=",
+		"sid_guard=",
+		"uid_tt=",
+		"passport_csrf_token=",
+		"cookie=",
+		"ttwid=",
+		"odin_tt=",
+		"uifid=",
+	}
+	matched := 0
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			matched++
+		}
+		if matched >= 2 {
+			return true
+		}
+	}
+	return false
 }
 
 func extractQualityOverride(message *telego.Message, manager platform.Manager) string {
@@ -364,7 +403,11 @@ func shouldResolveHost(host string, manager platform.Manager) bool {
 			continue
 		}
 		for _, domain := range provider.ShortLinkHosts() {
-			if strings.EqualFold(strings.TrimSpace(domain), host) {
+			domain = strings.ToLower(strings.TrimSpace(domain))
+			if domain == "" {
+				continue
+			}
+			if host == domain || strings.HasSuffix(host, "."+domain) {
 				return true
 			}
 		}
@@ -387,6 +430,28 @@ func matchPlaylistURL(ctx context.Context, manager platform.Manager, text string
 		}
 		if matcher, ok := plat.(platform.PlaylistURLMatcher); ok {
 			if id, ok := matcher.MatchPlaylistURL(urlStr); ok {
+				return name, id, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func matchArtistURL(ctx context.Context, manager platform.Manager, text string) (platformName, artistID string, matched bool) {
+	if manager == nil {
+		return "", "", false
+	}
+	urlStr := extractResolvedURL(ctx, manager, text)
+	if urlStr == "" {
+		return "", "", false
+	}
+	for _, name := range manager.List() {
+		plat := manager.Get(name)
+		if plat == nil {
+			continue
+		}
+		if matcher, ok := plat.(platform.ArtistURLMatcher); ok {
+			if id, ok := matcher.MatchArtistURL(urlStr); ok {
 				return name, id, true
 			}
 		}

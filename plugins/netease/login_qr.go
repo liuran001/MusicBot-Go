@@ -463,6 +463,13 @@ func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.Au
 			return platform.AutoRenewStatus{}, err
 		}
 	}
+	if enabled {
+		go func() {
+			if _, err := c.ManualRenew(context.Background()); err != nil && c.logger != nil {
+				c.logger.Debug("netease: immediate auto-renew failed", "err", err)
+			}
+		}()
+	}
 	return c.AutoRenewStatus(), nil
 }
 

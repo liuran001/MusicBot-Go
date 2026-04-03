@@ -356,6 +356,11 @@ func (m *ConceptSessionManager) SetAutoRefresh(enabled bool, interval time.Durat
 	if err := m.Persist(); err != nil {
 		return platform.AutoRenewStatus{}, err
 	}
+	if enabled {
+		go func() {
+			_, _ = m.ManualRenew(context.Background())
+		}()
+	}
 	return platform.AutoRenewStatus{Enabled: enabled, Interval: interval}, nil
 }
 

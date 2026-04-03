@@ -97,7 +97,11 @@ func (c *Config) PersistPluginConfig(plugin string, pairs map[string]string) err
 		return err
 	}
 
-	if err := upsertINIWithoutReformat(path, "plugins."+plugin, pairs); err != nil {
+	persistPairs := make(map[string]string, len(pairs))
+	for key, value := range pairs {
+		persistPairs[key] = formatINIPersistValue(value)
+	}
+	if err := upsertINIWithoutReformat(path, "plugins."+plugin, persistPairs); err != nil {
 		return err
 	}
 
@@ -115,6 +119,23 @@ func (c *Config) PersistPluginConfig(plugin string, pairs map[string]string) err
 	}
 
 	return nil
+}
+
+func formatINIPersistValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return value
+	}
+	if (strings.HasPrefix(trimmed, "`") && strings.HasSuffix(trimmed, "`")) ||
+		(strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`)) ||
+		(strings.HasPrefix(trimmed, "'") && strings.HasSuffix(trimmed, "'")) {
+		return value
+	}
+	if strings.ContainsAny(value, ";\n\r") {
+		escaped := strings.ReplaceAll(value, "`", "'")
+		return "`" + escaped + "`"
+	}
+	return value
 }
 
 func ensureParentDir(path string) error {

@@ -7,6 +7,7 @@
 - QQ音乐
 - 哔哩哔哩
 - 酷狗音乐
+- 汽水音乐
 
 > **原始项目**: [XiaoMengXinX/Music163bot-Go](https://github.com/XiaoMengXinX/Music163bot-Go)  
 > 本项目基于原项目进行了重构，采用插件化架构以支持多音乐平台。
@@ -175,6 +176,13 @@ music_u = YOUR_MUSIC_U_COOKIE
 cookie = YOUR_QQMUSIC_COOKIE
 ```
 
+#### 汽水音乐
+```ini
+[plugins.soda]
+enabled = true
+cookie = `YOUR_SODA_COOKIE`
+```
+
 #### 酷狗音乐
 ```ini
 [plugins.kugou]
@@ -183,12 +191,19 @@ concept_auto_refresh_enabled = false
 concept_auto_refresh_interval_sec = 21600
 ```
 
-酷狗下载当前统一走概念版会话链路，管理员可使用：
+管理员命令：
 
-- `/kgqr` 生成二维码登录
-- `/kgstatus` 查看概念版会话状态
-- `/kgsign` 尝试签到 / 领 VIP
-- `/renewck kugou` 手动续期
+- `/reload` 重载配置与插件
+- `/rmcache <平台>|all` 清除缓存
+- `/login kugou qr` 扫码登录酷狗概念版
+- `/login <platform> cookie <cookie>` 导入平台 Cookie
+- `/login <platform> check` 检查单个平台账号状态
+- `/login check` 批量检查所有平台账号状态
+- `/login <platform> renew` 单平台手动续期
+- `/login renew` 批量续期所有平台
+- `/login <platform> auto on|off|status [intervalSec]` 单平台自动续期开关
+- `/login auto on|off|status [intervalSec]` 批量自动续期开关
+- `/status` 查看机器人统计与账号状态
 
 详见 `config_example.ini` 获取完整配置选项。
 
