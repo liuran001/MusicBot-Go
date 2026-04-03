@@ -2,6 +2,7 @@ package qqmusic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -62,6 +63,22 @@ func (q *QQMusicPlatform) ManualRenew(ctx context.Context) (string, error) {
 	return "续期成功", nil
 }
 
+func (q *QQMusicPlatform) GetAutoRenewStatus(ctx context.Context) (platform.AutoRenewStatus, error) {
+	_ = ctx
+	if q == nil || q.client == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("qqmusic client unavailable")
+	}
+	return q.client.AutoRenewStatus(), nil
+}
+
+func (q *QQMusicPlatform) SetAutoRenew(ctx context.Context, enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
+	_ = ctx
+	if q == nil || q.client == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("qqmusic client unavailable")
+	}
+	return q.client.SetAutoRenew(enabled, interval)
+}
+
 func (q *QQMusicPlatform) Capabilities() platform.Capabilities {
 	return platform.Capabilities{
 		Download:    true,
@@ -104,26 +121,32 @@ func (q *QQMusicPlatform) GetDownloadInfo(ctx context.Context, trackID string, q
 	}
 	profiles := qualityProfiles()
 	qualityIdx := qualityIndex(quality)
-	selected := selectQualityProfile(profiles, qualityIdx, fileInfo)
-	if selected == nil {
+	candidates := fallbackQualityProfiles(profiles, qualityIdx, fileInfo)
+	if len(candidates) == 0 {
 		return nil, platform.NewUnavailableError("qqmusic", "track", trackID)
 	}
 	uin, authst := parseQQAuth(q.client.Cookie())
-	purl, err := q.client.GetVKey(ctx, songMid, mediaMid, selected.Code, selected.Ext, uin, authst)
-	if err != nil {
-		return nil, err
+	for _, selected := range candidates {
+		purl, err := q.client.GetVKey(ctx, songMid, mediaMid, selected.Code, selected.Ext, uin, authst)
+		if err != nil {
+			if errors.Is(err, platform.ErrUnavailable) {
+				continue
+			}
+			return nil, err
+		}
+		url := buildStreamURL(purl)
+		if strings.TrimSpace(url) == "" {
+			continue
+		}
+		return &platform.DownloadInfo{
+			URL:     url,
+			Size:    selected.Size(fileInfo),
+			Format:  selected.Ext,
+			Bitrate: selected.Quality.Bitrate(),
+			Quality: selected.Quality,
+		}, nil
 	}
-	url := buildStreamURL(purl)
-	if strings.TrimSpace(url) == "" {
-		return nil, platform.NewUnavailableError("qqmusic", "track", trackID)
-	}
-	return &platform.DownloadInfo{
-		URL:     url,
-		Size:    selected.Size(fileInfo),
-		Format:  selected.Ext,
-		Bitrate: selected.Quality.Bitrate(),
-		Quality: selected.Quality,
-	}, nil
+	return nil, platform.NewUnavailableError("qqmusic", "track", trackID)
 }
 
 func (q *QQMusicPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
@@ -400,32 +423,70 @@ func qualityIndex(q platform.Quality) int {
 }
 
 func selectQualityProfile(profiles []qualityProfile, start int, info *qqFileInfo) *qualityProfile {
+	candidates := fallbackQualityProfiles(profiles, start, info)
+	if len(candidates) == 0 {
+		return nil
+	}
+	selected := candidates[0]
+	return &selected
+}
+
+func fallbackQualityProfiles(profiles []qualityProfile, start int, info *qqFileInfo) []qualityProfile {
 	if len(profiles) == 0 {
 		return nil
 	}
 	if start < 0 || start >= len(profiles) {
 		start = len(profiles) - 1
 	}
+	candidates := make([]qualityProfile, 0, len(profiles)-start)
 	for i := start; i < len(profiles); i++ {
 		if profiles[i].Size(info) > 0 {
-			return &profiles[i]
+			candidates = append(candidates, profiles[i])
 		}
 	}
-	for i := start - 1; i >= 0; i-- {
-		if profiles[i].Size(info) > 0 {
-			return &profiles[i]
-		}
-	}
-	return nil
+	return candidates
 }
 
 func parseQQAuth(cookie string) (string, string) {
-	uin := parseCookieValue(cookie, "uin")
-	authst := parseCookieValue(cookie, "qqmusic_key")
-	if uin == "" {
-		uin = "0"
-	}
+	uin, authst, _ := parseQQAuthDetails(cookie)
 	return uin, authst
+}
+
+func parseQQAuthDetails(cookie string) (string, string, string) {
+	uin := normalizeQQUIN(parseCookieValue(cookie, "uin"))
+	authst := parseCookieValue(cookie, "qqmusic_key")
+	source := "qqmusic_key"
+	if authst == "" {
+		authst = parseCookieValue(cookie, "qm_keyst")
+		if authst != "" {
+			source = "qm_keyst"
+		}
+	}
+	if authst == "" {
+		source = ""
+	}
+	return uin, authst, source
+}
+
+func normalizeQQUIN(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "0"
+	}
+	trimmed = strings.TrimLeft(trimmed, "oO")
+	if trimmed == "" {
+		return "0"
+	}
+	for _, r := range trimmed {
+		if r < '0' || r > '9' {
+			return "0"
+		}
+	}
+	trimmed = strings.TrimLeft(trimmed, "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
 }
 
 func parseCookieValue(cookie, key string) string {

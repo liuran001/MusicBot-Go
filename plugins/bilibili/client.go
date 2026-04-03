@@ -36,6 +36,7 @@ type Client struct {
 type bilibiliAutoRenewConfig struct {
 	enabled  bool
 	interval time.Duration
+	started  bool
 }
 
 // AudioSongInfoRequestParams for requesting Audio song info

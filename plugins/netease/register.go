@@ -1,7 +1,9 @@
 package netease
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
@@ -28,7 +30,18 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 			spoofIP = cfg.GetPluginBool("netease", "spoof_ip")
 		}
 	}
-	client := New(musicU, spoofIP, logger)
+	autoRenewEnabled := cfg.GetPluginBool("netease", "auto_renew_enabled")
+	intervalSec := cfg.GetPluginInt("netease", "auto_renew_interval_sec")
+	var interval time.Duration
+	if intervalSec > 0 {
+		interval = time.Duration(intervalSec) * time.Second
+	}
+	persist := func(pairs map[string]string) error {
+		return cfg.PersistPluginConfig("netease", pairs)
+	}
+	client := New(musicU, spoofIP, logger, persist)
+	client.ConfigureAutoRenew(autoRenewEnabled, interval)
+	client.StartAutoRenewDaemon(context.Background())
 	if err := client.SetAPIProxy(cfg.ResolveAPIProxyConfig("netease")); err != nil {
 		return nil, err
 	}

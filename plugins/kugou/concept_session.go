@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/guohuiyuan/music-lib/model"
+	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
 type ConceptSessionManager struct {
@@ -339,6 +340,23 @@ func (m *ConceptSessionManager) SignIn(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("concept session unavailable")
 	}
 	return m.client.SignIn(ctx)
+}
+
+func (m *ConceptSessionManager) SetAutoRefresh(enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
+	if m == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("concept session unavailable")
+	}
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	m.Update(func(current *conceptSession) {
+		current.AutoRefresh = enabled
+		current.AutoRefreshPeriod = interval
+	})
+	if err := m.Persist(); err != nil {
+		return platform.AutoRenewStatus{}, err
+	}
+	return platform.AutoRenewStatus{Enabled: enabled, Interval: interval}, nil
 }
 
 func (m *ConceptSessionManager) FetchSongURL(ctx context.Context, song *model.Song, plan kugouDownloadPlan) (*conceptSongURLResponse, error) {

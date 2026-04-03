@@ -115,6 +115,27 @@ func (k *KugouPlatform) ManualRenew(ctx context.Context) (string, error) {
 	return k.client.ManualRenew(ctx)
 }
 
+func (k *KugouPlatform) GetAutoRenewStatus(ctx context.Context) (platform.AutoRenewStatus, error) {
+	_ = ctx
+	if k == nil || k.client == nil || k.client.Concept() == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("kugou concept session unavailable")
+	}
+	state := k.client.Concept().Snapshot()
+	interval := state.AutoRefreshPeriod
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	return platform.AutoRenewStatus{Enabled: state.AutoRefresh, Interval: interval}, nil
+}
+
+func (k *KugouPlatform) SetAutoRenew(ctx context.Context, enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
+	_ = ctx
+	if k == nil || k.client == nil || k.client.Concept() == nil {
+		return platform.AutoRenewStatus{}, fmt.Errorf("kugou concept session unavailable")
+	}
+	return k.client.Concept().SetAutoRefresh(enabled, interval)
+}
+
 func (k *KugouPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	if k == nil || k.client == nil {
 		return nil, platform.NewUnavailableError("kugou", "track", trackID)
