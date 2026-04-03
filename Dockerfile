@@ -3,10 +3,6 @@
 ARG GO_VERSION=1.26
 ARG NODE_VERSION=20
 ARG BOOKWORM_TAG=bookworm
-ARG FFMPEG_AMD64_ASSET=ffmpeg-master-latest-linux64-gpl-shared.tar.xz
-ARG FFMPEG_ARM64_ASSET=ffmpeg-master-latest-linuxarm64-gpl-shared.tar.xz
-ARG FFMPEG_AMD64_SHA256=204d05ca9bf655dec5970a1176f17413b532d2aa3294bf14b4fc70ab0981008d
-ARG FFMPEG_ARM64_SHA256=375520f90433e9bef2ac2958b2c9afddd1ff65e25ce905f729d9dfdde7e20eb7
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-${BOOKWORM_TAG} AS builder
 WORKDIR /src
@@ -74,28 +70,6 @@ RUN npm install --omit=dev \
 
 FROM node:${NODE_VERSION}-${BOOKWORM_TAG}-slim AS node-runtime
 
-FROM --platform=$TARGETPLATFORM debian:${BOOKWORM_TAG}-slim AS ffmpeg-runtime
-ARG FFMPEG_AMD64_ASSET
-ARG FFMPEG_ARM64_ASSET
-ARG FFMPEG_AMD64_SHA256
-ARG FFMPEG_ARM64_SHA256
-ARG TARGETARCH
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /tmp
-RUN case "$TARGETARCH" in \
-      amd64) asset="$FFMPEG_AMD64_ASSET"; sha="$FFMPEG_AMD64_SHA256" ;; \
-      arm64) asset="$FFMPEG_ARM64_ASSET"; sha="$FFMPEG_ARM64_SHA256" ;; \
-      *) echo "unsupported arch: $TARGETARCH"; exit 1 ;; \
-    esac \
-    && curl -L --fail --retry 3 -o ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/${asset}" \
-    && echo "${sha}  ffmpeg.tar.xz" | sha256sum -c - \
-    && mkdir out \
-    && tar -xJf ffmpeg.tar.xz -C out --strip-components=1 \
-    && test -x out/bin/ffmpeg \
-    && test -x out/bin/ffprobe
-
 FROM debian:${BOOKWORM_TAG}-slim AS runtime-base
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
@@ -129,12 +103,12 @@ LABEL org.opencontainers.image.description="MusicBot-Go lightweight image withou
 
 FROM runtime-base AS full
 LABEL org.opencontainers.image.description="MusicBot-Go full image with /recognize dependencies"
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=node-runtime /usr/local/include/node /usr/local/include/node
 COPY --from=node-runtime /usr/local/share /usr/local/share
-COPY --from=ffmpeg-runtime /tmp/out/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=ffmpeg-runtime /tmp/out/bin/ffprobe /usr/local/bin/ffprobe
-COPY --from=ffmpeg-runtime /tmp/out/lib /usr/local/lib
 COPY plugins/netease/recognize /app/plugins/netease/recognize
 COPY --from=npm-builder /build/node_modules /app/plugins/netease/recognize/service/node_modules

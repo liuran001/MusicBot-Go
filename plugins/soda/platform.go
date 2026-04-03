@@ -279,7 +279,7 @@ func (s *SodaPlatform) ShortLinkHosts() []string {
 func (s *SodaPlatform) CheckCookie(ctx context.Context) (platform.CookieCheckResult, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	info, err := s.GetDownloadInfo(checkCtx, "6899944093849612319", platform.QualityHigh)
+	info, err := s.GetDownloadInfo(checkCtx, "6696534426169378817", platform.QualityHigh)
 	if err != nil {
 		return platform.CookieCheckResult{OK: false, Message: fmt.Sprintf("汽水下载链路校验失败: %v", err)}, nil
 	}

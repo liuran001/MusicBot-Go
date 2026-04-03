@@ -800,7 +800,7 @@ func (h *SearchHandler) buildPlatformSwitchRows(currentPlatform string, requeste
 		}
 		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), platformDisplayName(h.PlatformManager, name))
 		if name == currentPlatform {
-			text = "✅ " + platformSearchShortName(name)
+			text = "✅ " + text
 		}
 		buttons = append(buttons, telego.InlineKeyboardButton{
 			Text:         text,
@@ -820,27 +820,6 @@ func (h *SearchHandler) buildPlatformSwitchRows(currentPlatform string, requeste
 		rows = append(rows, buttons[start:end])
 	}
 	return rows
-}
-
-func platformSearchShortName(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "bilibili":
-		return "B站"
-	case "netease":
-		return "网易云"
-	case "qqmusic":
-		return "Q音"
-	case "kugou":
-		return "酷狗"
-	case "soda":
-		return "汽水"
-	default:
-		trimmed := strings.TrimSpace(name)
-		if trimmed == "" {
-			return "平台"
-		}
-		return trimmed
-	}
 }
 
 func (h *SearchHandler) searchPlatforms() []string {

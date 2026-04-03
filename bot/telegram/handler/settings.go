@@ -171,7 +171,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 
 			text := displayName
 			if p == platformValue {
-				text = "✅ " + platformSearchShortName(p)
+				text = "✅ " + displayName
 			}
 
 			platformButtons = append(platformButtons, telego.InlineKeyboardButton{
