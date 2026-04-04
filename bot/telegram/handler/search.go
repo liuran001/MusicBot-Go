@@ -798,9 +798,10 @@ func (h *SearchHandler) buildPlatformSwitchRows(currentPlatform string, requeste
 		if unavailable != nil && unavailable[name] {
 			continue
 		}
-		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), platformDisplayName(h.PlatformManager, name))
+		displayName := platformDisplayName(h.PlatformManager, name)
+		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), displayName)
 		if name == currentPlatform {
-			text = "✅ " + text
+			text = "✅ " + displayName
 		}
 		buttons = append(buttons, telego.InlineKeyboardButton{
 			Text:         text,
