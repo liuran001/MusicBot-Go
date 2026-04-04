@@ -545,7 +545,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		userID = message.From.ID
 	}
 
-	quality := h.resolveRequestedQuality(ctx, message, userID, qualityOverride)
+	quality := h.resolveRequestedQuality(ctx, message, userID, platformName, qualityOverride)
 
 	qualityStr := quality.String()
 	if handled, err := h.tryPresentDirectEpisodes(ctx, b, message, platformName, trackID, qualityStr); handled {
@@ -707,10 +707,14 @@ func (h *MusicHandler) tryPresentDirectEpisodes(ctx context.Context, b *telego.B
 	return true, nil
 }
 
-func (h *MusicHandler) resolveRequestedQuality(ctx context.Context, message *telego.Message, userID int64, qualityOverride string) platform.Quality {
+func (h *MusicHandler) resolveRequestedQuality(ctx context.Context, message *telego.Message, userID int64, platformName, qualityOverride string) platform.Quality {
 	quality := platform.QualityHigh
+	scopeType := botpkg.PluginScopeUser
+	scopeID := userID
 	if h != nil && h.Repo != nil {
 		if message != nil && message.Chat.Type != "private" {
+			scopeType = botpkg.PluginScopeGroup
+			scopeID = message.Chat.ID
 			if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
 				if q, err := platform.ParseQuality(settings.DefaultQuality); err == nil {
 					quality = q
@@ -728,6 +732,10 @@ func (h *MusicHandler) resolveRequestedQuality(ctx context.Context, message *tel
 		if q, err := platform.ParseQuality(qualityOverride); err == nil {
 			quality = q
 		}
+		return quality
+	}
+	if q, err := platform.ParseQuality(resolvePlatformQualityValue(ctx, h.Repo, scopeType, scopeID, platformName, quality.String(), false)); err == nil {
+		quality = q
 	}
 	return quality
 }
@@ -2259,7 +2267,7 @@ func parseInlineSearchStartParameter(value string) (query string, ok bool) {
 	return query, true
 }
 
-func (h *MusicHandler) resolveInlineQualityValue(ctx context.Context, userID int64, qualityOverride string) string {
+func (h *MusicHandler) resolveInlineQualityValue(ctx context.Context, userID int64, platformName, qualityOverride string) string {
 	qualityValue := strings.TrimSpace(qualityOverride)
 	if qualityValue == "" {
 		qualityValue = strings.TrimSpace(h.DefaultQuality)
@@ -2272,14 +2280,14 @@ func (h *MusicHandler) resolveInlineQualityValue(ctx context.Context, userID int
 			qualityValue = strings.TrimSpace(settings.DefaultQuality)
 		}
 	}
-	return qualityValue
+	return resolvePlatformQualityValue(ctx, h.Repo, botpkg.PluginScopeUser, userID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
 }
 
 func (h *MusicHandler) findInlineCachedSong(ctx context.Context, userID int64, platformName, trackID, qualityOverride string) (*botpkg.SongInfo, string, error) {
 	if h == nil || h.Repo == nil {
 		return nil, "", nil
 	}
-	qualityValue := h.resolveInlineQualityValue(ctx, userID, qualityOverride)
+	qualityValue := h.resolveInlineQualityValue(ctx, userID, platformName, qualityOverride)
 	cached, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, qualityValue)
 	if err != nil {
 		return nil, qualityValue, err
@@ -2302,7 +2310,7 @@ func (h *MusicHandler) prepareInlineSong(
 	if h == nil {
 		return nil, errors.New("music handler not configured")
 	}
-	qualityValue := h.resolveInlineQualityValue(ctx, userID, qualityOverride)
+	qualityValue := h.resolveInlineQualityValue(ctx, userID, platformName, qualityOverride)
 
 	findCached := func() (*botpkg.SongInfo, error) {
 		if h.Repo == nil {

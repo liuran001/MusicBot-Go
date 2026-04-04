@@ -279,6 +279,22 @@ func TestSearchHandler_resolveDefaultQuality_NilRepo(t *testing.T) {
 	}
 }
 
+func TestResolvePlatformQualityValue_KugouDefaultHiResDowngrades(t *testing.T) {
+	repo := newStubRepo()
+	got := resolvePlatformQualityValue(context.Background(), repo, botpkg.PluginScopeUser, 12345, "kugou", "hires", false)
+	if got != "lossless" {
+		t.Fatalf("resolvePlatformQualityValue() = %q, want %q", got, "lossless")
+	}
+}
+
+func TestResolvePlatformQualityValue_KugouExplicitHiResNotDowngraded(t *testing.T) {
+	repo := newStubRepo()
+	got := resolvePlatformQualityValue(context.Background(), repo, botpkg.PluginScopeUser, 12345, "kugou", "hires", true)
+	if got != "hires" {
+		t.Fatalf("resolvePlatformQualityValue() = %q, want %q", got, "hires")
+	}
+}
+
 func TestSearchHandler_buildSearchPage_Basic(t *testing.T) {
 	handler := &SearchHandler{}
 

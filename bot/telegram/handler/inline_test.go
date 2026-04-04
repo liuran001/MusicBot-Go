@@ -227,6 +227,39 @@ func TestInlineSearchHandler_resolveDefaultQuality_NilRepo(t *testing.T) {
 	}
 }
 
+func TestBuildInlineSendCallbackData_PreservesQualityViaToken(t *testing.T) {
+	trackID := strings.Repeat("a", 40)
+	data := buildInlineSendCallbackData("kugou", trackID, "lossless", 12345)
+	if data == "" {
+		t.Fatal("callback data should not be empty")
+	}
+	parsed, ok := parseInlineSendCallbackArgs(strings.Fields(data))
+	if !ok {
+		t.Fatalf("parseInlineSendCallbackArgs failed for %q", data)
+	}
+	if parsed.qualityOverride != "lossless" {
+		t.Fatalf("qualityOverride = %q, want %q", parsed.qualityOverride, "lossless")
+	}
+	if parsed.trackID != trackID {
+		t.Fatalf("trackID = %q, want %q", parsed.trackID, trackID)
+	}
+}
+
+func TestInlineSearchFallbackAppliesResolvedPlatformQualityPolicy(t *testing.T) {
+	repo := newStubRepo()
+	qualityValue := "hires"
+	platformName := "netease"
+	resolved := resolvePlatformQualityValue(context.Background(), repo, botpkg.PluginScopeUser, 12345, platformName, qualityValue, false)
+	if resolved != "hires" {
+		t.Fatalf("resolved quality=%q want=hires", resolved)
+	}
+	platformName = "kugou"
+	resolved = resolvePlatformQualityValue(context.Background(), repo, botpkg.PluginScopeUser, 12345, platformName, qualityValue, false)
+	if resolved != "lossless" {
+		t.Fatalf("resolved quality=%q want=lossless", resolved)
+	}
+}
+
 func TestInlineSearchHandler_findCachedSong_ExactMatch(t *testing.T) {
 	repo := newStubRepo()
 	ctx := context.Background()

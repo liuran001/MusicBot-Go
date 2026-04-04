@@ -190,6 +190,22 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 		h.handleInlineEpisodeCallback(ctx, b, query, args)
 		return
 	}
+	if len(args) >= 3 && strings.TrimSpace(args[1]) == "iet" {
+		h.handleInlineEpisodeCallback(ctx, b, query, args)
+		return
+	}
+	if parsed, ok := parseInlineSendCallbackArgs(args); ok {
+		if parsed.requesterID != 0 && parsed.requesterID != query.From.ID {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+			return
+		}
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackText})
+		if h.tryPresentInlineEpisodePicker(ctx, b, query, parsed.platformName, parsed.trackID, parsed.qualityOverride, query.From.ID) {
+			return
+		}
+		h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, parsed.platformName, parsed.trackID, parsed.qualityOverride)
+		return
+	}
 	if len(args) >= 4 && strings.TrimSpace(args[2]) == "random" {
 		requesterID, _ := strconv.ParseInt(strings.TrimSpace(args[len(args)-1]), 10, 64)
 		if requesterID != 0 && requesterID != query.From.ID {
@@ -230,6 +246,34 @@ func (h *CallbackMusicHandler) handleInlineCallback(ctx context.Context, b *tele
 	}
 
 	h.runInlineDownloadFlowGuarded(detachContext(ctx), b, query.InlineMessageID, query.From.ID, query.From.Username, platformName, trackID, qualityOverride)
+}
+
+func parseInlineSendCallbackArgs(args []string) (parsedMusicCallback, bool) {
+	if len(args) >= 3 && strings.TrimSpace(args[1]) == "it" {
+		payload, ok := getInlineCallbackPayload(strings.TrimSpace(args[2]))
+		if !ok {
+			return parsedMusicCallback{}, false
+		}
+		return parsedMusicCallback{
+			platformName:    payload.platformName,
+			trackID:         payload.trackID,
+			qualityOverride: payload.qualityValue,
+			requesterID:     payload.requesterID,
+			ok:              true,
+		}, true
+	}
+	if len(args) < 5 || strings.TrimSpace(args[1]) != "i" {
+		return parsedMusicCallback{}, false
+	}
+	parsed := parsedMusicCallback{platformName: strings.TrimSpace(args[2]), trackID: strings.TrimSpace(args[3]), ok: true}
+	parsed.requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[len(args)-1]), 10, 64)
+	if len(args) >= 6 {
+		parsed.qualityOverride = strings.TrimSpace(args[4])
+	}
+	if parsed.platformName == "" || parsed.trackID == "" {
+		return parsedMusicCallback{}, false
+	}
+	return parsed, true
 }
 
 func (h *CallbackMusicHandler) runInlineDownloadFlowGuarded(ctx context.Context, b *telego.Bot, inlineMessageID string, userID int64, userName, platformName, trackID, qualityOverride string) bool {
@@ -600,6 +644,13 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 }
 
 func parseInlineEpisodeCallbackArgs(args []string) (action, platformName, trackID, qualityValue string, requesterID int64, page int, ok bool) {
+	if len(args) >= 3 && strings.TrimSpace(args[1]) == "iet" {
+		payload, found := getInlineCallbackPayload(strings.TrimSpace(args[2]))
+		if !found {
+			return "", "", "", "", 0, 0, false
+		}
+		return payload.action, payload.platformName, payload.trackID, payload.qualityValue, payload.requesterID, payload.page, true
+	}
 	if len(args) < 7 || strings.TrimSpace(args[1]) != "iep" {
 		return "", "", "", "", 0, 0, false
 	}
