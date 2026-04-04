@@ -86,6 +86,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 	if strings.TrimSpace(qualityOverride) != "" {
 		qualityValue = strings.TrimSpace(qualityOverride)
 	}
+	qualityValue = resolvePlatformQualityValue(ctx, h.Repo, botpkg.PluginScopeUser, query.From.ID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
 		h.inlineEmpty(ctx, b, query)
@@ -366,6 +367,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 
 	tracks, matchedPlatform, err := searchWithFallback(keyWord)
 	platformName = matchedPlatform
+	qualityValue = resolvePlatformQualityValue(ctx, h.Repo, botpkg.PluginScopeUser, query.From.ID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
 
 	if err != nil || len(tracks) == 0 {
 		inlineMsg := &telego.InlineQueryResultArticle{
@@ -389,6 +391,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 			keyWord = fallbackKeyword
 			tracks = fallbackTracks
 			platformName = fallbackMatchedPlatform
+			qualityValue = resolvePlatformQualityValue(ctx, h.Repo, botpkg.PluginScopeUser, query.From.ID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
 			pageCount = (len(tracks)-1)/pageSize + 1
 		}
 	}
@@ -442,6 +445,7 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 	if strings.TrimSpace(qualityOverride) != "" {
 		qualityValue = strings.TrimSpace(qualityOverride)
 	}
+	qualityValue = resolvePlatformQualityValue(ctx, h.Repo, botpkg.PluginScopeUser, query.From.ID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
 	inlineMsgs := make([]telego.InlineQueryResult, 0, 2)
 
 	title := trackID

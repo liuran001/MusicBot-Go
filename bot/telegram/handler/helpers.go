@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -779,9 +780,11 @@ func buildInlineSendCallbackData(platformName, trackID, qualityValue string, req
 	if len(data) <= 64 {
 		return data
 	}
-	data = fmt.Sprintf("music i %s %s %d", platformName, trackID, requesterID)
-	if len(data) <= 64 {
-		return data
+	if token := storeInlineCallbackPayload(inlineCallbackPayload{platformName: platformName, trackID: trackID, qualityValue: qualityValue, requesterID: requesterID}); token != "" {
+		data = fmt.Sprintf("music it %s", token)
+		if len(data) <= 64 {
+			return data
+		}
 	}
 	return ""
 }
@@ -930,11 +933,23 @@ func buildInlineEpisodeCallbackData(action, platformName, trackID, qualityValue 
 	if len(data) <= 64 {
 		return data
 	}
-	data = fmt.Sprintf("music iep %s %s %s %d %d", action, platformName, trackID, requesterID, page)
-	if len(data) <= 64 {
-		return data
+	if token := storeInlineCallbackPayload(inlineCallbackPayload{action: action, platformName: platformName, trackID: trackID, qualityValue: qualityValue, requesterID: requesterID, page: page}); token != "" {
+		data = fmt.Sprintf("music iet %s", token)
+		if len(data) <= 64 {
+			return data
+		}
 	}
 	return ""
+}
+
+type inlineCallbackPayload struct {
+	platformName string
+	trackID      string
+	qualityValue string
+	requesterID  int64
+	action       string
+	page         int
+	storedAt     time.Time
 }
 
 type inlineMessageLockEntry struct {
@@ -951,6 +966,15 @@ var callbackInFlightStore = struct {
 	mu      sync.Mutex
 	entries map[string]time.Time
 }{entries: make(map[string]time.Time)}
+
+var inlineCallbackPayloadStore = struct {
+	mu      sync.Mutex
+	entries map[string]inlineCallbackPayload
+}{entries: make(map[string]inlineCallbackPayload)}
+
+var inlineCallbackTokenCounter uint64
+
+const inlineCallbackPayloadTTL = 30 * time.Minute
 
 func withInlineMessageLock(inlineMessageID string, fn func()) {
 	if fn == nil {
@@ -1019,6 +1043,53 @@ func tryAcquireCallbackInFlight(key string, ttl time.Duration) (release func(), 
 		released = true
 		delete(callbackInFlightStore.entries, key)
 	}, true
+}
+
+func storeInlineCallbackPayload(payload inlineCallbackPayload) string {
+	payload.platformName = strings.TrimSpace(payload.platformName)
+	payload.trackID = strings.TrimSpace(payload.trackID)
+	payload.qualityValue = strings.TrimSpace(payload.qualityValue)
+	payload.action = strings.TrimSpace(strings.ToLower(payload.action))
+	if payload.qualityValue == "" {
+		payload.qualityValue = "hires"
+	}
+	if payload.page <= 0 {
+		payload.page = 1
+	}
+	if payload.platformName == "" || payload.trackID == "" || payload.requesterID == 0 {
+		return ""
+	}
+	payload.storedAt = time.Now()
+	token := strconv.FormatUint(uint64(time.Now().UnixNano()), 36) + strconv.FormatUint(atomic.AddUint64(&inlineCallbackTokenCounter, 1), 36)
+	inlineCallbackPayloadStore.mu.Lock()
+	defer inlineCallbackPayloadStore.mu.Unlock()
+	for key, entry := range inlineCallbackPayloadStore.entries {
+		if payload.storedAt.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
+			delete(inlineCallbackPayloadStore.entries, key)
+		}
+	}
+	inlineCallbackPayloadStore.entries[token] = payload
+	return token
+}
+
+func getInlineCallbackPayload(token string) (inlineCallbackPayload, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return inlineCallbackPayload{}, false
+	}
+	now := time.Now()
+	inlineCallbackPayloadStore.mu.Lock()
+	defer inlineCallbackPayloadStore.mu.Unlock()
+	for key, entry := range inlineCallbackPayloadStore.entries {
+		if now.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
+			delete(inlineCallbackPayloadStore.entries, key)
+		}
+	}
+	payload, ok := inlineCallbackPayloadStore.entries[token]
+	if !ok {
+		return inlineCallbackPayload{}, false
+	}
+	return payload, true
 }
 
 func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {

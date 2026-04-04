@@ -141,6 +141,15 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	if strings.TrimSpace(qualityOverride) != "" {
 		qualityValue = qualityOverride
 	}
+	if strings.TrimSpace(qualityOverride) == "" {
+		scopeType := botpkg.PluginScopeUser
+		scopeID := requesterID
+		if message.Chat.Type != "private" {
+			scopeType = botpkg.PluginScopeGroup
+			scopeID = message.Chat.ID
+		}
+		qualityValue = resolvePlatformQualityValue(ctx, h.Repo, scopeType, scopeID, platformName, qualityValue, false)
+	}
 	platformEmoji := platformEmoji(h.PlatformManager, platformName)
 	displayName := platformDisplayName(h.PlatformManager, platformName)
 	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji, mdV2Replacer.Replace(displayName), collectionLabel)
