@@ -38,6 +38,10 @@ var (
 	sodaExtractLosslessFLAC = extractSodaLosslessFLAC
 	sodaRewriteLosslessFLAC = rewriteSodaLosslessFLAC
 	sodaValidateAudioFile   = validateSodaAudioFile
+	sodaEnsurePlayableFLAC  = ensureSodaPlayableLosslessFLAC
+	sodaProbeAudioCodec     = probeAudioCodec
+	sodaDecryptAudio        = decryptSodaAudio
+	sodaDecryptAudioWithLog = decryptSodaAudioWithLogger
 )
 
 type Client struct {
@@ -106,13 +110,13 @@ type sodaShareArtistPayload struct {
 }
 
 type sodaAlbumMeta struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Intro       string `json:"intro"`
-	Desc        string `json:"desc"`
-	ReleaseDate string `json:"release_date"`
-	CountTracks int    `json:"count_tracks"`
-	TrackCount  int    `json:"track_count"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Intro       string           `json:"intro"`
+	Desc        string           `json:"desc"`
+	ReleaseDate sodaFlexibleDate `json:"release_date"`
+	CountTracks int              `json:"count_tracks"`
+	TrackCount  int              `json:"track_count"`
 	Artists     []struct {
 		Name string `json:"name"`
 		ID   string `json:"id"`
@@ -121,6 +125,34 @@ type sodaAlbumMeta struct {
 		URLs []string `json:"urls"`
 		URI  string   `json:"uri"`
 	} `json:"url_cover"`
+}
+
+type sodaFlexibleDate string
+
+func (d *sodaFlexibleDate) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) || len(data) == 0 {
+		*d = ""
+		return nil
+	}
+	if len(data) >= 2 && data[0] == '"' && data[len(data)-1] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		*d = sodaFlexibleDate(strings.TrimSpace(value))
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+	*d = sodaFlexibleDate(number.String())
+	return nil
+}
+
+func (d sodaFlexibleDate) String() string {
+	return strings.TrimSpace(string(d))
 }
 
 type sodaArtistMeta struct {
@@ -743,9 +775,11 @@ func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info
 	}
 	decrypted := encryptedData
 	playAuth := strings.TrimSpace(info.Headers["X-Soda-Play-Auth"])
+	decryptSucceeded := false
 	if playAuth != "" {
-		if decoded, decodeErr := decryptSodaAudio(encryptedData, playAuth); decodeErr == nil {
+		if decoded, decodeErr := sodaDecryptAudioWithLog(encryptedData, playAuth, c.logger); decodeErr == nil {
 			decrypted = decoded
+			decryptSucceeded = true
 			if c != nil && c.logger != nil {
 				c.logger.Debug("soda: decrypt succeeded", "format", info.Format, "input_size", len(encryptedData), "output_size", len(decrypted))
 			}
@@ -754,9 +788,8 @@ func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(info.Format), "mp4") && looksLikeLosslessAudioContainer(encryptedData) {
-		decrypted = encryptedData
 		if c != nil && c.logger != nil {
-			c.logger.Debug("soda: lossless container detected from raw media", "size", len(encryptedData))
+			c.logger.Debug("soda: lossless container detected from raw media", "size", len(encryptedData), "decrypt_succeeded", decryptSucceeded)
 		}
 	}
 	outputPath := destPath
@@ -764,7 +797,7 @@ func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info
 	if err := os.WriteFile(outputPath, outputData, 0o644); err != nil {
 		return 0, err
 	}
-	codecName, codecErr := probeAudioCodec(outputPath)
+	codecName, codecErr := sodaProbeAudioCodec(outputPath)
 	codecName = strings.ToLower(strings.TrimSpace(codecName))
 	if codecErr == nil {
 		if c != nil && c.logger != nil {
@@ -773,17 +806,33 @@ func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info
 		switch codecName {
 		case "flac":
 			extractedPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".flac"
-			if err := ensureSodaPlayableLosslessFLAC(ctx, outputPath, extractedPath); err == nil {
-				if extracted, readErr := os.ReadFile(extractedPath); readErr == nil && len(extracted) > 0 {
-					_ = os.Remove(outputPath)
-					outputPath = extractedPath
-					outputData = extracted
-					info.Format = "flac"
-					info.Headers["X-Soda-Container"] = "mp4(flac)"
-					if c != nil && c.logger != nil {
-						c.logger.Debug("soda: extracted playable flac from audio container", "path", outputPath, "size", len(outputData))
-					}
+			if err := sodaEnsurePlayableFLAC(ctx, outputPath, extractedPath); err != nil {
+				if c != nil && c.logger != nil {
+					c.logger.Warn("soda: failed to extract playable flac from lossless container", "src_path", outputPath, "dst_path", extractedPath, "error", err)
 				}
+				return 0, fmt.Errorf("soda: extract playable flac from lossless container: %w", err)
+			}
+			extracted, readErr := os.ReadFile(extractedPath)
+			if readErr != nil {
+				if c != nil && c.logger != nil {
+					c.logger.Warn("soda: failed to read extracted flac after successful extraction", "path", extractedPath, "error", readErr)
+				}
+				return 0, fmt.Errorf("soda: read extracted flac: %w", readErr)
+			}
+			if len(extracted) == 0 {
+				err := errors.New("extracted flac is empty")
+				if c != nil && c.logger != nil {
+					c.logger.Warn("soda: extracted flac is empty", "path", extractedPath)
+				}
+				return 0, fmt.Errorf("soda: %w", err)
+			}
+			_ = os.Remove(outputPath)
+			outputPath = extractedPath
+			outputData = extracted
+			info.Format = "flac"
+			info.Headers["X-Soda-Container"] = "mp4(flac)"
+			if c != nil && c.logger != nil {
+				c.logger.Debug("soda: extracted playable flac from audio container", "path", outputPath, "size", len(outputData))
 			}
 		case "aac", "alac":
 			repackedPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".m4a"
@@ -991,7 +1040,7 @@ func convertSodaAlbum(meta sodaAlbumMeta) *platform.Album {
 		artists = append(artists, platform.Artist{ID: artistID, Platform: "soda", Name: artist.Name, URL: buildSodaArtistURL(artistID)})
 	}
 	var releaseDate *time.Time
-	if ts := parseSodaDate(meta.ReleaseDate); !ts.IsZero() {
+	if ts := parseSodaDate(meta.ReleaseDate.String()); !ts.IsZero() {
 		releaseDate = &ts
 	}
 	trackCount := maxInt(meta.TrackCount, meta.CountTracks)
@@ -1006,7 +1055,7 @@ func convertSodaAlbum(meta sodaAlbumMeta) *platform.Album {
 		ReleaseDate: releaseDate,
 		TrackCount:  trackCount,
 		URL:         buildSodaAlbumURL(id),
-		Year:        yearFromSodaDate(meta.ReleaseDate),
+		Year:        yearFromSodaDate(meta.ReleaseDate.String()),
 	}
 }
 
@@ -1032,6 +1081,13 @@ func maxInt(values ...int) int {
 		}
 	}
 	return best
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func convertSodaArtist(meta sodaArtistMeta) (*platform.Artist, int) {
@@ -1118,12 +1174,50 @@ func parseSodaDate(value string) time.Time {
 	if value == "" {
 		return time.Time{}
 	}
+	if ts, ok := parseSodaNumericDate(value); ok {
+		return ts
+	}
 	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006/01/02"} {
 		if parsed, err := time.Parse(layout, value); err == nil {
 			return parsed
 		}
 	}
 	return time.Time{}
+}
+
+func parseSodaNumericDate(value string) (time.Time, bool) {
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return time.Time{}, false
+		}
+	}
+	if len(value) == 8 {
+		if parsed, err := time.Parse("20060102", value); err == nil {
+			return parsed, true
+		}
+	}
+	if l := len(value); l != 10 && l != 13 && l != 16 && l != 19 {
+		return time.Time{}, false
+	}
+	iv, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || iv <= 0 {
+		return time.Time{}, false
+	}
+	var ts time.Time
+	switch {
+	case iv >= 1e18:
+		ts = time.Unix(0, iv)
+	case iv >= 1e15:
+		ts = time.UnixMicro(iv)
+	case iv >= 1e12:
+		ts = time.UnixMilli(iv)
+	default:
+		ts = time.Unix(iv, 0)
+	}
+	return ts.UTC(), true
 }
 
 func yearFromSodaDate(value string) int {
@@ -1205,6 +1299,10 @@ func parseSodaLyricLines(lrc string) []platform.LyricLine {
 }
 
 func decryptSodaAudio(fileData []byte, playAuth string) ([]byte, error) {
+	return decryptSodaAudioWithLogger(fileData, playAuth, nil)
+}
+
+func decryptSodaAudioWithLogger(fileData []byte, playAuth string, logger bot.Logger) ([]byte, error) {
 	hexKey, err := extractSodaKey(playAuth)
 	if err != nil {
 		return nil, err
@@ -1217,38 +1315,30 @@ func decryptSodaAudio(fileData []byte, playAuth string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("moov box not found")
 	}
-	stbl, err := findSodaBox(fileData, "stbl", moov.offset, moov.offset+moov.size)
-	if err != nil {
-		trak, _ := findSodaBox(fileData, "trak", moov.offset+8, moov.offset+moov.size)
-		if trak != nil {
-			mdia, _ := findSodaBox(fileData, "mdia", trak.offset+8, trak.offset+trak.size)
-			if mdia != nil {
-				minf, _ := findSodaBox(fileData, "minf", mdia.offset+8, mdia.offset+mdia.size)
-				if minf != nil {
-					stbl, _ = findSodaBox(fileData, "stbl", minf.offset+8, minf.offset+minf.size)
-				}
-			}
-		}
-	}
+	trak, stbl, err := findSodaAudioTrack(fileData, moov)
 	if stbl == nil {
 		return nil, errors.New("stbl box not found")
 	}
-	stsz, err := findSodaBox(fileData, "stsz", stbl.offset+8, stbl.offset+stbl.size)
-	if err != nil {
-		return nil, errors.New("stsz box not found")
+	if logger != nil {
+		logger.Debug("soda: selected mp4 track for decrypt", "trak_offset", trak.offset, "stbl_offset", stbl.offset)
 	}
-	sampleSizes := parseSodaStsz(stsz.data)
-	senc, err := findSodaBox(fileData, "senc", moov.offset+8, moov.offset+moov.size)
+	sampleRanges, err := parseSodaSampleRanges(stbl, fileData)
+	if err != nil {
+		return nil, err
+	}
+	senc, err := findSodaBox(fileData, "senc", trak.offset+8, trak.offset+trak.size)
 	if err != nil {
 		senc, err = findSodaBox(fileData, "senc", stbl.offset+8, stbl.offset+stbl.size)
 	}
 	if err != nil {
+		senc, err = findSodaBox(fileData, "senc", moov.offset+8, moov.offset+moov.size)
+	}
+	if err != nil {
 		return nil, errors.New("senc box not found")
 	}
-	ivs := parseSodaSenc(senc.data)
-	mdat, err := findSodaBox(fileData, "mdat", 0, len(fileData))
-	if err != nil {
-		return nil, errors.New("mdat box not found")
+	sencSamples, ivSize, hasSubsamples := parseSodaSenc(senc.data)
+	if logger != nil {
+		logger.Debug("soda: parsed senc metadata", "sample_count", len(sencSamples), "iv_size", ivSize, "has_subsamples", hasSubsamples)
 	}
 	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
@@ -1256,42 +1346,22 @@ func decryptSodaAudio(fileData []byte, playAuth string) ([]byte, error) {
 	}
 	decryptedData := make([]byte, len(fileData))
 	copy(decryptedData, fileData)
-	readPtr := mdat.offset + 8
-	decryptedMdat := make([]byte, 0, mdat.size-8)
-	for i := 0; i < len(sampleSizes); i++ {
-		size := int(sampleSizes[i])
-		if readPtr+size > len(decryptedData) {
-			break
-		}
-		chunk := decryptedData[readPtr : readPtr+size]
-		if i < len(ivs) {
-			iv := ivs[i]
-			if len(iv) < 16 {
-				padded := make([]byte, 16)
-				copy(padded, iv)
-				iv = padded
+	for i, sampleRange := range sampleRanges {
+		chunk := decryptedData[sampleRange.Offset : sampleRange.Offset+sampleRange.Size]
+		if i < len(sencSamples) {
+			dst, decryptErr := decryptSodaSample(block, chunk, sencSamples[i])
+			if decryptErr != nil {
+				return nil, fmt.Errorf("decrypt sample %d: %w", i, decryptErr)
 			}
-			stream := cipher.NewCTR(block, iv)
-			dst := make([]byte, size)
-			stream.XORKeyStream(dst, chunk)
-			decryptedMdat = append(decryptedMdat, dst...)
-		} else {
-			decryptedMdat = append(decryptedMdat, chunk...)
+			if logger != nil && len(sencSamples[i].Subsamples) > 0 {
+				logger.Debug("soda: decrypted sample with subsamples", "sample_index", i, "sample_size", sampleRange.Size, "subsample_count", len(sencSamples[i].Subsamples))
+			}
+			copy(decryptedData[sampleRange.Offset:sampleRange.Offset+sampleRange.Size], dst)
 		}
-		readPtr += size
 	}
-	if len(decryptedMdat) != int(mdat.size)-8 {
-		return nil, errors.New("decrypted size mismatch")
-	}
-	copy(decryptedData[mdat.offset+8:], decryptedMdat)
 	stsd, err := findSodaBox(fileData, "stsd", stbl.offset+8, stbl.offset+stbl.size)
 	if err == nil {
-		stsdOffset := stsd.offset
-		stsdData := decryptedData[stsdOffset : stsdOffset+stsd.size]
-		if idx := bytes.Index(stsdData, []byte("enca")); idx != -1 {
-			copy(stsdData[idx:], []byte("mp4a"))
-			copy(decryptedData[stsdOffset:], stsdData)
-		}
+		rewriteSodaStsdAudioSampleEntry(decryptedData[stsd.offset : stsd.offset+stsd.size])
 	}
 	return decryptedData, nil
 }
@@ -1302,23 +1372,132 @@ type sodaMP4Box struct {
 	data   []byte
 }
 
+type sodaSencSubsample struct {
+	ClearBytes     uint16
+	EncryptedBytes uint32
+}
+
+type sodaSencSample struct {
+	IV         []byte
+	Subsamples []sodaSencSubsample
+}
+
+type sodaChunkMapEntry struct {
+	FirstChunk      uint32
+	SamplesPerChunk uint32
+	SampleDescID    uint32
+}
+
+type sodaSampleRange struct {
+	Offset int
+	Size   int
+}
+
 func findSodaBox(data []byte, boxType string, start, end int) (*sodaMP4Box, error) {
+	boxes, err := findSodaBoxes(data, boxType, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return boxes[0], nil
+}
+
+func findSodaBoxes(data []byte, boxType string, start, end int) ([]*sodaMP4Box, error) {
 	if end > len(data) {
 		end = len(data)
 	}
 	pos := start
 	target := []byte(boxType)
+	boxes := make([]*sodaMP4Box, 0, 1)
 	for pos+8 <= end {
-		size := int(binary.BigEndian.Uint32(data[pos : pos+4]))
-		if size < 8 {
+		size, headerSize, ok := parseSodaBoxHeader(data, pos, end)
+		if !ok || size < headerSize {
+			break
+		}
+		if pos+size > end {
 			break
 		}
 		if bytes.Equal(data[pos+4:pos+8], target) {
-			return &sodaMP4Box{offset: pos, size: size, data: data[pos+8 : pos+size]}, nil
+			boxes = append(boxes, &sodaMP4Box{offset: pos, size: size, data: data[pos+headerSize : pos+size]})
 		}
 		pos += size
 	}
+	if len(boxes) > 0 {
+		return boxes, nil
+	}
 	return nil, fmt.Errorf("box not found")
+}
+
+func parseSodaBoxHeader(data []byte, pos, end int) (size int, headerSize int, ok bool) {
+	if pos+8 > end || pos+8 > len(data) {
+		return 0, 0, false
+	}
+	boxSize := binary.BigEndian.Uint32(data[pos : pos+4])
+	switch boxSize {
+	case 0:
+		return end - pos, 8, true
+	case 1:
+		if pos+16 > end || pos+16 > len(data) {
+			return 0, 0, false
+		}
+		size64 := binary.BigEndian.Uint64(data[pos+8 : pos+16])
+		if size64 > uint64(end-pos) || size64 > uint64(^uint(0)>>1) {
+			return 0, 0, false
+		}
+		return int(size64), 16, true
+	default:
+		return int(boxSize), 8, true
+	}
+}
+
+func findSodaAudioTrack(data []byte, moov *sodaMP4Box) (*sodaMP4Box, *sodaMP4Box, error) {
+	traks, err := findSodaBoxes(data, "trak", moov.offset+8, moov.offset+moov.size)
+	if err != nil || len(traks) == 0 {
+		return nil, nil, errors.New("trak box not found")
+	}
+	for _, trak := range traks {
+		if isSodaAudioTrack(data, trak) {
+			stbl, stblErr := findSodaTrackStbl(data, trak)
+			if stblErr == nil {
+				return trak, stbl, nil
+			}
+		}
+	}
+	stbl, stblErr := findSodaTrackStbl(data, traks[0])
+	if stblErr != nil {
+		return traks[0], nil, stblErr
+	}
+	return traks[0], stbl, nil
+}
+
+func findSodaTrackStbl(data []byte, trak *sodaMP4Box) (*sodaMP4Box, error) {
+	mdia, err := findSodaBox(data, "mdia", trak.offset+8, trak.offset+trak.size)
+	if err != nil {
+		return nil, err
+	}
+	minf, err := findSodaBox(data, "minf", mdia.offset+8, mdia.offset+mdia.size)
+	if err != nil {
+		return nil, err
+	}
+	return findSodaBox(data, "stbl", minf.offset+8, minf.offset+minf.size)
+}
+
+func isSodaAudioTrack(data []byte, trak *sodaMP4Box) bool {
+	mdia, err := findSodaBox(data, "mdia", trak.offset+8, trak.offset+trak.size)
+	if err == nil {
+		hdlr, hdlrErr := findSodaBox(data, "hdlr", mdia.offset+8, mdia.offset+mdia.size)
+		if hdlrErr == nil && len(hdlr.data) >= 12 && bytes.Equal(hdlr.data[8:12], []byte("soun")) {
+			return true
+		}
+	}
+	stbl, err := findSodaTrackStbl(data, trak)
+	if err != nil {
+		return false
+	}
+	stsd, err := findSodaBox(data, "stsd", stbl.offset+8, stbl.offset+stbl.size)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(stsd.data, []byte("enca")) || bytes.Contains(stsd.data, []byte("mp4a"))
 }
 
 func parseSodaStsz(data []byte) []uint32 {
@@ -1342,42 +1521,285 @@ func parseSodaStsz(data []byte) []uint32 {
 	return sizes
 }
 
-func parseSodaSenc(data []byte) [][]byte {
+func parseSodaStsc(data []byte) []sodaChunkMapEntry {
 	if len(data) < 8 {
 		return nil
 	}
-	flags := binary.BigEndian.Uint32(data[0:4]) & 0x00FFFFFF
-	sampleCount := int(binary.BigEndian.Uint32(data[4:8]))
-	ivs := make([][]byte, 0, sampleCount)
+	entryCount := int(binary.BigEndian.Uint32(data[4:8]))
+	entries := make([]sodaChunkMapEntry, 0, entryCount)
 	ptr := 8
-	hasSubsamples := (flags & 0x02) != 0
-	for i := 0; i < sampleCount; i++ {
+	for i := 0; i < entryCount; i++ {
+		if ptr+12 > len(data) {
+			break
+		}
+		entries = append(entries, sodaChunkMapEntry{
+			FirstChunk:      binary.BigEndian.Uint32(data[ptr : ptr+4]),
+			SamplesPerChunk: binary.BigEndian.Uint32(data[ptr+4 : ptr+8]),
+			SampleDescID:    binary.BigEndian.Uint32(data[ptr+8 : ptr+12]),
+		})
+		ptr += 12
+	}
+	return entries
+}
+
+func parseSodaStco(data []byte) []uint64 {
+	if len(data) < 8 {
+		return nil
+	}
+	entryCount := int(binary.BigEndian.Uint32(data[4:8]))
+	offsets := make([]uint64, 0, entryCount)
+	ptr := 8
+	for i := 0; i < entryCount; i++ {
+		if ptr+4 > len(data) {
+			break
+		}
+		offsets = append(offsets, uint64(binary.BigEndian.Uint32(data[ptr:ptr+4])))
+		ptr += 4
+	}
+	return offsets
+}
+
+func parseSodaCo64(data []byte) []uint64 {
+	if len(data) < 8 {
+		return nil
+	}
+	entryCount := int(binary.BigEndian.Uint32(data[4:8]))
+	offsets := make([]uint64, 0, entryCount)
+	ptr := 8
+	for i := 0; i < entryCount; i++ {
 		if ptr+8 > len(data) {
 			break
 		}
-		iv := make([]byte, 16)
-		copy(iv, data[ptr:ptr+8])
-		ivs = append(ivs, iv)
+		offsets = append(offsets, binary.BigEndian.Uint64(data[ptr:ptr+8]))
 		ptr += 8
+	}
+	return offsets
+}
+
+func parseSodaSampleRanges(stbl *sodaMP4Box, fileData []byte) ([]sodaSampleRange, error) {
+	if stbl == nil {
+		return nil, errors.New("stbl box not found")
+	}
+	stsz, err := findSodaBox(fileData, "stsz", stbl.offset+8, stbl.offset+stbl.size)
+	if err != nil {
+		return nil, errors.New("stsz box not found")
+	}
+	sampleSizes := parseSodaStsz(stsz.data)
+	if len(sampleSizes) == 0 {
+		return nil, errors.New("stsz sample sizes empty")
+	}
+	stsc, err := findSodaBox(fileData, "stsc", stbl.offset+8, stbl.offset+stbl.size)
+	if err != nil {
+		return nil, errors.New("stsc box not found")
+	}
+	chunkMap := parseSodaStsc(stsc.data)
+	if len(chunkMap) == 0 {
+		return nil, errors.New("stsc entries empty")
+	}
+	var chunkOffsets []uint64
+	if stco, stcoErr := findSodaBox(fileData, "stco", stbl.offset+8, stbl.offset+stbl.size); stcoErr == nil {
+		chunkOffsets = parseSodaStco(stco.data)
+	} else if co64, co64Err := findSodaBox(fileData, "co64", stbl.offset+8, stbl.offset+stbl.size); co64Err == nil {
+		chunkOffsets = parseSodaCo64(co64.data)
+	}
+	if len(chunkOffsets) == 0 {
+		return nil, errors.New("chunk offsets not found")
+	}
+	ranges := make([]sodaSampleRange, 0, len(sampleSizes))
+	sampleIndex := 0
+	for mapIndex, entry := range chunkMap {
+		if entry.FirstChunk == 0 || entry.SamplesPerChunk == 0 {
+			continue
+		}
+		chunkStart := int(entry.FirstChunk) - 1
+		chunkEnd := len(chunkOffsets)
+		if mapIndex+1 < len(chunkMap) && chunkMap[mapIndex+1].FirstChunk > 0 {
+			chunkEnd = int(chunkMap[mapIndex+1].FirstChunk) - 1
+		}
+		if chunkStart >= len(chunkOffsets) {
+			break
+		}
+		if chunkEnd > len(chunkOffsets) {
+			chunkEnd = len(chunkOffsets)
+		}
+		for chunkIndex := chunkStart; chunkIndex < chunkEnd && sampleIndex < len(sampleSizes); chunkIndex++ {
+			chunkOffset := chunkOffsets[chunkIndex]
+			if chunkOffset > uint64(len(fileData)) {
+				return nil, fmt.Errorf("chunk offset %d out of range", chunkOffset)
+			}
+			offset := int(chunkOffset)
+			for sampleInChunk := uint32(0); sampleInChunk < entry.SamplesPerChunk && sampleIndex < len(sampleSizes); sampleInChunk++ {
+				size := int(sampleSizes[sampleIndex])
+				if offset+size > len(fileData) {
+					return nil, fmt.Errorf("sample %d out of range", sampleIndex)
+				}
+				ranges = append(ranges, sodaSampleRange{Offset: offset, Size: size})
+				offset += size
+				sampleIndex++
+			}
+		}
+	}
+	if sampleIndex != len(sampleSizes) {
+		return nil, fmt.Errorf("sample layout incomplete: mapped=%d total=%d", sampleIndex, len(sampleSizes))
+	}
+	return ranges, nil
+}
+
+func parseSodaSenc(data []byte) ([]sodaSencSample, int, bool) {
+	if len(data) < 8 {
+		return nil, 0, false
+	}
+	flags := binary.BigEndian.Uint32(data[0:4]) & 0x00FFFFFF
+	sampleCount := int(binary.BigEndian.Uint32(data[4:8]))
+	hasSubsamples := (flags & 0x02) != 0
+	ivSize := inferSodaSencIVSize(data[8:], sampleCount, hasSubsamples)
+	if ivSize == 0 {
+		return nil, 0, hasSubsamples
+	}
+	samples := make([]sodaSencSample, 0, sampleCount)
+	ptr := 8
+	for i := 0; i < sampleCount; i++ {
+		if ptr+ivSize > len(data) {
+			break
+		}
+		sample := sodaSencSample{IV: append([]byte(nil), data[ptr:ptr+ivSize]...)}
+		ptr += ivSize
 		if hasSubsamples {
 			if ptr+2 > len(data) {
 				break
 			}
 			subCount := int(binary.BigEndian.Uint16(data[ptr : ptr+2]))
-			ptr += 2 + (subCount * 6)
+			ptr += 2
+			sample.Subsamples = make([]sodaSencSubsample, 0, subCount)
+			for j := 0; j < subCount; j++ {
+				if ptr+6 > len(data) {
+					break
+				}
+				sample.Subsamples = append(sample.Subsamples, sodaSencSubsample{
+					ClearBytes:     binary.BigEndian.Uint16(data[ptr : ptr+2]),
+					EncryptedBytes: binary.BigEndian.Uint32(data[ptr+2 : ptr+6]),
+				})
+				ptr += 6
+			}
+		}
+		samples = append(samples, sample)
+	}
+	return samples, ivSize, hasSubsamples
+}
+
+func rewriteSodaStsdAudioSampleEntry(stsdData []byte) {
+	if len(stsdData) < 16 {
+		return
+	}
+	entryCount := int(binary.BigEndian.Uint32(stsdData[12:16]))
+	ptr := 16
+	for i := 0; i < entryCount; i++ {
+		if ptr+8 > len(stsdData) {
+			return
+		}
+		entrySize := int(binary.BigEndian.Uint32(stsdData[ptr : ptr+4]))
+		if entrySize < 8 || ptr+entrySize > len(stsdData) {
+			return
+		}
+		entryType := stsdData[ptr+4 : ptr+8]
+		if bytes.Equal(entryType, []byte("enca")) {
+			replacement := []byte("mp4a")
+			entryData := stsdData[ptr : ptr+entrySize]
+			if idx := bytes.Index(entryData, []byte("frma")); idx >= 0 && idx+8 <= len(entryData) {
+				candidate := entryData[idx+4 : idx+8]
+				if len(candidate) == 4 {
+					replacement = append([]byte(nil), candidate...)
+				}
+			}
+			copy(entryType, replacement)
+		}
+		ptr += entrySize
+	}
+}
+
+func inferSodaSencIVSize(data []byte, sampleCount int, hasSubsamples bool) int {
+	if sampleCount <= 0 {
+		return 0
+	}
+	for _, candidate := range []int{8, 16} {
+		if consumed, ok := sodaSencConsumedBytes(data, sampleCount, candidate, hasSubsamples); ok && consumed == len(data) {
+			return candidate
 		}
 	}
-	return ivs
+	for _, candidate := range []int{8, 16} {
+		if _, ok := sodaSencConsumedBytes(data, sampleCount, candidate, hasSubsamples); ok {
+			return candidate
+		}
+	}
+	return 0
+}
+
+func sodaSencConsumedBytes(data []byte, sampleCount, ivSize int, hasSubsamples bool) (int, bool) {
+	ptr := 0
+	for i := 0; i < sampleCount; i++ {
+		if ptr+ivSize > len(data) {
+			return 0, false
+		}
+		ptr += ivSize
+		if !hasSubsamples {
+			continue
+		}
+		if ptr+2 > len(data) {
+			return 0, false
+		}
+		subCount := int(binary.BigEndian.Uint16(data[ptr : ptr+2]))
+		ptr += 2
+		if ptr+subCount*6 > len(data) {
+			return 0, false
+		}
+		ptr += subCount * 6
+	}
+	return ptr, true
+}
+
+func decryptSodaSample(block cipher.Block, sample []byte, senc sodaSencSample) ([]byte, error) {
+	iv := make([]byte, aes.BlockSize)
+	copy(iv, senc.IV)
+	stream := cipher.NewCTR(block, iv)
+	if len(senc.Subsamples) == 0 {
+		dst := make([]byte, len(sample))
+		stream.XORKeyStream(dst, sample)
+		return dst, nil
+	}
+	decrypted := make([]byte, 0, len(sample))
+	ptr := 0
+	for idx, subsample := range senc.Subsamples {
+		clearBytes := int(subsample.ClearBytes)
+		encryptedBytes := int(subsample.EncryptedBytes)
+		if ptr+clearBytes+encryptedBytes > len(sample) {
+			return nil, fmt.Errorf("subsample %d exceeds sample size", idx)
+		}
+		decrypted = append(decrypted, sample[ptr:ptr+clearBytes]...)
+		ptr += clearBytes
+		if encryptedBytes == 0 {
+			continue
+		}
+		buf := make([]byte, encryptedBytes)
+		stream.XORKeyStream(buf, sample[ptr:ptr+encryptedBytes])
+		decrypted = append(decrypted, buf...)
+		ptr += encryptedBytes
+	}
+	if ptr < len(sample) {
+		decrypted = append(decrypted, sample[ptr:]...)
+	}
+	return decrypted, nil
 }
 
 func looksLikeLosslessAudioContainer(data []byte) bool {
 	if len(data) < 16 {
 		return false
 	}
-	if !bytes.Contains(data[:128], []byte("ftyp")) {
+	headerEnd := minInt(len(data), 128)
+	probeEnd := minInt(len(data), 2048)
+	if !bytes.Contains(data[:headerEnd], []byte("ftyp")) {
 		return false
 	}
-	return bytes.Contains(data[:2048], []byte("fLaC")) || bytes.Contains(data[:2048], []byte("dfLa"))
+	return bytes.Contains(data[:probeEnd], []byte("fLaC")) || bytes.Contains(data[:probeEnd], []byte("dfLa"))
 }
 
 func extractSodaLosslessFLAC(ctx context.Context, srcPath, dstPath string) error {
@@ -1395,8 +1817,13 @@ func extractSodaLosslessFLAC(ctx context.Context, srcPath, dstPath string) error
 }
 
 func ensureSodaPlayableLosslessFLAC(ctx context.Context, srcPath, dstPath string) (retErr error) {
-	tmpExtractedPath := dstPath + ".extracting"
-	tmpRewrittenPath := dstPath + ".rewritten"
+	ext := filepath.Ext(dstPath)
+	base := strings.TrimSuffix(dstPath, ext)
+	if ext == "" {
+		ext = ".flac"
+	}
+	tmpExtractedPath := base + ".extracting" + ext
+	tmpRewrittenPath := base + ".rewritten" + ext
 	defer func() {
 		_ = os.Remove(tmpExtractedPath)
 		_ = os.Remove(tmpRewrittenPath)
@@ -1447,7 +1874,7 @@ func rewriteSodaLosslessFLAC(ctx context.Context, srcPath, dstPath string) error
 }
 
 func validateSodaAudioFile(ctx context.Context, filePath, expectedCodec string) error {
-	codecName, err := probeAudioCodec(filePath)
+	codecName, err := sodaProbeAudioCodec(filePath)
 	if err != nil {
 		return fmt.Errorf("probe audio codec: %w", err)
 	}

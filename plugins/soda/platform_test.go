@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
@@ -198,6 +199,24 @@ func TestConvertSodaAlbumIncludesArtistURL(t *testing.T) {
 	}
 	if album.Artists[0].URL != "https://music.douyin.com/qishui/share/artist?artist_id=423456789" {
 		t.Fatalf("convertSodaAlbum() artist url = %q", album.Artists[0].URL)
+	}
+}
+
+func TestConvertSodaAlbumKeepsReleaseDateAndYearForTimestamp(t *testing.T) {
+	ts := time.Date(2024, time.February, 3, 4, 5, 6, 0, time.UTC).Unix()
+	album := convertSodaAlbum(sodaAlbumMeta{
+		ID:          "323456789",
+		Name:        "Album",
+		ReleaseDate: sodaFlexibleDate(fmt.Sprintf("%d", ts)),
+	})
+	if album == nil {
+		t.Fatal("convertSodaAlbum() returned nil")
+	}
+	if album.Year != 2024 {
+		t.Fatalf("convertSodaAlbum() year = %d, want 2024", album.Year)
+	}
+	if album.ReleaseDate == nil || !album.ReleaseDate.Equal(time.Unix(ts, 0).UTC()) {
+		t.Fatalf("convertSodaAlbum() release date = %v, want %v", album.ReleaseDate, time.Unix(ts, 0).UTC())
 	}
 }
 
