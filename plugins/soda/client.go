@@ -34,6 +34,12 @@ const (
 	sodaAid       = "386088"
 )
 
+var (
+	sodaExtractLosslessFLAC = extractSodaLosslessFLAC
+	sodaRewriteLosslessFLAC = rewriteSodaLosslessFLAC
+	sodaValidateAudioFile   = validateSodaAudioFile
+)
+
 type Client struct {
 	httpClient  *http.Client
 	cookie      string
@@ -767,7 +773,7 @@ func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info
 		switch codecName {
 		case "flac":
 			extractedPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".flac"
-			if err := extractSodaLosslessFLAC(ctx, outputPath, extractedPath); err == nil {
+			if err := ensureSodaPlayableLosslessFLAC(ctx, outputPath, extractedPath); err == nil {
 				if extracted, readErr := os.ReadFile(extractedPath); readErr == nil && len(extracted) > 0 {
 					_ = os.Remove(outputPath)
 					outputPath = extractedPath
@@ -775,7 +781,7 @@ func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info
 					info.Format = "flac"
 					info.Headers["X-Soda-Container"] = "mp4(flac)"
 					if c != nil && c.logger != nil {
-						c.logger.Debug("soda: extracted flac from audio container", "path", outputPath, "size", len(outputData))
+						c.logger.Debug("soda: extracted playable flac from audio container", "path", outputPath, "size", len(outputData))
 					}
 				}
 			}
@@ -1384,6 +1390,81 @@ func extractSodaLosslessFLAC(ctx context.Context, srcPath, dstPath string) error
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("extract flac from soda mp4: %w, stderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func ensureSodaPlayableLosslessFLAC(ctx context.Context, srcPath, dstPath string) (retErr error) {
+	tmpExtractedPath := dstPath + ".extracting"
+	tmpRewrittenPath := dstPath + ".rewritten"
+	defer func() {
+		_ = os.Remove(tmpExtractedPath)
+		_ = os.Remove(tmpRewrittenPath)
+		if retErr != nil {
+			_ = os.Remove(dstPath)
+		}
+	}()
+
+	if err := sodaExtractLosslessFLAC(ctx, srcPath, tmpExtractedPath); err != nil {
+		return err
+	}
+	if err := sodaValidateAudioFile(ctx, tmpExtractedPath, "flac"); err != nil {
+		return fmt.Errorf("validate extracted soda flac: %w", err)
+	}
+	if err := sodaRewriteLosslessFLAC(ctx, tmpExtractedPath, tmpRewrittenPath); err != nil {
+		return fmt.Errorf("rewrite extracted soda flac: %w", err)
+	}
+	if err := sodaValidateAudioFile(ctx, tmpRewrittenPath, "flac"); err != nil {
+		return fmt.Errorf("validate rewritten soda flac: %w", err)
+	}
+	if err := os.Rename(tmpRewrittenPath, dstPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rewriteSodaLosslessFLAC(ctx context.Context, srcPath, dstPath string) error {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, ffmpegPath,
+		"-y",
+		"-i", srcPath,
+		"-map", "0:a:0",
+		"-map_metadata", "-1",
+		"-vn",
+		"-c:a", "flac",
+		"-compression_level", "12",
+		dstPath,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("rewrite soda flac: %w, stderr: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func validateSodaAudioFile(ctx context.Context, filePath, expectedCodec string) error {
+	codecName, err := probeAudioCodec(filePath)
+	if err != nil {
+		return fmt.Errorf("probe audio codec: %w", err)
+	}
+	codecName = strings.ToLower(strings.TrimSpace(codecName))
+	expectedCodec = strings.ToLower(strings.TrimSpace(expectedCodec))
+	if expectedCodec != "" && codecName != expectedCodec {
+		return fmt.Errorf("unexpected codec %q", codecName)
+	}
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-v", "error", "-i", filePath, "-f", "null", "-")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("decode audio file: %w, stderr: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }

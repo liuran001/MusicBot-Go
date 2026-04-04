@@ -3,9 +3,13 @@ package soda
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -258,6 +262,109 @@ func TestClientFetchDownloadInfoUsesPlayerInfoURL(t *testing.T) {
 	if info.Headers["X-Soda-Play-Auth"] != "auth-token" {
 		t.Fatalf("FetchDownloadInfo() auth header = %q", info.Headers["X-Soda-Play-Auth"])
 	}
+}
+
+func TestEnsureSodaPlayableLosslessFLAC_RewritesAfterValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "track.mp4")
+	dstPath := filepath.Join(tmpDir, "track.flac")
+	if err := os.WriteFile(srcPath, []byte("mp4"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	originalExtract := sodaExtractLosslessFLAC
+	originalRewrite := sodaRewriteLosslessFLAC
+	originalValidate := sodaValidateAudioFile
+	t.Cleanup(func() {
+		sodaExtractLosslessFLAC = originalExtract
+		sodaRewriteLosslessFLAC = originalRewrite
+		sodaValidateAudioFile = originalValidate
+	})
+
+	var validateCalls []string
+	sodaExtractLosslessFLAC = func(_ context.Context, gotSrc, gotDst string) error {
+		if gotSrc != srcPath {
+			t.Fatalf("extract src = %q, want %q", gotSrc, srcPath)
+		}
+		if filepath.Ext(gotDst) != ".extracting" {
+			t.Fatalf("extract dst ext = %q, want .extracting", filepath.Ext(gotDst))
+		}
+		return os.WriteFile(gotDst, []byte("extracted-flac"), 0o644)
+	}
+	sodaRewriteLosslessFLAC = func(_ context.Context, gotSrc, gotDst string) error {
+		if filepath.Ext(gotSrc) != ".extracting" {
+			t.Fatalf("rewrite src ext = %q, want .extracting", filepath.Ext(gotSrc))
+		}
+		if filepath.Ext(gotDst) != ".rewritten" {
+			t.Fatalf("rewrite dst ext = %q, want .rewritten", filepath.Ext(gotDst))
+		}
+		return os.WriteFile(gotDst, []byte("rewritten-flac"), 0o644)
+	}
+	sodaValidateAudioFile = func(_ context.Context, gotPath, codec string) error {
+		if codec != "flac" {
+			t.Fatalf("validate codec = %q, want flac", codec)
+		}
+		validateCalls = append(validateCalls, filepath.Ext(gotPath))
+		return nil
+	}
+
+	if err := ensureSodaPlayableLosslessFLAC(context.Background(), srcPath, dstPath); err != nil {
+		t.Fatalf("ensureSodaPlayableLosslessFLAC() error = %v", err)
+	}
+	if got := string(mustReadFile(t, dstPath)); got != "rewritten-flac" {
+		t.Fatalf("dst content = %q, want rewritten-flac", got)
+	}
+	if len(validateCalls) != 2 || validateCalls[0] != ".extracting" || validateCalls[1] != ".rewritten" {
+		t.Fatalf("validate calls = %#v, want [.extracting .rewritten]", validateCalls)
+	}
+}
+
+func TestEnsureSodaPlayableLosslessFLAC_FailsWhenRewriteValidationFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "track.mp4")
+	dstPath := filepath.Join(tmpDir, "track.flac")
+	if err := os.WriteFile(srcPath, []byte("mp4"), 0o644); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+
+	originalExtract := sodaExtractLosslessFLAC
+	originalRewrite := sodaRewriteLosslessFLAC
+	originalValidate := sodaValidateAudioFile
+	t.Cleanup(func() {
+		sodaExtractLosslessFLAC = originalExtract
+		sodaRewriteLosslessFLAC = originalRewrite
+		sodaValidateAudioFile = originalValidate
+	})
+
+	sodaExtractLosslessFLAC = func(_ context.Context, _, gotDst string) error {
+		return os.WriteFile(gotDst, []byte("extracted-flac"), 0o644)
+	}
+	sodaRewriteLosslessFLAC = func(_ context.Context, _, gotDst string) error {
+		return os.WriteFile(gotDst, []byte("rewritten-flac"), 0o644)
+	}
+	sodaValidateAudioFile = func(_ context.Context, gotPath, _ string) error {
+		if filepath.Ext(gotPath) == ".rewritten" {
+			return errors.New("decode failed")
+		}
+		return nil
+	}
+
+	err := ensureSodaPlayableLosslessFLAC(context.Background(), srcPath, dstPath)
+	if err == nil || !strings.Contains(err.Error(), "validate rewritten soda flac") {
+		t.Fatalf("ensureSodaPlayableLosslessFLAC() error = %v, want rewrite validation error", err)
+	}
+	if _, statErr := os.Stat(dstPath); !os.IsNotExist(statErr) {
+		t.Fatalf("dst should not exist, stat err = %v", statErr)
+	}
+}
+
+func mustReadFile(t *testing.T, filePath string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", filePath, err)
+	}
+	return data
 }
 
 func makePlaylistTrackEntry(id, name string) sodaPlaylistEntry {

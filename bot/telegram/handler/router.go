@@ -134,7 +134,8 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		if strings.TrimSpace(baseText) == "" {
 			return false
 		}
-		platformName, _, matched := matchPlaylistURL(ctx, r.PlatformManager, baseText)
+		resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
+		platformName, _, matched := matchPlaylistURL(ctx, r.PlatformManager, resolvedText)
 		if !matched {
 			return false
 		}
@@ -225,9 +226,6 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return false
 		}
 		text := update.Message.Text
-		if hasSearchPlatformSuffix(text, r.PlatformManager) {
-			return true
-		}
 		baseText, _, _ := parseTrailingOptions(text, r.PlatformManager)
 		if strings.TrimSpace(baseText) == "" {
 			return false
@@ -237,12 +235,18 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			if _, _, matched := matchPlaylistURL(ctx, r.PlatformManager, resolvedText); matched {
 				return false
 			}
+			if _, _, matched := matchArtistURL(ctx, r.PlatformManager, resolvedText); matched {
+				return false
+			}
 			if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
 				return false
 			}
 			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 				return false
 			}
+		}
+		if hasSearchPlatformSuffix(text, r.PlatformManager) {
+			return true
 		}
 		return true
 	})

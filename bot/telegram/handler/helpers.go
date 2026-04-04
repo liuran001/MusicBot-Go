@@ -299,12 +299,14 @@ func isURLTrailingRune(r rune) bool {
 	}
 }
 
+var shortURLResolver = resolveShortURL
+
 func resolveShortLinkText(ctx context.Context, manager platform.Manager, text string) string {
 	urlStr := extractFirstURL(text)
 	if urlStr == "" {
 		return text
 	}
-	resolved, err := resolveShortURL(ctx, manager, urlStr)
+	resolved, err := shortURLResolver(ctx, manager, urlStr)
 	if err != nil || resolved == "" || resolved == urlStr {
 		return text
 	}
@@ -316,7 +318,7 @@ func extractResolvedURL(ctx context.Context, manager platform.Manager, text stri
 	if urlStr == "" {
 		return ""
 	}
-	resolved, err := resolveShortURL(ctx, manager, urlStr)
+	resolved, err := shortURLResolver(ctx, manager, urlStr)
 	if err != nil || resolved == "" {
 		return urlStr
 	}
