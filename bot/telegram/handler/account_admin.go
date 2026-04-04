@@ -18,7 +18,7 @@ import (
 func BuildAccountLoginCommand(manager platform.Manager) admincmd.Command {
 	return admincmd.Command{
 		Name:        "login",
-		Description: "统一账号登录（qr/cookie/check/renew/auto/help）",
+		Description: "统一账号登录（qr/cookie/sign/check/renew/auto/help）",
 		RichHandler: func(ctx context.Context, args string) (*admincmd.Response, error) {
 			return handleAccountLogin(ctx, manager, args)
 		},
@@ -53,6 +53,20 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 	switch action {
 	case "", "help":
 		return &admincmd.Response{Text: buildPlatformLoginHelp(manager, plat)}, nil
+	case "sign":
+		signer, ok := plat.(platform.SignInProvider)
+		if !ok {
+			return &admincmd.Response{Text: fmt.Sprintf("%s 当前不支持签到/VIP 领取", platformDisplayName(manager, platformName))}, nil
+		}
+		message, err := signer.SignIn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		message = strings.TrimSpace(message)
+		if message == "" {
+			message = fmt.Sprintf("%s 签到/VIP 领取完成", platformDisplayName(manager, platformName))
+		}
+		return &admincmd.Response{Text: sanitizeSensitiveText(message)}, nil
 	case "renew":
 		message, err := renewCookieForPlatform(ctx, manager, platformName)
 		if err != nil {
@@ -165,6 +179,33 @@ func handleGlobalLoginActions(ctx context.Context, manager platform.Manager, arg
 	}
 	action := strings.ToLower(strings.TrimSpace(fields[0]))
 	switch action {
+	case "sign":
+		if len(fields) == 2 {
+			platformName := resolveCookiePlatform(manager, fields[1])
+			if platformName == "" {
+				return "", false, nil
+			}
+			plat := manager.Get(platformName)
+			if plat == nil {
+				return "", false, nil
+			}
+			signer, ok := plat.(platform.SignInProvider)
+			if !ok {
+				return fmt.Sprintf("%s 当前不支持签到/VIP 领取", platformDisplayName(manager, platformName)), true, nil
+			}
+			text, err := signer.SignIn(ctx)
+			if err != nil {
+				return "", true, err
+			}
+			text = strings.TrimSpace(text)
+			if text == "" {
+				text = fmt.Sprintf("%s 签到/VIP 领取完成", platformDisplayName(manager, platformName))
+			}
+			return sanitizeSensitiveText(text), true, nil
+		}
+		if len(fields) != 1 {
+			return "用法: /login sign <platform>", true, nil
+		}
 	case "check":
 		if len(fields) == 1 {
 			text, err := checkCookies(ctx, manager, "")
@@ -259,6 +300,8 @@ func loginUsage(manager platform.Manager) string {
 		"/login <platform> help - 查看平台支持的登录方式\n" +
 		"/login <platform> qr - 扫码登录（如支持）\n" +
 		"/login <platform> cookie <cookie> - 导入 Cookie\n" +
+		"/login <platform> sign - 签到/VIP 领取（如支持）\n" +
+		"/login sign <platform> - 按平台执行签到/VIP 领取\n" +
 		"/login <platform> check - 检查平台账号状态\n" +
 		"/login check - 检查所有平台账号状态\n" +
 		"/login <platform> renew - 手动续期\n" +
@@ -291,8 +334,53 @@ func buildPlatformLoginHelp(manager platform.Manager, plat platform.Platform) st
 	if len(methods) == 0 {
 		methods = append(methods, "status")
 	}
-	return fmt.Sprintf("%s 支持: %s\n\n示例:\n/login %s qr\n/login %s cookie <cookie>\n/login %s check\n/login check\n/login %s renew\n/login renew\n/login %s auto on 21600\n/login %s auto status\n/login auto status\n/status",
-		platformDisplayName(manager, name), strings.Join(methods, ", "), name, name, name, name, name, name)
+	examples := []string{"/status"}
+	if containsLoginMethod(methods, "qr") {
+		examples = append(examples, fmt.Sprintf("/login %s qr", name))
+	}
+	if containsLoginMethod(methods, "cookie") {
+		examples = append(examples, fmt.Sprintf("/login %s cookie <cookie>", name))
+	}
+	if containsLoginMethod(methods, "check") || implementsAccountCheck(plat) {
+		examples = append(examples, fmt.Sprintf("/login %s check", name), "/login check")
+	}
+	if containsLoginMethod(methods, "sign") {
+		examples = append(examples, fmt.Sprintf("/login %s sign", name))
+		examples = append(examples, fmt.Sprintf("/login sign %s", name))
+	}
+	if containsLoginMethod(methods, "renew") || implementsRenew(plat) {
+		examples = append(examples, fmt.Sprintf("/login %s renew", name), "/login renew")
+	}
+	if containsLoginMethod(methods, "auto") || implementsAutoRenew(plat) {
+		examples = append(examples, fmt.Sprintf("/login %s auto on 21600", name), fmt.Sprintf("/login %s auto status", name), "/login auto status")
+	}
+	return fmt.Sprintf("%s 支持: %s\n\n示例:\n%s",
+		platformDisplayName(manager, name), strings.Join(methods, ", "), strings.Join(examples, "\n"))
+}
+
+func containsLoginMethod(methods []string, target string) bool {
+	target = strings.TrimSpace(strings.ToLower(target))
+	for _, method := range methods {
+		if strings.TrimSpace(strings.ToLower(method)) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func implementsAccountCheck(plat platform.Platform) bool {
+	_, ok := plat.(platform.CookieChecker)
+	return ok
+}
+
+func implementsRenew(plat platform.Platform) bool {
+	_, ok := plat.(platform.CookieRenewer)
+	return ok
+}
+
+func implementsAutoRenew(plat platform.Platform) bool {
+	_, ok := plat.(platform.AutoRenewer)
+	return ok
 }
 
 func handlePlatformAutoRenew(ctx context.Context, manager platform.Manager, platformName, payload string) (string, error) {

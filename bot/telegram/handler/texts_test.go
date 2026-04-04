@@ -10,7 +10,7 @@ import (
 func TestBuildHelpTextIncludesAccountCommandsForAdmin(t *testing.T) {
 	adminCommands := []admincmd.Command{
 		{Name: "checkck", Description: "检查插件 Cookie 有效性"},
-		{Name: "login", Description: "统一账号登录（qr/cookie/renew/auto/help）"},
+		{Name: "login", Description: "统一账号登录（qr/cookie/sign/renew/auto/help）"},
 	}
 
 	text := buildHelpText(nil, true, adminCommands, false, true)
@@ -33,7 +33,7 @@ func TestBuildHelpTextIncludesAccountCommandsForAdmin(t *testing.T) {
 
 func TestBuildHelpTextDoesNotShowAccountCommandsForNonAdmin(t *testing.T) {
 	adminCommands := []admincmd.Command{
-		{Name: "login", Description: "统一账号登录（qr/cookie/renew/auto/help）"},
+		{Name: "login", Description: "统一账号登录（qr/cookie/sign/renew/auto/help）"},
 	}
 
 	text := buildHelpText(nil, false, adminCommands, false, true)
