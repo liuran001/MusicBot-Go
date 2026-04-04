@@ -66,3 +66,7 @@ type QRLoginProvider interface {
 type LoginMethodProvider interface {
 	SupportedLoginMethods() []string
 }
+
+type SignInProvider interface {
+	SignIn(ctx context.Context) (string, error)
+}

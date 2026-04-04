@@ -37,7 +37,14 @@ func (k *KugouPlatform) AccountStatus(ctx context.Context) (platform.AccountStat
 }
 
 func (k *KugouPlatform) SupportedLoginMethods() []string {
-	return []string{"qr", "renew", "auto", "status"}
+	return []string{"qr", "sign", "renew", "auto", "status"}
+}
+
+func (k *KugouPlatform) SignIn(ctx context.Context) (string, error) {
+	if k == nil || k.client == nil || k.client.Concept() == nil {
+		return "", fmt.Errorf("kugou concept session unavailable")
+	}
+	return k.client.Concept().SignIn(ctx)
 }
 
 func (k *KugouPlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSession, error) {
