@@ -30,7 +30,7 @@ func (s *SodaPlatform) SupportsLyrics() bool { return true }
 func (s *SodaPlatform) SupportsRecognition() bool { return false }
 
 func (s *SodaPlatform) Capabilities() platform.Capabilities {
-	return platform.Capabilities{Download: true, Search: true, Lyrics: true, Recognition: false, HiRes: false}
+	return platform.Capabilities{Download: true, Search: true, Lyrics: true, Recognition: false, HiRes: true}
 }
 
 func (s *SodaPlatform) Metadata() platform.Meta {
@@ -279,12 +279,12 @@ func (s *SodaPlatform) ShortLinkHosts() []string {
 func (s *SodaPlatform) CheckCookie(ctx context.Context) (platform.CookieCheckResult, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	info, err := s.GetDownloadInfo(checkCtx, "6696534426169378817", platform.QualityHigh)
+	info, err := s.GetDownloadInfo(checkCtx, "6696534426169378817", platform.QualityHiRes)
 	if err != nil {
 		return platform.CookieCheckResult{OK: false, Message: fmt.Sprintf("汽水下载链路校验失败: %v", err)}, nil
 	}
-	if info == nil || strings.TrimSpace(info.URL) == "" {
-		return platform.CookieCheckResult{OK: false, Message: "下载链接为空"}, nil
+	if info == nil || strings.TrimSpace(info.URL) == "" || info.Size <= 0 {
+		return platform.CookieCheckResult{OK: false, Message: "Hi-Res 下载链接为空或文件大小为 0"}, nil
 	}
-	return platform.CookieCheckResult{OK: true, Message: "汽水音乐下载能力可用"}, nil
+	return platform.CookieCheckResult{OK: true, Message: fmt.Sprintf("Hi-Res 可用: %.2fMB", float64(info.Size)/1024/1024)}, nil
 }

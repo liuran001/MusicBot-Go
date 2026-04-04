@@ -76,7 +76,7 @@ func TestSearchHandler_buildPlatformSwitchRowsWrapAtThree(t *testing.T) {
 	if len(rows[1]) != 2 {
 		t.Fatalf("expected second row has 2 buttons, got %d", len(rows[1]))
 	}
-	if rows[1][1].Text != "✅ 🥤 汽水音乐" {
+	if rows[1][1].Text != "✅ 汽水音乐" {
 		t.Fatalf("expected current platform full label in wrapped row, got %q", rows[1][1].Text)
 	}
 }
