@@ -75,6 +75,8 @@ func (k *KugouPlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSess
 		}
 	}
 	session.Poll = func(ctx context.Context, onUpdate func(platform.QRLoginUpdate, error)) {
+		lastState := "pending"
+		skipInitialPending := true
 		manager.StartQRCodePolling(ctx, time.Second, func(status conceptQRCheckData, err error) {
 			if onUpdate == nil {
 				return
@@ -97,6 +99,16 @@ func (k *KugouPlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSess
 					update.Caption = accountStatus.Summary
 				}
 			}
+			if skipInitialPending && update.State == "pending" && !update.Final {
+				skipInitialPending = false
+				lastState = update.State
+				return
+			}
+			skipInitialPending = false
+			if update.State == lastState && !update.Final {
+				return
+			}
+			lastState = update.State
 			onUpdate(update, nil)
 		})
 	}

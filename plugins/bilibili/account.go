@@ -204,6 +204,8 @@ func (b *BilibiliPlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginS
 		defer bilibiliQRStore.clear(session.CancelID)
 		interval := time.NewTicker(2 * time.Second)
 		defer interval.Stop()
+		lastState := "pending"
+		skipInitialPending := true
 		for {
 			resp, err := b.client.pollQRLogin(pollCtx, key)
 			if err != nil {
@@ -221,10 +223,21 @@ func (b *BilibiliPlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginS
 					update.Caption = status.Summary
 				}
 			}
+			if skipInitialPending && update.State == "pending" && !update.Final {
+				skipInitialPending = false
+				lastState = update.State
+				goto waitNextPoll
+			}
+			skipInitialPending = false
+			if update.State == lastState && !update.Final {
+				goto waitNextPoll
+			}
+			lastState = update.State
 			onUpdate(update, nil)
 			if update.Final {
 				return
 			}
+		waitNextPoll:
 			select {
 			case <-pollCtx.Done():
 				onUpdate(platform.QRLoginUpdate{State: "cancelled", Message: "已取消 B站二维码登录", Final: true, Caption: "已取消 B站二维码登录"}, nil)

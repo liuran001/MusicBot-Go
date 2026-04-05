@@ -88,6 +88,11 @@ type neteaseQRCheckResponse struct {
 	AvatarURL string `json:"avatarUrl"`
 }
 
+type neteaseQRCheckResult struct {
+	Response *neteaseQRCheckResponse
+	Cookies  []*http.Cookie
+}
+
 func (n *NeteasePlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSession, error) {
 	if n == nil || n.client == nil {
 		return nil, fmt.Errorf("netease client unavailable")
@@ -125,8 +130,10 @@ func (n *NeteasePlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSe
 		defer neteaseQRStore.clear(session.CancelID)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		lastState := "pending"
+		skipInitialPending := true
 		for {
-			resp, err := n.client.CheckQRCode(pollCtx, unikey)
+			result, err := n.client.CheckQRCode(pollCtx, unikey)
 			if err != nil {
 				if pollCtx.Err() != nil {
 					onUpdate(platform.QRLoginUpdate{State: "cancelled", Message: "已取消网易云二维码登录", Final: true, Caption: "已取消网易云二维码登录"}, nil)
@@ -135,19 +142,32 @@ func (n *NeteasePlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSe
 				onUpdate(platform.QRLoginUpdate{}, err)
 				return
 			}
+			resp := result.Response
 			update := buildNeteaseQRUpdate(resp)
-			if resp.Code == 803 && strings.TrimSpace(resp.Cookie) != "" {
-				if _, importErr := n.ImportCookie(context.Background(), resp.Cookie); importErr == nil {
-					if status, statusErr := n.AccountStatus(context.Background()); statusErr == nil {
-						update.Status = &status
-						update.Caption = status.Summary
-					}
+			if resp.Code == 803 {
+				if status, importErr := n.importQRCookies(resp.Cookie, result.Cookies); importErr == nil {
+					update.Status = &status
+					update.Caption = status.Summary
+				} else {
+					onUpdate(platform.QRLoginUpdate{}, importErr)
+					return
 				}
 			}
+			if skipInitialPending && update.State == "pending" && !update.Final {
+				skipInitialPending = false
+				lastState = update.State
+				goto waitNextPoll
+			}
+			skipInitialPending = false
+			if update.State == lastState && !update.Final {
+				goto waitNextPoll
+			}
+			lastState = update.State
 			onUpdate(update, nil)
 			if update.Final {
 				return
 			}
+		waitNextPoll:
 			select {
 			case <-pollCtx.Done():
 				onUpdate(platform.QRLoginUpdate{State: "cancelled", Message: "已取消网易云二维码登录", Final: true, Caption: "已取消网易云二维码登录"}, nil)
@@ -189,8 +209,8 @@ func (c *Client) CreateQRCodeKey(ctx context.Context) (string, error) {
 	return unikey, nil
 }
 
-func (c *Client) CheckQRCode(ctx context.Context, key string) (*neteaseQRCheckResponse, error) {
-	body, err := c.weapiRequest(ctx, "https://interface.music.163.com/weapi/login/qrcode/client/login?csrf_token=", map[string]any{"key": strings.TrimSpace(key), "type": 1})
+func (c *Client) CheckQRCode(ctx context.Context, key string) (*neteaseQRCheckResult, error) {
+	body, cookies, err := c.weapiRequestDetailed(ctx, "https://interface.music.163.com/weapi/login/qrcode/client/login?csrf_token=", map[string]any{"key": strings.TrimSpace(key), "type": 1}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +218,65 @@ func (c *Client) CheckQRCode(ctx context.Context, key string) (*neteaseQRCheckRe
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return &neteaseQRCheckResult{Response: &resp, Cookies: cookies}, nil
+}
+
+func (n *NeteasePlatform) importQRCookies(raw string, responseCookies []*http.Cookie) (platform.AccountStatus, error) {
+	status := platform.AccountStatus{}
+	if n == nil || n.client == nil {
+		return status, fmt.Errorf("netease client unavailable")
+	}
+	merged := make(map[string]string)
+	applyRawCookieString(merged, raw)
+	applyResponseCookies(merged, responseCookies)
+	if len(merged) == 0 {
+		return status, fmt.Errorf("netease qr login missing cookies")
+	}
+	if strings.TrimSpace(merged["MUSIC_U"]) == "" {
+		return status, fmt.Errorf("netease qr login missing MUSIC_U cookie")
+	}
+	if err := n.client.SetCookieMap(merged); err != nil {
+		return status, err
+	}
+	return n.AccountStatus(context.Background())
+}
+
+func applyRawCookieString(dst map[string]string, raw string) {
+	raw = strings.TrimSpace(strings.Trim(raw, "`\"'"))
+	if raw == "" {
+		return
+	}
+	parts := strings.Split(raw, ";")
+	for _, part := range parts {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(kv[0])
+		value := strings.TrimSpace(kv[1])
+		if name == "" || value == "" {
+			continue
+		}
+		dst[name] = value
+	}
+}
+
+func applyResponseCookies(dst map[string]string, cookies []*http.Cookie) {
+	for _, cookie := range cookies {
+		if cookie == nil {
+			continue
+		}
+		name := strings.TrimSpace(cookie.Name)
+		if name == "" {
+			continue
+		}
+		value := strings.TrimSpace(cookie.Value)
+		if value == "" {
+			delete(dst, name)
+			continue
+		}
+		dst[name] = value
+	}
 }
 
 func (c *Client) weapiRequest(ctx context.Context, endpoint string, payload map[string]any) ([]byte, error) {
