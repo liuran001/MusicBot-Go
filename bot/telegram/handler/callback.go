@@ -87,7 +87,7 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	if len(args) < 2 {
 		return
 	}
-	if len(args) >= 3 && (args[1] == "i" || args[1] == "iep") {
+	if isInlineMusicCallbackArgs(args) {
 		h.handleInlineCallback(ctx, b, query, args)
 		return
 	}
@@ -169,6 +169,18 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		} else {
 			_ = b.DeleteMessage(ctx, deleteParams)
 		}
+	}
+}
+
+func isInlineMusicCallbackArgs(args []string) bool {
+	if len(args) < 3 {
+		return false
+	}
+	switch strings.TrimSpace(args[1]) {
+	case "i", "it", "iep", "iet":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -953,7 +965,7 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 		}
 		clearInlineReplyMarkup()
 		setInlineText(waitForDown, nil)
-		songInfo, err := h.Music.prepareInlineSong(ctx, b, userID, userName, platformName, trackID, qualityOverride, progress)
+		songInfo, err := h.Music.prepareInlineSongWithTimeout(ctx, b, userID, userName, platformName, trackID, qualityOverride, progress)
 		if err != nil {
 			if h.Music.Logger != nil {
 				h.Music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)
