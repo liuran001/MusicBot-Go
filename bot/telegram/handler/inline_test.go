@@ -245,6 +245,50 @@ func TestBuildInlineSendCallbackData_PreservesQualityViaToken(t *testing.T) {
 	}
 }
 
+func TestBuildInlinePendingResultID_UsesTokenForUnsafeTrackID(t *testing.T) {
+	resultID := buildInlinePendingResultID("kugou", "sharechain:abc123", "lossless")
+	if !strings.HasPrefix(resultID, "pt_") {
+		t.Fatalf("resultID = %q, want pt_ prefix", resultID)
+	}
+	platformName, trackID, qualityValue, ok := parseInlinePendingResultID(resultID)
+	if !ok {
+		t.Fatalf("parseInlinePendingResultID(%q) failed", resultID)
+	}
+	if platformName != "kugou" || trackID != "sharechain:abc123" || qualityValue != "lossless" {
+		t.Fatalf("parsed = (%q,%q,%q), want (%q,%q,%q)", platformName, trackID, qualityValue, "kugou", "sharechain:abc123", "lossless")
+	}
+}
+
+func TestBuildInlinePendingResultID_UsesTokenForLongTrackID(t *testing.T) {
+	trackID := strings.Repeat("a", 80)
+	resultID := buildInlinePendingResultID("kugou", trackID, "lossless")
+	if !strings.HasPrefix(resultID, "pt_") {
+		t.Fatalf("resultID = %q, want pt_ prefix", resultID)
+	}
+	platformName, parsedTrackID, qualityValue, ok := parseInlinePendingResultID(resultID)
+	if !ok {
+		t.Fatalf("parseInlinePendingResultID(%q) failed", resultID)
+	}
+	if platformName != "kugou" || parsedTrackID != trackID || qualityValue != "lossless" {
+		t.Fatalf("parsed = (%q,%q,%q), want (%q,%q,%q)", platformName, parsedTrackID, qualityValue, "kugou", trackID, "lossless")
+	}
+}
+
+func TestBuildInlineCollectionResultID_UsesTokenForLongCollectionID(t *testing.T) {
+	collectionID := "album:" + strings.Repeat("9", 80)
+	resultID := buildInlineCollectionResultID("kugou", collectionID, "lossless")
+	if !strings.HasPrefix(resultID, "lt_") {
+		t.Fatalf("resultID = %q, want lt_ prefix", resultID)
+	}
+	platformName, parsedCollectionID, qualityValue, ok := parseInlineCollectionResultID(resultID)
+	if !ok {
+		t.Fatalf("parseInlineCollectionResultID(%q) failed", resultID)
+	}
+	if platformName != "kugou" || parsedCollectionID != collectionID || qualityValue != "lossless" {
+		t.Fatalf("parsed = (%q,%q,%q), want (%q,%q,%q)", platformName, parsedCollectionID, qualityValue, "kugou", collectionID, "lossless")
+	}
+}
+
 func TestInlineSearchFallbackAppliesResolvedPlatformQualityPolicy(t *testing.T) {
 	repo := newStubRepo()
 	qualityValue := "hires"

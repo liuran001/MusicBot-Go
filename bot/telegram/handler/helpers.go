@@ -952,6 +952,14 @@ type inlineCallbackPayload struct {
 	storedAt     time.Time
 }
 
+type inlineResultPayload struct {
+	platformName string
+	trackID      string
+	qualityValue string
+	collectionID string
+	storedAt     time.Time
+}
+
 type inlineMessageLockEntry struct {
 	mu   sync.Mutex
 	refs int
@@ -972,7 +980,13 @@ var inlineCallbackPayloadStore = struct {
 	entries map[string]inlineCallbackPayload
 }{entries: make(map[string]inlineCallbackPayload)}
 
+var inlineResultPayloadStore = struct {
+	mu      sync.Mutex
+	entries map[string]inlineResultPayload
+}{entries: make(map[string]inlineResultPayload)}
+
 var inlineCallbackTokenCounter uint64
+var inlineResultTokenCounter uint64
 
 const inlineCallbackPayloadTTL = 30 * time.Minute
 
@@ -1072,6 +1086,30 @@ func storeInlineCallbackPayload(payload inlineCallbackPayload) string {
 	return token
 }
 
+func storeInlineResultPayload(payload inlineResultPayload) string {
+	payload.platformName = strings.TrimSpace(payload.platformName)
+	payload.trackID = strings.TrimSpace(payload.trackID)
+	payload.qualityValue = strings.TrimSpace(payload.qualityValue)
+	payload.collectionID = strings.TrimSpace(payload.collectionID)
+	if payload.qualityValue == "" {
+		payload.qualityValue = "hires"
+	}
+	if payload.platformName == "" || (payload.trackID == "" && payload.collectionID == "") {
+		return ""
+	}
+	payload.storedAt = time.Now()
+	token := strconv.FormatUint(uint64(time.Now().UnixNano()), 36) + strconv.FormatUint(atomic.AddUint64(&inlineResultTokenCounter, 1), 36)
+	inlineResultPayloadStore.mu.Lock()
+	defer inlineResultPayloadStore.mu.Unlock()
+	for key, entry := range inlineResultPayloadStore.entries {
+		if payload.storedAt.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
+			delete(inlineResultPayloadStore.entries, key)
+		}
+	}
+	inlineResultPayloadStore.entries[token] = payload
+	return token
+}
+
 func getInlineCallbackPayload(token string) (inlineCallbackPayload, bool) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -1088,6 +1126,26 @@ func getInlineCallbackPayload(token string) (inlineCallbackPayload, bool) {
 	payload, ok := inlineCallbackPayloadStore.entries[token]
 	if !ok {
 		return inlineCallbackPayload{}, false
+	}
+	return payload, true
+}
+
+func getInlineResultPayload(token string) (inlineResultPayload, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return inlineResultPayload{}, false
+	}
+	now := time.Now()
+	inlineResultPayloadStore.mu.Lock()
+	defer inlineResultPayloadStore.mu.Unlock()
+	for key, entry := range inlineResultPayloadStore.entries {
+		if now.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
+			delete(inlineResultPayloadStore.entries, key)
+		}
+	}
+	payload, ok := inlineResultPayloadStore.entries[token]
+	if !ok {
+		return inlineResultPayload{}, false
 	}
 	return payload, true
 }
@@ -1178,15 +1236,24 @@ func buildInlinePendingResultID(platformName, trackID, qualityValue string) stri
 		qualityValue = "hires"
 	}
 	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) || !isInlineStartToken(qualityValue) {
+		if token := storeInlineResultPayload(inlineResultPayload{platformName: platformName, trackID: trackID, qualityValue: qualityValue}); token != "" {
+			return "pt_" + token
+		}
 		return fmt.Sprintf("r_%d", time.Now().UnixMicro())
 	}
 	payload := platformName + "|" + trackID + "|" + qualityValue
 	encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	if encoded == "" {
+		if token := storeInlineResultPayload(inlineResultPayload{platformName: platformName, trackID: trackID, qualityValue: qualityValue}); token != "" {
+			return "pt_" + token
+		}
 		return fmt.Sprintf("r_%d", time.Now().UnixMicro())
 	}
 	id := "p_" + encoded
 	if len(id) > 64 {
+		if token := storeInlineResultPayload(inlineResultPayload{platformName: platformName, trackID: trackID, qualityValue: qualityValue}); token != "" {
+			return "pt_" + token
+		}
 		return fmt.Sprintf("r_%d", time.Now().UnixMicro())
 	}
 	return id
@@ -1216,10 +1283,16 @@ func buildInlineCollectionResultID(platformName, collectionID, qualityValue stri
 	payload := platformName + "|" + collectionID + "|" + qualityValue
 	encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	if encoded == "" {
+		if token := storeInlineResultPayload(inlineResultPayload{platformName: platformName, collectionID: collectionID, qualityValue: qualityValue}); token != "" {
+			return "lt_" + token
+		}
 		return fmt.Sprintf("l_%d", time.Now().UnixMicro())
 	}
 	id := "l_" + encoded
 	if len(id) > 64 {
+		if token := storeInlineResultPayload(inlineResultPayload{platformName: platformName, collectionID: collectionID, qualityValue: qualityValue}); token != "" {
+			return "lt_" + token
+		}
 		return fmt.Sprintf("l_%d", time.Now().UnixMicro())
 	}
 	return id
@@ -1227,6 +1300,22 @@ func buildInlineCollectionResultID(platformName, collectionID, qualityValue stri
 
 func parseInlinePendingResultID(resultID string) (platformName, trackID, qualityValue string, ok bool) {
 	resultID = strings.TrimSpace(resultID)
+	if strings.HasPrefix(resultID, "pt_") {
+		payload, found := getInlineResultPayload(strings.TrimPrefix(resultID, "pt_"))
+		if !found {
+			return "", "", "", false
+		}
+		qualityValue = strings.TrimSpace(payload.qualityValue)
+		if qualityValue == "" {
+			qualityValue = "hires"
+		}
+		platformName = strings.TrimSpace(payload.platformName)
+		trackID = strings.TrimSpace(payload.trackID)
+		if platformName == "" || trackID == "" {
+			return "", "", "", false
+		}
+		return platformName, trackID, qualityValue, true
+	}
 	if !strings.HasPrefix(resultID, "p_") {
 		return "", "", "", false
 	}
@@ -1258,6 +1347,22 @@ func parseInlinePendingResultID(resultID string) (platformName, trackID, quality
 
 func parseInlineCollectionResultID(resultID string) (platformName, collectionID, qualityValue string, ok bool) {
 	resultID = strings.TrimSpace(resultID)
+	if strings.HasPrefix(resultID, "lt_") {
+		payload, found := getInlineResultPayload(strings.TrimPrefix(resultID, "lt_"))
+		if !found {
+			return "", "", "", false
+		}
+		qualityValue = strings.TrimSpace(payload.qualityValue)
+		if qualityValue == "" {
+			qualityValue = "hires"
+		}
+		platformName = strings.TrimSpace(payload.platformName)
+		collectionID = strings.TrimSpace(payload.collectionID)
+		if platformName == "" || collectionID == "" {
+			return "", "", "", false
+		}
+		return platformName, collectionID, qualityValue, true
+	}
 	if !strings.HasPrefix(resultID, "l_") {
 		return "", "", "", false
 	}
