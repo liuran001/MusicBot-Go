@@ -465,7 +465,7 @@ func (a *App) Start(ctx context.Context) error {
 		Logger:                   a.Logger,
 	}
 
-	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, nil)
+	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, telegram.LongPollingParams())
 	if err != nil {
 		return fmt.Errorf("init telegram: %w", err)
 	}

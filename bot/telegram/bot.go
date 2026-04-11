@@ -12,6 +12,34 @@ import (
 	"github.com/mymmrac/telego"
 )
 
+var allowedUpdates = []string{
+	"message",
+	"callback_query",
+	"inline_query",
+	"chosen_inline_result",
+}
+
+const longPollingTimeoutSeconds = 60
+
+// AllowedUpdates returns the update types required by the bot.
+func AllowedUpdates() []string {
+	return append([]string(nil), allowedUpdates...)
+}
+
+// LongPollingParams returns long polling parameters with explicit allowed updates.
+func LongPollingParams() *telego.GetUpdatesParams {
+	return &telego.GetUpdatesParams{Timeout: longPollingTimeoutSeconds, AllowedUpdates: AllowedUpdates()}
+}
+
+// WebhookParams builds webhook params with explicit allowed updates.
+func WebhookParams(url string, secret string) *telego.SetWebhookParams {
+	params := &telego.SetWebhookParams{URL: url, AllowedUpdates: AllowedUpdates()}
+	if secret != "" {
+		params.SecretToken = secret
+	}
+	return params
+}
+
 // Bot wraps telego with application configuration.
 type Bot struct {
 	client   *telego.Bot
@@ -151,11 +179,7 @@ func (b *Bot) SendChatAction(ctx context.Context, chatID int64, action string) e
 
 // SetWebhook configures webhook and starts the webhook handler.
 func (b *Bot) SetWebhook(ctx context.Context, url string, secret string) error {
-	params := &telego.SetWebhookParams{URL: url}
-	if secret != "" {
-		params.SecretToken = secret
-	}
-	return b.client.SetWebhook(ctx, params)
+	return b.client.SetWebhook(ctx, WebhookParams(url, secret))
 }
 
 type telegoLogger struct {
