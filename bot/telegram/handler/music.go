@@ -2555,6 +2555,19 @@ func (h *MusicHandler) prepareInlineSong(
 	return &copy, nil
 }
 
+func (h *MusicHandler) prepareInlineSongWithTimeout(
+	ctx context.Context,
+	b *telego.Bot,
+	userID int64,
+	userName string,
+	platformName, trackID, qualityOverride string,
+	progress func(text string),
+) (*botpkg.SongInfo, error) {
+	processCtx, cancel := h.processContext(detachContext(ctx))
+	defer cancel()
+	return h.prepareInlineSong(processCtx, b, userID, userName, platformName, trackID, qualityOverride, progress)
+}
+
 // acquireDownloadSlot acquires download limiter or enqueues wait-state updater when full.
 // Lock scope: downloadQueueMu is handled by enqueue/dequeue helpers.
 func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, update func(text string)) (func(), error) {

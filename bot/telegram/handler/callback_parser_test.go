@@ -2,6 +2,29 @@ package handler
 
 import "testing"
 
+func TestIsInlineMusicCallbackArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "inline direct", args: []string{"music", "i", "netease", "123"}, want: true},
+		{name: "inline token", args: []string{"music", "it", "token"}, want: true},
+		{name: "inline episode direct", args: []string{"music", "iep", "s", "netease", "123", "hires", "1", "1"}, want: true},
+		{name: "inline episode token", args: []string{"music", "iet", "token"}, want: true},
+		{name: "non inline episode", args: []string{"music", "ep", "s", "netease"}, want: false},
+		{name: "too short", args: []string{"music", "i"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isInlineMusicCallbackArgs(tt.args); got != tt.want {
+				t.Fatalf("isInlineMusicCallbackArgs(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseMusicCallbackDataV2_CompatibleCases(t *testing.T) {
 	tests := []struct {
 		name string
