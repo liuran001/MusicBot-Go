@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -59,6 +61,20 @@ func TestSanitizeFileName(t *testing.T) {
 	safe := sanitizeFileName(name)
 	if safe == name {
 		t.Fatalf("expected sanitized name")
+	}
+}
+
+func TestSanitizeFileNameTruncatesLongNamesAndKeepsExtension(t *testing.T) {
+	name := strings.Repeat("测", 120) + ".flac"
+	safe := sanitizeFileName(name)
+	if filepath.Ext(safe) != ".flac" {
+		t.Fatalf("expected extension preserved, got %q", safe)
+	}
+	if len([]byte(safe)) > 180 {
+		t.Fatalf("expected sanitized name <= 180 bytes, got %d", len([]byte(safe)))
+	}
+	if !utf8.ValidString(safe) {
+		t.Fatalf("expected valid utf-8, got %q", safe)
 	}
 }
 
