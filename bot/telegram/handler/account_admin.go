@@ -146,25 +146,27 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 			if timeout <= 0 {
 				timeout = 2 * time.Minute
 			}
-			pollCtx, pollCancel := context.WithTimeout(context.Background(), timeout)
-			defer pollCancel()
-			session.Poll(pollCtx, func(update platform.QRLoginUpdate, err error) {
-				if err != nil {
-					if err == context.DeadlineExceeded {
-						editQRMessageCaption(b, sent, "二维码已超时，请重新执行 /login "+platformName+" qr", true)
+			go func() {
+				pollCtx, pollCancel := context.WithTimeout(context.Background(), timeout)
+				defer pollCancel()
+				session.Poll(pollCtx, func(update platform.QRLoginUpdate, err error) {
+					if err != nil {
+						if err == context.DeadlineExceeded {
+							editQRMessageCaption(b, sent, "二维码已超时，请重新执行 /login "+platformName+" qr", true)
+						}
+						return
 					}
-					return
-				}
-				caption := strings.TrimSpace(update.Caption)
-				if caption == "" {
-					caption = strings.TrimSpace(update.Message)
-				}
-				caption = sanitizeSensitiveText(caption)
-				if caption == "" {
-					return
-				}
-				editQRMessageCaption(b, sent, caption, update.Final)
-			})
+					caption := strings.TrimSpace(update.Caption)
+					if caption == "" {
+						caption = strings.TrimSpace(update.Message)
+					}
+					caption = sanitizeSensitiveText(caption)
+					if caption == "" {
+						return
+					}
+					editQRMessageCaption(b, sent, caption, update.Final)
+				})
+			}()
 		}
 		return resp, nil
 	default:
@@ -248,7 +250,7 @@ func handleAccountLoginCallback(ctx context.Context, manager platform.Manager, b
 	if query.Message != nil {
 		msg := query.Message.Message()
 		if msg != nil {
-			params := &telego.EditMessageReplyMarkupParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, ReplyMarkup: &telego.InlineKeyboardMarkup{}}
+			params := &telego.EditMessageReplyMarkupParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, ReplyMarkup: &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{}}}
 			_, _ = telegram.EditMessageReplyMarkupWithRetry(ctx, nil, b, params)
 		}
 	}
@@ -522,7 +524,7 @@ func editQRMessageCaption(b *telego.Bot, sent *telego.Message, caption string, f
 		Caption:   caption,
 	}
 	if final {
-		params.ReplyMarkup = &telego.InlineKeyboardMarkup{}
+		params.ReplyMarkup = &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{}}
 	}
 	editCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

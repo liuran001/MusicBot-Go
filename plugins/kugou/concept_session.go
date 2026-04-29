@@ -2,7 +2,6 @@ package kugou
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -25,6 +24,7 @@ type ConceptSessionManager struct {
 	client      *ConceptAPIClient
 	state       conceptSession
 	pollCancel  context.CancelFunc
+	pollSeq     uint64
 }
 
 func NewConceptSessionManager(logger interface {
@@ -121,35 +121,54 @@ func (m *ConceptSessionManager) StartQRCodePolling(ctx context.Context, interval
 	m.StopQRCodePolling()
 	pollCtx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
+	m.pollSeq++
+	seq := m.pollSeq
 	m.pollCancel = cancel
 	m.mu.Unlock()
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-pollCtx.Done():
-				if onUpdate != nil && errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
-					onUpdate(conceptQRCheckData{}, pollCtx.Err())
-				}
-				return
-			default:
-			}
-			data, err := m.client.CheckQRCode(pollCtx)
-			if onUpdate != nil {
-				onUpdate(data, err)
-			}
-			if err == nil && (data.Status == 0 || data.Status == 4) {
-				m.StopQRCodePolling()
-				return
-			}
-			select {
-			case <-pollCtx.Done():
-				return
-			case <-ticker.C:
-			}
+	defer func() {
+		m.mu.Lock()
+		if m.pollSeq == seq {
+			m.pollCancel = nil
 		}
+		m.mu.Unlock()
 	}()
+	notifyCtxDone := false
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-pollCtx.Done():
+			if onUpdate != nil && !notifyCtxDone {
+				notifyCtxDone = true
+				onUpdate(conceptQRCheckData{}, pollCtx.Err())
+			}
+			return
+		default:
+		}
+		data, err := m.client.CheckQRCode(pollCtx)
+		if err != nil && pollCtx.Err() != nil {
+			if onUpdate != nil && !notifyCtxDone {
+				notifyCtxDone = true
+				onUpdate(conceptQRCheckData{}, pollCtx.Err())
+			}
+			return
+		}
+		if onUpdate != nil {
+			onUpdate(data, err)
+		}
+		if err == nil && (data.Status == 0 || data.Status == 4) {
+			return
+		}
+		select {
+		case <-pollCtx.Done():
+			if onUpdate != nil && !notifyCtxDone {
+				notifyCtxDone = true
+				onUpdate(conceptQRCheckData{}, pollCtx.Err())
+			}
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *ConceptSessionManager) StopQRCodePolling() {
