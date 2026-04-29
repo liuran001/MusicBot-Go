@@ -82,6 +82,10 @@ func (k *KugouPlatform) StartQRLogin(ctx context.Context) (*platform.QRLoginSess
 				return
 			}
 			if err != nil {
+				if err == context.Canceled {
+					onUpdate(platform.QRLoginUpdate{State: "cancelled", Message: "已取消酷狗二维码登录", Final: true, Caption: "已取消酷狗二维码登录"}, nil)
+					return
+				}
 				onUpdate(platform.QRLoginUpdate{}, err)
 				return
 			}
