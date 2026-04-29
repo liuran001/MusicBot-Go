@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -517,7 +518,41 @@ func ensureDir(path string) {
 
 func sanitizeFileName(name string) string {
 	replacer := strings.NewReplacer("/", " ", "?", " ", "*", " ", ":", " ", "|", " ", "\\", " ", "<", " ", ">", " ", "\"", " ")
-	return replacer.Replace(name)
+	cleaned := strings.TrimSpace(replacer.Replace(name))
+	if cleaned == "" {
+		return "file"
+	}
+	const maxComponentBytes = 180
+	ext := filepath.Ext(cleaned)
+	base := strings.TrimSuffix(cleaned, ext)
+	if ext == cleaned {
+		base = cleaned
+		ext = ""
+	}
+	if ext != "" && len(ext) > maxComponentBytes/2 {
+		ext = truncateUTF8Bytes(ext, maxComponentBytes/2)
+	}
+	baseBudget := maxComponentBytes - len(ext)
+	if baseBudget <= 0 {
+		baseBudget = maxComponentBytes
+		ext = ""
+	}
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "file"
+	}
+	return truncateUTF8Bytes(base, baseBudget) + ext
+}
+
+func truncateUTF8Bytes(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	truncated := s[:maxBytes]
+	for !utf8.ValidString(truncated) && len(truncated) > 0 {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return strings.TrimSpace(truncated)
 }
 
 func cleanupFiles(paths ...string) {
