@@ -79,7 +79,7 @@ func New(musicU string, spoofIP bool, logger bot.Logger, persist ...func(map[str
 			logger.Warn("netease client initialized WITHOUT MUSIC_U cookie - lossless download may fail")
 		}
 	}
-	data.Client = &http.Client{}
+	data.Client = &http.Client{Timeout: 30 * time.Second}
 
 	return &Client{
 		baseData:    data,
@@ -103,7 +103,7 @@ func (c *Client) SetAPIProxy(cfg httpproxy.Config) error {
 		return err
 	}
 	if client == nil {
-		client = &http.Client{}
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	c.baseData.Client = client
 	return nil
@@ -325,7 +325,7 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 func (c *Client) requestData() RequestData {
 	data := c.baseData
 	if data.Client == nil {
-		data.Client = &http.Client{}
+		data.Client = &http.Client{Timeout: 30 * time.Second}
 	}
 
 	headers := make(Headers, 0, len(c.baseData.Headers)+4)

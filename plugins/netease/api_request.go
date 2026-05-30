@@ -50,7 +50,7 @@ func encodeURIComponent(str string) string {
 func createNewRequest(data string, endpoint string, options RequestData) (string, http.Header, error) {
 	client := options.Client
 	if client == nil {
-		client = &http.Client{}
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	req, err := http.NewRequest("POST", endpoint, strings.NewReader(data))
 	if err != nil {
