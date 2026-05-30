@@ -1,6 +1,7 @@
 package netease
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"io"
@@ -12,9 +13,9 @@ import (
 	"time"
 )
 
-func apiRequest(eapiOption EAPIOption, options RequestData) (string, http.Header, error) {
+func apiRequest(ctx context.Context, eapiOption EAPIOption, options RequestData) (string, http.Header, error) {
 	data := spliceStr(eapiOption.Path, eapiOption.Json)
-	return createNewRequest(formatToParams(data), eapiOption.Url, options)
+	return createNewRequest(ctx, formatToParams(data), eapiOption.Url, options)
 }
 
 func spliceStr(path string, data string) string {
@@ -47,12 +48,15 @@ func encodeURIComponent(str string) string {
 	return strings.ReplaceAll(r, "+", "%20")
 }
 
-func createNewRequest(data string, endpoint string, options RequestData) (string, http.Header, error) {
+func createNewRequest(ctx context.Context, data string, endpoint string, options RequestData) (string, http.Header, error) {
 	client := options.Client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	req, err := http.NewRequest("POST", endpoint, strings.NewReader(data))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(data))
 	if err != nil {
 		return "", nil, err
 	}

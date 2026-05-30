@@ -1,6 +1,7 @@
 package netease
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,7 +17,7 @@ const (
 	programDetailAPI  = "/api/dj/program/detail"
 )
 
-func GetSongDetail(data RequestData, ids []int) (SongsDetailData, error) {
+func GetSongDetail(ctx context.Context, data RequestData, ids []int) (SongsDetailData, error) {
 	type songIDs struct {
 		ID int `json:"id"`
 	}
@@ -30,10 +31,10 @@ func GetSongDetail(data RequestData, ids []int) (SongsDetailData, error) {
 	}
 	itemsJSON, _ := json.Marshal(items)
 	bodyJSON, _ := json.Marshal(reqBody{C: string(itemsJSON)})
-	return doJSONRequest[SongsDetailData](data, EAPIOption{Path: songDetailAPI, Url: "https://music.163.com/eapi/v3/song/detail", Json: string(bodyJSON)})
+	return doJSONRequest[SongsDetailData](ctx, data, EAPIOption{Path: songDetailAPI, Url: "https://music.163.com/eapi/v3/song/detail", Json: string(bodyJSON)})
 }
 
-func GetSongURL(data RequestData, config SongURLConfig) (SongsURLData, error) {
+func GetSongURL(ctx context.Context, data RequestData, config SongURLConfig) (SongsURLData, error) {
 	type reqBody struct {
 		EncodeType string `json:"encodeType"`
 		IDs        string `json:"ids"`
@@ -51,10 +52,10 @@ func GetSongURL(data RequestData, config SongURLConfig) (SongsURLData, error) {
 		config.EncodeType = "mp3"
 	}
 	bodyJSON, _ := json.Marshal(reqBody{IDs: string(idsJSON), EncodeType: config.EncodeType, Level: config.Level})
-	return doJSONRequest[SongsURLData](data, EAPIOption{Path: songURLAPI, Url: "https://music.163.com/eapi/song/enhance/player/url/v1", Json: string(bodyJSON)})
+	return doJSONRequest[SongsURLData](ctx, data, EAPIOption{Path: songURLAPI, Url: "https://music.163.com/eapi/song/enhance/player/url/v1", Json: string(bodyJSON)})
 }
 
-func SearchSong(data RequestData, config SearchSongConfig) (SearchSongData, error) {
+func SearchSong(ctx context.Context, data RequestData, config SearchSongConfig) (SearchSongData, error) {
 	type reqBody struct {
 		S      string `json:"s"`
 		Offset int    `json:"offset"`
@@ -64,10 +65,10 @@ func SearchSong(data RequestData, config SearchSongConfig) (SearchSongData, erro
 		config.Limit = 20
 	}
 	bodyJSON, _ := json.Marshal(reqBody{S: config.Keyword, Offset: config.Offset, Limit: config.Limit})
-	return doJSONRequest[SearchSongData](data, EAPIOption{Path: searchSongAPI, Url: "https://music.163.com/eapi/v1/search/song/get", Json: string(bodyJSON)})
+	return doJSONRequest[SearchSongData](ctx, data, EAPIOption{Path: searchSongAPI, Url: "https://music.163.com/eapi/v1/search/song/get", Json: string(bodyJSON)})
 }
 
-func GetSongLyric(data RequestData, id int) (SongLyricData, error) {
+func GetSongLyric(ctx context.Context, data RequestData, id int) (SongLyricData, error) {
 	type reqBody struct {
 		ID int `json:"id"`
 		Lv int `json:"lv"`
@@ -76,10 +77,10 @@ func GetSongLyric(data RequestData, id int) (SongLyricData, error) {
 		Yv int `json:"yv"`
 	}
 	bodyJSON, _ := json.Marshal(reqBody{ID: id, Lv: -1, Kv: -1, Tv: -1, Yv: -1})
-	return doJSONRequest[SongLyricData](data, EAPIOption{Path: songLyricAPI, Url: "https://music.163.com/eapi/song/lyric", Json: string(bodyJSON)})
+	return doJSONRequest[SongLyricData](ctx, data, EAPIOption{Path: songLyricAPI, Url: "https://music.163.com/eapi/song/lyric", Json: string(bodyJSON)})
 }
 
-func GetPlaylistDetail(data RequestData, id int) (PlaylistDetailData, error) {
+func GetPlaylistDetail(ctx context.Context, data RequestData, id int) (PlaylistDetailData, error) {
 	type reqBody struct {
 		ID string `json:"id"`
 		T  string `json:"t"`
@@ -87,30 +88,30 @@ func GetPlaylistDetail(data RequestData, id int) (PlaylistDetailData, error) {
 		S  string `json:"s"`
 	}
 	bodyJSON, _ := json.Marshal(reqBody{ID: fmt.Sprintf("%d", id), T: "0", N: "50", S: "5"})
-	return doJSONRequest[PlaylistDetailData](data, EAPIOption{Path: playlistDetailAPI, Url: "https://music.163.com/eapi/v6/playlist/detail", Json: string(bodyJSON)})
+	return doJSONRequest[PlaylistDetailData](ctx, data, EAPIOption{Path: playlistDetailAPI, Url: "https://music.163.com/eapi/v6/playlist/detail", Json: string(bodyJSON)})
 }
 
-func GetAlbumDetail(data RequestData, albumID int) (AlbumDetailData, error) {
+func GetAlbumDetail(ctx context.Context, data RequestData, albumID int) (AlbumDetailData, error) {
 	type reqBody struct {
 		ID       int    `json:"id"`
 		CacheKey string `json:"cache_key"`
 	}
 	cacheKey := base64.StdEncoding.EncodeToString(CacheKeyEncrypt(fmt.Sprintf("id=%d", albumID)))
 	bodyJSON, _ := json.Marshal(reqBody{ID: albumID, CacheKey: cacheKey})
-	return doJSONRequest[AlbumDetailData](data, EAPIOption{Path: albumDetailAPI, Url: "https://music.163.com/eapi/album/v3/detail", Json: string(bodyJSON)})
+	return doJSONRequest[AlbumDetailData](ctx, data, EAPIOption{Path: albumDetailAPI, Url: "https://music.163.com/eapi/album/v3/detail", Json: string(bodyJSON)})
 }
 
-func GetProgramDetail(data RequestData, id int) (ProgramDetailData, error) {
+func GetProgramDetail(ctx context.Context, data RequestData, id int) (ProgramDetailData, error) {
 	type reqBody struct {
 		ID string `json:"id"`
 	}
 	bodyJSON, _ := json.Marshal(reqBody{ID: fmt.Sprintf("%d", id)})
-	return doJSONRequest[ProgramDetailData](data, EAPIOption{Path: programDetailAPI, Url: "https://music.163.com/eapi/dj/program/detail", Json: string(bodyJSON)})
+	return doJSONRequest[ProgramDetailData](ctx, data, EAPIOption{Path: programDetailAPI, Url: "https://music.163.com/eapi/dj/program/detail", Json: string(bodyJSON)})
 }
 
-func doJSONRequest[T any](data RequestData, option EAPIOption) (T, error) {
+func doJSONRequest[T any](ctx context.Context, data RequestData, option EAPIOption) (T, error) {
 	var result T
-	body, _, err := apiRequest(option, data)
+	body, _, err := apiRequest(ctx, option, data)
 	if err != nil {
 		return result, err
 	}

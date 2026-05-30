@@ -117,7 +117,7 @@ func (c *Client) GetSongDetail(ctx context.Context, musicID int) (*SongsDetailDa
 
 	var result SongsDetailData
 	err := c.execute(ctx, func() error {
-		data, err := GetSongDetail(c.requestData(), []int{musicID})
+		data, err := GetSongDetail(ctx, c.requestData(), []int{musicID})
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetSongDetail failed", "music_id", musicID, "error", err)
@@ -146,7 +146,7 @@ func (c *Client) GetSongDetailBatch(ctx context.Context, musicIDs []int) (*Songs
 	}
 	var result SongsDetailData
 	err := c.execute(ctx, func() error {
-		data, err := GetSongDetail(c.requestData(), musicIDs)
+		data, err := GetSongDetail(ctx, c.requestData(), musicIDs)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetSongDetail batch failed", "count", len(musicIDs), "error", err)
@@ -169,7 +169,7 @@ func (c *Client) GetPlaylistDetail(ctx context.Context, playlistID int) (*Playli
 	}
 	var result PlaylistDetailData
 	err := c.execute(ctx, func() error {
-		data, err := GetPlaylistDetail(c.requestData(), playlistID)
+		data, err := GetPlaylistDetail(ctx, c.requestData(), playlistID)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetPlaylistDetail failed", "playlist_id", playlistID, "error", err)
@@ -193,7 +193,7 @@ func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*AlbumDetailD
 
 	var result AlbumDetailData
 	err := c.execute(ctx, func() error {
-		data, err := GetAlbumDetail(c.requestData(), albumID)
+		data, err := GetAlbumDetail(ctx, c.requestData(), albumID)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Error("api.GetAlbumDetail failed", "album_id", albumID, "error", err)
@@ -213,7 +213,7 @@ func (c *Client) GetAlbumDetail(ctx context.Context, albumID int) (*AlbumDetailD
 func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*SongsURLData, error) {
 	var result SongsURLData
 	err := c.execute(ctx, func() error {
-		data, err := GetSongURL(c.requestData(), SongURLConfig{IDs: []int{musicID}, Level: quality})
+		data, err := GetSongURL(ctx, c.requestData(), SongURLConfig{IDs: []int{musicID}, Level: quality})
 		if err != nil {
 			return err
 		}
@@ -230,7 +230,7 @@ func (c *Client) GetSongURL(ctx context.Context, musicID int, quality string) (*
 func (c *Client) Search(ctx context.Context, keyword string, limit int) (*SearchSongData, error) {
 	var result SearchSongData
 	err := c.execute(ctx, func() error {
-		data, err := SearchSong(c.requestData(), SearchSongConfig{Keyword: keyword, Limit: limit})
+		data, err := SearchSong(ctx, c.requestData(), SearchSongConfig{Keyword: keyword, Limit: limit})
 		if err != nil {
 			return err
 		}
@@ -247,7 +247,7 @@ func (c *Client) Search(ctx context.Context, keyword string, limit int) (*Search
 func (c *Client) GetLyric(ctx context.Context, musicID int) (*SongLyricData, error) {
 	var result SongLyricData
 	err := c.execute(ctx, func() error {
-		data, err := GetSongLyric(c.requestData(), musicID)
+		data, err := GetSongLyric(ctx, c.requestData(), musicID)
 		if err != nil {
 			return err
 		}
@@ -263,7 +263,7 @@ func (c *Client) GetLyric(ctx context.Context, musicID int) (*SongLyricData, err
 func (c *Client) GetProgramDetail(ctx context.Context, programID int) (*ProgramDetailData, error) {
 	var result ProgramDetailData
 	err := c.execute(ctx, func() error {
-		data, err := GetProgramDetail(c.requestData(), programID)
+		data, err := GetProgramDetail(ctx, c.requestData(), programID)
 		if err != nil {
 			return err
 		}
