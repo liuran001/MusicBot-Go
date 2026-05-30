@@ -2185,7 +2185,7 @@ func (c *Client) fetchMobilePlayInfo(ctx context.Context, song *model.Song, plan
 }
 
 func (c *Client) doJSONRequest(ctx context.Context, method, rawURL string, query url.Values, body io.Reader, headers map[string]string, out any) error {
-	if query != nil && len(query) > 0 {
+	if len(query) > 0 {
 		if strings.Contains(rawURL, "?") {
 			rawURL += "&" + query.Encode()
 		} else {

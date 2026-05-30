@@ -480,6 +480,9 @@ func (h *MusicHandler) processContext(ctx context.Context) (context.Context, con
 }
 
 func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID string, qualityOverride string) error {
+	if message == nil {
+		return errors.New("message required")
+	}
 	if replacementPlatform, replacementTrackID, hijacked, replacementLabel := maybeApplyAprilFoolsTrackHijack(platformName, trackID); hijacked {
 		if h != nil && h.Logger != nil {
 			h.Logger.Info("april fools hijacked download request", "from_platform", platformName, "from_track_id", trackID, "to_platform", replacementPlatform, "to_track_id", replacementTrackID, "replacement", replacementLabel)
@@ -541,7 +544,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	var userID int64
-	if message != nil && message.From != nil {
+	if message.From != nil {
 		userID = message.From.ID
 	}
 
@@ -1823,9 +1826,6 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 	if len(snapshot) == 0 {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	for idx, entry := range snapshot {
 		if entry.bot == nil || entry.message == nil {
 			continue
@@ -1912,10 +1912,7 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 	uploadCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	threadID := 0
-	if message != nil {
-		threadID = message.MessageThreadID
-	}
+	threadID := message.MessageThreadID
 
 	var audioFile telego.InputFile
 	openAudioUpload := func() (telego.InputFile, *os.File, error) {
@@ -1974,7 +1971,7 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		ReplyParameters: buildReplyParams(message),
 	}
 	requesterID := int64(0)
-	if message != nil && message.From != nil {
+	if message.From != nil {
 		requesterID = message.From.ID
 	}
 	if resolveForwardButtonEnabledForMessage(ctx, h.Repo, message) {

@@ -10,7 +10,8 @@ import (
 
 var copyWithProgressBufferPool = sync.Pool{
 	New: func() any {
-		return make([]byte, 32*1024)
+		buf := make([]byte, 32*1024)
+		return &buf
 	},
 }
 
@@ -62,8 +63,9 @@ func CopyWithProgress(dst io.Writer, src io.Reader, total int64, progress Progre
 		return io.Copy(dst, src)
 	}
 
-	buf := copyWithProgressBufferPool.Get().([]byte)
-	defer copyWithProgressBufferPool.Put(buf)
+	bufPtr := copyWithProgressBufferPool.Get().(*[]byte)
+	defer copyWithProgressBufferPool.Put(bufPtr)
+	buf := *bufPtr
 	var written int64
 
 	for {

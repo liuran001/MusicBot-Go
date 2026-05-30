@@ -116,9 +116,13 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		h.editPlaylistMessage(ctx, b, msgResult, userVisiblePlaylistError(err), nil)
 		return true
 	}
+	if playlist == nil {
+		h.editPlaylistMessage(ctx, b, msgResult, noResults, nil)
+		return true
+	}
 	collectionType = detectCollectionType(playlistID, playlist.URL)
 	collectionLabel := collectionTypeLabel(collectionType)
-	if playlist == nil || len(playlist.Tracks) == 0 {
+	if len(playlist.Tracks) == 0 {
 		emptyText := playlistEmpty
 		if collectionType == collectionTypeAlbum {
 			emptyText = "专辑为空"

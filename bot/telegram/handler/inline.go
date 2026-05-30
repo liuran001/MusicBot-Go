@@ -333,13 +333,6 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 
 	var inlineMsgs []telego.InlineQueryResult
 
-	startKeyword := keyWord
-	if requestedPlatform != "" {
-		startKeyword = startKeyword + " " + requestedPlatform
-	}
-	if strings.TrimSpace(qualityOverride) != "" {
-		startKeyword = startKeyword + " " + strings.TrimSpace(qualityOverride)
-	}
 	params := &telego.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
 		IsPersonal:    true,

@@ -39,7 +39,6 @@ func chooseUserAgent() string {
 		"Mozilla/5.0 (iPhone; CPU iPhone OS 10_0 like Mac OS X) AppleWebKit/602.1.38 (KHTML, like Gecko) Version/10.0 Mobile/14A300 Safari/602.1",
 		"NeteaseMusic/6.5.0.1575377963(164);Dalvik/2.1.0 (Linux; U; Android 9; MIX 2 MIUI/V12.0.1.0.PDECNXM)",
 	}
-	rand.Seed(time.Now().UnixNano())
 	return userAgentList[rand.Intn(len(userAgentList))]
 }
 

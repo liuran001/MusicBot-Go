@@ -939,6 +939,7 @@ func extractSodaRouterData(page []byte) (*sodaSharePageData, error) {
 	end := -1
 	inString := false
 	escaped := false
+scan:
 	for i := start; i < len(text); i++ {
 		ch := text[i]
 		if inString {
@@ -966,11 +967,8 @@ func extractSodaRouterData(page []byte) (*sodaSharePageData, error) {
 			depth--
 			if depth == 0 {
 				end = i + 1
-				break
+				break scan
 			}
-		}
-		if end > 0 {
-			break
 		}
 	}
 	if end <= start {
@@ -1316,6 +1314,9 @@ func decryptSodaAudioWithLogger(fileData []byte, playAuth string, logger bot.Log
 		return nil, errors.New("moov box not found")
 	}
 	trak, stbl, err := findSodaAudioTrack(fileData, moov)
+	if err != nil {
+		return nil, err
+	}
 	if stbl == nil {
 		return nil, errors.New("stbl box not found")
 	}
