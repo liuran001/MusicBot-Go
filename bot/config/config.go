@@ -146,6 +146,32 @@ func ensureParentDir(path string) error {
 	return os.MkdirAll(dir, 0o755)
 }
 
+// atomicWriteFile writes data to a file atomically via temp+rename.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp.*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
 func upsertINIWithoutReformat(path, sectionName string, pairs map[string]string) error {
 	cleanPairs := make(map[string]string, len(pairs))
 	for key, value := range pairs {
@@ -231,7 +257,7 @@ func upsertINIWithoutReformat(path, sectionName string, pairs map[string]string)
 	}
 
 	out := strings.Join(lines, lineSep)
-	return os.WriteFile(path, []byte(out), 0o644)
+	return atomicWriteFile(path, []byte(out), 0o644)
 }
 
 func writeNewINI(path, sectionName string, pairs map[string]string) error {
@@ -244,7 +270,7 @@ func writeNewINI(path, sectionName string, pairs map[string]string) error {
 	for _, k := range keys {
 		lines = append(lines, fmt.Sprintf("%s = %s", k, pairs[k]))
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	return atomicWriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
 
 func appendNewSection(path, content, lineSep, sectionName string, pairs map[string]string) error {
@@ -275,7 +301,7 @@ func appendNewSection(path, content, lineSep, sectionName string, pairs map[stri
 		b.WriteString(lineSep)
 	}
 
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return atomicWriteFile(path, []byte(b.String()), 0o644)
 }
 
 func findSectionRange(lines []string, sectionName string) (start, end int) {

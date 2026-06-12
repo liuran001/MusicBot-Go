@@ -61,8 +61,9 @@ const (
 )
 
 var (
-	retryJitterMu  sync.Mutex
-	retryJitterRng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	retryJitterMu       sync.Mutex
+	retryJitterRng      = rand.New(rand.NewSource(time.Now().UnixNano()))
+	neteaseHostReplacer = strings.NewReplacer("m8.", "m7.", "m801.", "m701.", "m804.", "m701.", "m704.", "m701.")
 )
 
 func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
@@ -478,16 +479,19 @@ func (s *DownloadService) downloadOnce(ctx context.Context, rawURL string, info 
 	if closeErr != nil {
 		return written, closeErr
 	}
+	if written == 0 {
+		_ = os.Remove(destPath)
+		return 0, errors.New("download returned empty file")
+	}
 	return written, nil
 }
 
 func rewriteNeteaseHost(rawURL string) string {
-	replacer := strings.NewReplacer("m8.", "m7.", "m801.", "m701.", "m804.", "m701.", "m704.", "m701.")
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return rawURL
 	}
-	parsed.Host = replacer.Replace(parsed.Host)
+	parsed.Host = neteaseHostReplacer.Replace(parsed.Host)
 	return parsed.String()
 }
 

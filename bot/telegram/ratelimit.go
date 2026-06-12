@@ -17,6 +17,7 @@ import (
 const (
 	defaultLimiterEntryTTL      = 30 * time.Minute
 	defaultLimiterCleanupPeriod = 5 * time.Minute
+	defaultMaxLimiterEntries    = 10000
 )
 
 type Logger interface {
@@ -36,6 +37,7 @@ type RateLimiter struct {
 	entryTTL        time.Duration
 	cleanupInterval time.Duration
 	lastCleanup     time.Time
+	maxEntries      int
 }
 
 type chatLimiter struct {
@@ -61,6 +63,7 @@ func NewRateLimiterWithGlobal(msgPerSec float64, burst int, globalPerSec float64
 		entryTTL:        defaultLimiterEntryTTL,
 		cleanupInterval: defaultLimiterCleanupPeriod,
 		lastCleanup:     time.Now(),
+		maxEntries:      defaultMaxLimiterEntries,
 	}
 }
 
@@ -108,6 +111,22 @@ func (rl *RateLimiter) getLimiter(chatID int64) *rate.Limiter {
 		limiter:  limiter,
 		lastUsed: now,
 	}
+
+	// Evict oldest entry when map exceeds max size
+	if rl.maxEntries > 0 && len(rl.limiters) > rl.maxEntries {
+		var oldestID int64
+		oldestTime := now
+		for id, cl := range rl.limiters {
+			if id != chatID && cl.lastUsed.Before(oldestTime) {
+				oldestTime = cl.lastUsed
+				oldestID = id
+			}
+		}
+		if oldestID != 0 {
+			delete(rl.limiters, oldestID)
+		}
+	}
+
 	return limiter
 }
 
