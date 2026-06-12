@@ -150,28 +150,38 @@ func performDataMigration(cacheDB, dataDB *gorm.DB, cacheDSN string) error {
 			_ = dataDB.AutoMigrate(&UserSettingsModel{})
 			var records []UserSettingsModel
 			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
-				dataDB.CreateInBatches(records, 100)
+				if err := dataDB.CreateInBatches(records, 100).Error; err != nil {
+					return fmt.Errorf("migrate %s: %w", table, err)
+				}
 			}
 		case "group_settings":
 			_ = dataDB.AutoMigrate(&GroupSettingsModel{})
 			var records []GroupSettingsModel
 			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
-				dataDB.CreateInBatches(records, 100)
+				if err := dataDB.CreateInBatches(records, 100).Error; err != nil {
+					return fmt.Errorf("migrate %s: %w", table, err)
+				}
 			}
 		case "plugin_settings":
 			_ = dataDB.AutoMigrate(&PluginSettingModel{})
 			var records []PluginSettingModel
 			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
-				dataDB.CreateInBatches(records, 100)
+				if err := dataDB.CreateInBatches(records, 100).Error; err != nil {
+					return fmt.Errorf("migrate %s: %w", table, err)
+				}
 			}
 		case "bot_stats":
 			_ = dataDB.AutoMigrate(&BotStatModel{})
 			var records []BotStatModel
 			if err := cacheDB.Find(&records).Error; err == nil && len(records) > 0 {
-				dataDB.CreateInBatches(records, 100)
+				if err := dataDB.CreateInBatches(records, 100).Error; err != nil {
+					return fmt.Errorf("migrate %s: %w", table, err)
+				}
 			}
 		}
-		_ = cacheDB.Migrator().DropTable(table)
+		if err := cacheDB.Migrator().DropTable(table); err != nil {
+			return fmt.Errorf("drop legacy table %s: %w", table, err)
+		}
 	}
 
 	return nil

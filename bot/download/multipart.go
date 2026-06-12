@@ -1,6 +1,7 @@
 package download
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -35,6 +36,14 @@ type MultipartDownloader struct {
 
 var errRangeNotSupported = errors.New("range request not supported by server")
 
+// bufPool reuses 32KB buffers for download I/O to reduce allocations.
+var bufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 32*1024)
+		return &buf
+	},
+}
+
 // partDownload represents a single chunk download task
 type partDownload struct {
 	index   int
@@ -47,11 +56,12 @@ type partDownload struct {
 
 // progressTracker aggregates progress from multiple parts
 type progressTracker struct {
-	mu       sync.Mutex
-	parts    map[int]int64
-	total    int64
-	callback ProgressFunc
-	lastCall time.Time
+	mu           sync.Mutex
+	parts        map[int]int64
+	total        int64
+	totalWritten int64
+	callback     ProgressFunc
+	lastCall     time.Time
 }
 
 func newProgressTracker(total int64, callback ProgressFunc) *progressTracker {
@@ -71,7 +81,9 @@ func (pt *progressTracker) update(partIndex int, written int64) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
+	prev := pt.parts[partIndex]
 	pt.parts[partIndex] = written
+	pt.totalWritten += written - prev
 
 	now := time.Now()
 	if now.Sub(pt.lastCall) < 500*time.Millisecond {
@@ -79,12 +91,7 @@ func (pt *progressTracker) update(partIndex int, written int64) {
 	}
 	pt.lastCall = now
 
-	var totalWritten int64
-	for _, w := range pt.parts {
-		totalWritten += w
-	}
-
-	pt.callback(totalWritten, pt.total)
+	pt.callback(pt.totalWritten, pt.total)
 }
 
 func (pt *progressTracker) final() {
@@ -95,12 +102,7 @@ func (pt *progressTracker) final() {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	var totalWritten int64
-	for _, w := range pt.parts {
-		totalWritten += w
-	}
-
-	pt.callback(totalWritten, pt.total)
+	pt.callback(pt.totalWritten, pt.total)
 }
 
 func NewMultipartDownloader(client *http.Client, timeout time.Duration, opts MultipartDownloadOptions) *MultipartDownloader {
@@ -208,7 +210,9 @@ func (md *MultipartDownloader) downloadSingle(ctx context.Context, rawURL string
 	}
 	defer file.Close()
 
-	buf := make([]byte, 32*1024)
+	bufp := bufPool.Get().(*[]byte)
+	defer bufPool.Put(bufp)
+	buf := *bufp
 	var written int64
 	for {
 		nr, readErr := resp.Body.Read(buf)
@@ -386,7 +390,9 @@ func (md *MultipartDownloader) downloadPart(ctx context.Context, rawURL string, 
 	}()
 
 	// Download part with progress tracking
-	buf := make([]byte, 32*1024)
+	bufp := bufPool.Get().(*[]byte)
+	defer bufPool.Put(bufp)
+	buf := *bufp
 	var written int64
 	expectedSize := part.end - part.start + 1
 
@@ -448,6 +454,13 @@ func (md *MultipartDownloader) mergeParts(parts []*partDownload, destPath string
 		}
 	}()
 
+	bw := bufio.NewWriterSize(outFile, 256*1024)
+	defer func() {
+		if flushErr := bw.Flush(); flushErr != nil && retErr == nil {
+			retErr = flushErr
+		}
+	}()
+
 	for _, part := range parts {
 		if part.err != nil {
 			return totalWritten, part.err
@@ -458,7 +471,7 @@ func (md *MultipartDownloader) mergeParts(parts []*partDownload, destPath string
 			return totalWritten, err
 		}
 
-		written, err := io.Copy(outFile, partFile)
+		written, err := io.Copy(bw, partFile)
 		closeErr := partFile.Close()
 		if err != nil {
 			return totalWritten, err

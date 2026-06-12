@@ -198,7 +198,7 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 ) {
 	platformManager = platform.NewManager()
 	dynManager = dynplugin.NewManager(log)
-	adminIDs = parseAdminIDs(conf.GetString("BotAdmin"))
+	adminIDs = parseIDSet(conf.GetString("BotAdmin"))
 	pluginTagProviders = make(map[string]id3.ID3TagProvider)
 	adminCommands = make([]admincmd.Command, 0)
 	pluginSettingDefinitions = make([]botpkg.PluginSettingDefinition, 0)
@@ -351,7 +351,7 @@ func (a *App) Start(ctx context.Context) error {
 	if searchFallback == "" {
 		searchFallback = "netease"
 	}
-	whitelistIDs := parseWhitelistIDs(a.Config.GetString("WhitelistChatIDs"))
+	whitelistIDs := parseIDSet(a.Config.GetString("WhitelistChatIDs"))
 	whitelist := handler.NewWhitelist(a.Config.GetBool("EnableWhitelist"), whitelistIDs, a.AdminIDs, a.ConfigPath)
 
 	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
@@ -651,17 +651,7 @@ func (a *App) ReloadDynamicPlugins(ctx context.Context) error {
 	return a.ReloadAll(ctx)
 }
 
-func parseAdminIDs(raw string) map[int64]struct{} {
-	ids := make(map[int64]struct{})
-	for _, value := range splitAdminIDs(raw) {
-		if id, err := strconv.ParseInt(value, 10, 64); err == nil {
-			ids[id] = struct{}{}
-		}
-	}
-	return ids
-}
-
-func parseWhitelistIDs(raw string) map[int64]struct{} {
+func parseIDSet(raw string) map[int64]struct{} {
 	ids := make(map[int64]struct{})
 	for _, value := range splitAdminIDs(raw) {
 		if id, err := strconv.ParseInt(value, 10, 64); err == nil {
@@ -678,10 +668,8 @@ func refreshAdminIDs(dst map[int64]struct{}, raw string) {
 	for key := range dst {
 		delete(dst, key)
 	}
-	for _, value := range splitAdminIDs(raw) {
-		if id, err := strconv.ParseInt(value, 10, 64); err == nil {
-			dst[id] = struct{}{}
-		}
+	for id := range parseIDSet(raw) {
+		dst[id] = struct{}{}
 	}
 }
 
