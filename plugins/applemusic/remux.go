@@ -163,6 +163,23 @@ func buildProgressiveFile(frag *mp4.File) (*mp4.File, error) {
 		trak.Tkhd.Duration = totalDur * uint64(moov.Mvhd.Timescale) / uint64(mdhdTimescale)
 	}
 
+	// Drop the edit list (edts/elst). In the source fragmented files its
+	// SegmentDuration is 0 (the fragmented moov has no duration), and players
+	// like ffmpeg honor that 0 and report the whole stream as 0-length /
+	// duration N/A. A progressive single-track audio file does not need an
+	// edit list, so removing it lets the duration come from mdhd/stts.
+	trak.Edts = nil
+	if len(trak.Children) > 0 {
+		kept := trak.Children[:0]
+		for _, child := range trak.Children {
+			if child.Type() == "edts" {
+				continue
+			}
+			kept = append(kept, child)
+		}
+		trak.Children = kept
+	}
+
 	// Remove mvex (fragment declaration) — a progressive file must not have it.
 	removeMvex(moov)
 
