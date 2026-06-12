@@ -40,24 +40,19 @@ MusicBot-Go/
 │   ├── interfaces.go            # 全局接口定义
 │   └── types.go                 # 全局类型定义
 └── plugins/                     # 平台插件
-    ├── all/                     # 插件聚合 (空白导入)
-    ├── scripts/                 # 动态脚本插件 (PluginScriptDir)
-    ├── netease/                 # 网易云音乐插件
-    │   ├── client.go            # API 客户端
-    │   ├── platform.go          # Platform 接口实现
-    │   ├── matcher.go           # URL 匹配器
-    │   ├── textmatcher.go       # 文本匹配器 (短链/纯 ID)
-    │   ├── recognizer.go        # 识曲适配器
-    │   ├── register.go          # 插件注册
-    │   └── *_test.go            # 单元测试
-    └── qqmusic/                 # QQ音乐插件
-        ├── client.go            # API 客户端
-        ├── platform.go          # Platform 接口实现
-        ├── matcher.go           # URL 匹配器
-        ├── textmatcher.go       # 文本匹配器 (短链/纯 ID)
-        ├── refresh.go           # Cookie 刷新/检查
-        ├── register.go          # 插件注册
-        └── *_test.go            # 单元测试
+    ├── all/                     # 插件聚合 (空白导入，决定编译进哪些平台)
+    ├── scripts/                 # 动态脚本插件 (PluginScriptDir, yaegi 解释执行)
+    ├── netease/                 # 网易云音乐（含 recognize/ 识曲 Node.js 服务）
+    ├── qqmusic/                 # QQ 音乐
+    ├── kugou/                   # 酷狗音乐（含概念版扫码登录）
+    ├── soda/                    # 汽水音乐
+    ├── bilibili/                # 哔哩哔哩
+    └── applemusic/              # Apple Music（Widevine 原生解密 + 可选 FairPlay wrapper）
+
+每个平台插件目录的典型结构：`client.go`（API 客户端）、`platform.go`（Platform
+接口实现）、`matcher.go` / `textmatcher.go`（URL / 短链 / 纯 ID 识别）、
+`register.go`（注册工厂），按需还有 `recognizer.go`、`refresh.go`（Cookie 续期）、
+`account.go`（账号登录）等。
 ```
 
 ## 核心流程
@@ -196,17 +191,22 @@ type SongRepository interface {
 - `SongInfoModel`: 歌曲缓存
 - `UserSettingsModel`: 用户偏好设置 (默认平台/音质)
 - `GroupSettingsModel`: 群聊偏好设置 (默认平台/音质)
+- `PluginSettingsModel`: 插件独立设置 (按 `[plugins.<name>]` 维度存储)
 - `BotStatModel`: 统计信息（发送次数等）
 
 ### Telegram 处理器 (`bot/telegram/handler/`)
 
 **主要处理器**:
-- `MusicHandler`: 音乐下载核心逻辑
+- `MusicHandler`: 音乐下载核心逻辑（含 `/music` 与关键词回退、URL/ID 自动识别）
 - `SearchHandler`: 搜索功能 (使用用户默认平台)
+- `PlaylistHandler`: 专辑/歌单分页选择
+- `ArtistHandler`: 艺术家作品集
 - `LyricHandler`: 歌词获取
-- `SettingsHandler`: 用户设置 (平台/音质偏好)
-- `RecognizeHandler`: 语音识曲
-- `StatusHandler`: 状态查询
+- `SettingsHandler`: 用户/群聊设置 (平台/音质偏好)
+- `RecognizeHandler`: 语音识曲（需 `EnableRecognize`）
+- `StatusHandler`: 状态与账号查询
+- `InlineHandler`: Inline 模式查询
+- 管理类：账号登录 (`/login`)、`/reload`、`/rmcache`、`/wl` 白名单
 
 **设计特点**:
 - 每个处理器独立，职责单一
@@ -294,7 +294,8 @@ CREATE TABLE group_settings (
 3. **实现 URLMatcher** (可选): 用于 URL 识别
 4. **注册插件**: 在插件包内注册工厂，并在 `plugins/all` 添加空白导入
 
-详见 `PLUGIN_GUIDE.md`。
+详见 [`plugins/README.md`](plugins/README.md)（静态插件）与
+[`plugins/scripts/README.md`](plugins/scripts/README.md)（动态脚本插件）。
 
 ### 添加新命令
 
