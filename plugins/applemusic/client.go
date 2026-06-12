@@ -800,29 +800,50 @@ func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL st
 
 // --- Wrapper Decryption ---
 
-// fetchViaWrapper uses the WorldObservationLog/wrapper service to get an m3u8 URL
-// via its TCP port 20020, then downloads the underlying mp4 from CDN and streams
-// encrypted samples through TCP port 10020 for decryption.
+// fetchViaWrapper decrypts an enhancedHls stream (ALAC lossless / Hi-Res /
+// Atmos) through the WorldObservationLog/wrapper FairPlay service.
 //
 // The full flow:
-//  1. wrapper:20020 → send adamId → receive m3u8 URL
-//  2. Fetch m3u8, parse segments and skd:// key URI
-//  3. Download the encrypted mp4 from CDN
-//  4. wrapper:10020 → send adamId + skd URI + encrypted samples → receive decrypted samples
-//  5. Reassemble decrypted mp4 and write to dest
+//  1. Resolve the enhancedHls master playlist. For Hi-Res/Atmos, prefer the
+//     wrapper's device m3u8 (port 20020) — the catalog enhancedHls is a trimmed
+//     "_lossless" variant (ALAC ≤48kHz/24bit, no true Hi-Res/Atmos). Fall back
+//     to the catalog enhancedHls when the device m3u8 is unavailable.
+//  2. Pick the stream variant matching the requested quality.
+//  3. Fetch the variant media playlist (per-segment skd:// keys + mp4 URL).
+//  4. Download the single byte-range mp4 from CDN.
+//  5. Stream each cbcs sample through wrapper port 10020 to decrypt in place,
+//     then (ALAC) run alacfix and remux to a progressive MP4.
 func (c *Client) fetchViaWrapper(ctx context.Context, trackID string, quality platform.Quality, wantAtmos bool) (*platform.DownloadInfo, error) {
 	host := strings.TrimSpace(c.wrapperHost)
 	if host == "" {
 		return nil, fmt.Errorf("wrapper host not configured")
 	}
 
-	// Resolve the enhancedHls master and pick the variant for the requested
-	// quality up front, so we can fail fast (and report the real quality)
-	// before returning a DownloadInfo.
-	masterURL, err := c.enhancedHLSMasterURL(ctx, trackID)
-	if err != nil {
-		return nil, fmt.Errorf("enhancedHls master: %w", err)
+	wrapper := NewWrapperClient(host)
+
+	// Resolve the enhancedHls master playlist. The catalog API's enhancedHls is
+	// a trimmed "_lossless" variant: ALAC capped at 48kHz/24bit, no true Hi-Res
+	// (96/192kHz) and no Atmos. The wrapper's device m3u8 port (20020) returns
+	// the full "_default" master with those streams. For Hi-Res/Atmos requests
+	// we must use the device m3u8; for AAC/standard the catalog is enough.
+	wantBest := wantAtmos || quality >= platform.QualityHiRes
+	var masterURL string
+	if wantBest {
+		if devURL, err := wrapper.GetM3U8URL(ctx, trackID); err == nil && strings.HasSuffix(devURL, ".m3u8") {
+			masterURL = devURL
+		} else if c.logger != nil {
+			c.logger.Warn("applemusic: device m3u8 unavailable, falling back to catalog enhancedHls",
+				"track_id", trackID, "error", err)
+		}
 	}
+	if masterURL == "" {
+		catalogURL, err := c.enhancedHLSMasterURL(ctx, trackID)
+		if err != nil {
+			return nil, fmt.Errorf("enhancedHls master: %w", err)
+		}
+		masterURL = catalogURL
+	}
+
 	masterBody, err := c.downloadURL(ctx, masterURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch enhancedHls master: %w", err)
@@ -842,7 +863,6 @@ func (c *Client) fetchViaWrapper(ctx context.Context, trackID string, quality pl
 		mediaURL = base + mediaURL
 	}
 
-	wrapper := NewWrapperClient(host)
 	resolvedQuality := variantQuality(variant)
 	resolvedBitrate := variant.AvgBW / 1000
 	if resolvedBitrate <= 0 {
