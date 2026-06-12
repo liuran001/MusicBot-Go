@@ -102,7 +102,7 @@ FROM runtime-base AS lite
 LABEL org.opencontainers.image.description="MusicBot-Go lightweight image without /recognize dependencies"
 
 FROM runtime-base AS full
-LABEL org.opencontainers.image.description="MusicBot-Go full image with /recognize dependencies"
+LABEL org.opencontainers.image.description="MusicBot-Go full image with /recognize dependencies and Apple Music support"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
@@ -112,3 +112,14 @@ COPY --from=node-runtime /usr/local/include/node /usr/local/include/node
 COPY --from=node-runtime /usr/local/share /usr/local/share
 COPY plugins/netease/recognize /app/plugins/netease/recognize
 COPY --from=npm-builder /build/node_modules /app/plugins/netease/recognize/service/node_modules
+
+# --- Apple Music wrapper (optional, requires wrapper release zip at build time) ---
+# To enable: place the wrapper release zip at docker/wrapper/ before building.
+# The wrapper provides Widevine DRM decryption for Apple Music full-quality downloads.
+# At runtime, set APPLE_MUSIC_USERNAME / APPLE_MUSIC_PASSWORD env vars for first login.
+COPY docker/wrapper/ /app/wrapper/
+RUN if [ -f /app/wrapper/wrapper ]; then chmod +x /app/wrapper/wrapper; fi
+COPY docker/entrypoint-full.sh /app/entrypoint-full.sh
+RUN chmod +x /app/entrypoint-full.sh
+ENTRYPOINT ["/app/entrypoint-full.sh"]
+CMD ["-c", "/app/config.ini"]

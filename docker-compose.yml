@@ -3,11 +3,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: full
     container_name: musicbot-go
     restart: unless-stopped
+    # privileged is required for the Apple Music wrapper (uses chroot)
+    # If you don't need Apple Music DRM decryption, remove this line.
+    privileged: true
     working_dir: /app/workdir
     command: ["-c", "/app/workdir/config.ini"]
     volumes:
       - ./docker-data:/app/workdir
     environment:
       TZ: Asia/Shanghai
+      # Apple Music wrapper credentials (only needed for first login)
+      # APPLE_MUSIC_USERNAME: you@icloud.com
+      # APPLE_MUSIC_PASSWORD: yourpassword
