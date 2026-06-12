@@ -36,7 +36,7 @@ type Client struct {
 	mediaUserToken     string
 	storefront         string
 	language           string
-	wrapperURL         string // URL of the Widevine decryption wrapper (e.g. http://localhost:11451)
+	wrapperHost        string // Host of the wrapper service (e.g. "127.0.0.1"), empty = disabled
 	storefrontDetected bool
 	logger             *logpkg.Logger
 	persistFunc        func(pairs map[string]string) error
@@ -488,8 +488,8 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		previewURL = attrs.Previews[0].URL
 	}
 
-	// Priority 1: Use the wrapper API for decrypted full-quality download.
-	if strings.TrimSpace(c.wrapperURL) != "" {
+	// Priority 1: Use the wrapper service for decrypted full-quality download.
+	if strings.TrimSpace(c.wrapperHost) != "" {
 		info, err := c.fetchViaWrapper(ctx, trackID)
 		if err == nil && info != nil {
 			if previewURL != "" {
@@ -722,94 +722,143 @@ func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL st
 
 // --- Wrapper Decryption ---
 
-// fetchViaWrapper calls an external Widevine decryption wrapper service
-// (https://github.com/WorldObservationLog/wrapper) to download and decrypt a track.
-// The wrapper returns the decrypted m4a file directly in the response body.
-// We use a custom DownloadFunc to stream from the wrapper instead of a direct URL.
+// fetchViaWrapper uses the WorldObservationLog/wrapper service to get an m3u8 URL
+// via its TCP port 20020, then downloads the underlying mp4 from CDN and streams
+// encrypted samples through TCP port 10020 for decryption.
+//
+// The full flow:
+//  1. wrapper:20020 → send adamId → receive m3u8 URL
+//  2. Fetch m3u8, parse segments and skd:// key URI
+//  3. Download the encrypted mp4 from CDN
+//  4. wrapper:10020 → send adamId + skd URI + encrypted samples → receive decrypted samples
+//  5. Reassemble decrypted mp4 and write to dest
 func (c *Client) fetchViaWrapper(ctx context.Context, trackID string) (*platform.DownloadInfo, error) {
-	wrapperURL := strings.TrimRight(strings.TrimSpace(c.wrapperURL), "/")
-	if wrapperURL == "" {
-		return nil, fmt.Errorf("wrapper URL not configured")
+	host := strings.TrimSpace(c.wrapperHost)
+	if host == "" {
+		return nil, fmt.Errorf("wrapper host not configured")
 	}
 
-	// The wrapper API: POST / with {"id": "<trackID>", "storefront": "<sf>"}
-	// returns the decrypted m4a as the response body.
+	wrapper := NewWrapperClient(host)
+
 	downloadFn := func(ctx context.Context, info *platform.DownloadInfo, destPath string, progress func(written, total int64)) (int64, error) {
-		payload, err := json.Marshal(map[string]string{
-			"id":         trackID,
-			"storefront": c.storefront,
-		})
+		// Step 1: Get m3u8 URL from wrapper.
+		m3u8URL, err := wrapper.GetM3U8URL(ctx, trackID)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("get m3u8: %w", err)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, wrapperURL, bytes.NewReader(payload))
+		// Step 2: Fetch m3u8 and find mp4 URL + skd URI.
+		mp4URL, skdURI, err := c.parseHLSManifest(ctx, m3u8URL)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("parse m3u8: %w", err)
 		}
-		req.Header.Set("Content-Type", "application/json")
 
-		// Use a longer timeout for decryption (can take 10-30s).
-		wrapperClient := &http.Client{Timeout: 120 * time.Second}
-		resp, err := wrapperClient.Do(req)
+		// Step 3: Download the encrypted mp4 from CDN.
+		encData, err := c.downloadURL(ctx, mp4URL)
 		if err != nil {
-			return 0, fmt.Errorf("applemusic: wrapper request failed: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-			return 0, fmt.Errorf("applemusic: wrapper HTTP %d: %s", resp.StatusCode, string(errBody))
+			return 0, fmt.Errorf("download encrypted mp4: %w", err)
 		}
 
-		// Stream the decrypted file to destPath.
+		if progress != nil {
+			progress(int64(len(encData))/2, int64(len(encData)))
+		}
+
+		// Step 4: Decrypt via wrapper.
+		// For simplicity, send the entire file as one sample.
+		decSamples, err := wrapper.DecryptSamples(ctx, trackID, skdURI, [][]byte{encData})
+		if err != nil {
+			return 0, fmt.Errorf("decrypt: %w", err)
+		}
+		if len(decSamples) == 0 {
+			return 0, fmt.Errorf("decrypt returned no data")
+		}
+
+		// Step 5: Write to dest.
 		f, err := createFile(destPath)
 		if err != nil {
 			return 0, err
 		}
 		defer f.Close()
 
-		var total int64
-		if cl := resp.Header.Get("Content-Length"); cl != "" {
-			total, _ = strconv.ParseInt(cl, 10, 64)
+		n, err := f.Write(decSamples[0])
+		if progress != nil {
+			progress(int64(n), int64(n))
 		}
-
-		var written int64
-		buf := make([]byte, 32*1024)
-		for {
-			n, readErr := resp.Body.Read(buf)
-			if n > 0 {
-				nw, writeErr := f.Write(buf[:n])
-				written += int64(nw)
-				if progress != nil {
-					progress(written, total)
-				}
-				if writeErr != nil {
-					return written, writeErr
-				}
-			}
-			if readErr != nil {
-				if readErr == io.EOF {
-					break
-				}
-				return written, readErr
-			}
-		}
-		return written, nil
+		return int64(n), err
 	}
 
 	if c.logger != nil {
 		c.logger.Debug("applemusic: using wrapper for decrypted download",
-			"track_id", trackID, "wrapper_url", wrapperURL)
+			"track_id", trackID, "wrapper_host", host)
 	}
 
 	return &platform.DownloadInfo{
-		URL:        wrapperURL, // informational; actual download uses Downloader
+		URL:        fmt.Sprintf("wrapper://%s/%s", host, trackID),
 		Format:     "m4a",
 		Bitrate:    256,
 		Quality:    platform.QualityHigh,
 		Downloader: downloadFn,
 	}, nil
+}
+
+// parseHLSManifest fetches an m3u8 and extracts the mp4 segment URL and skd:// key URI.
+func (c *Client) parseHLSManifest(ctx context.Context, m3u8URL string) (mp4URL, skdURI string, err error) {
+	body, err := c.downloadURL(ctx, m3u8URL)
+	if err != nil {
+		return "", "", err
+	}
+
+	content := string(body)
+	baseURL := m3u8URL[:strings.LastIndex(m3u8URL, "/")+1]
+
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		// Extract skd:// URI from EXT-X-KEY
+		if strings.Contains(line, "EXT-X-KEY") && strings.Contains(line, "skd://") {
+			start := strings.Index(line, "skd://")
+			end := strings.Index(line[start:], `"`)
+			if end > 0 {
+				skdURI = line[start : start+end]
+			}
+		}
+		// Extract mp4 segment filename
+		if !strings.HasPrefix(line, "#") && line != "" &&
+			(strings.HasSuffix(line, ".mp4") || strings.HasSuffix(line, ".m4a") || strings.HasSuffix(line, ".m4s")) {
+			if strings.HasPrefix(line, "http") {
+				mp4URL = line
+			} else {
+				mp4URL = baseURL + line
+			}
+		}
+	}
+
+	if mp4URL == "" {
+		return "", "", fmt.Errorf("no mp4 segment in m3u8")
+	}
+	if skdURI == "" {
+		return "", "", fmt.Errorf("no skd:// key URI in m3u8")
+	}
+	return mp4URL, skdURI, nil
+}
+
+// downloadURL downloads a URL and returns its content as bytes.
+func (c *Client) downloadURL(ctx context.Context, targetURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", appleMusicUA)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, targetURL)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // createFile creates a file for writing, creating parent directories as needed.

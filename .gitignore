@@ -47,5 +47,10 @@ package-lock.json
 .DS_Store
 Thumbs.db
 
+# Apple Music wrapper binaries (download separately, see docker/wrapper/README.md)
+docker/wrapper/wrapper
+docker/wrapper/rootfs/
+docker/wrapper/*.zip
+
 # sisyphus sessions
 .sisyphus/

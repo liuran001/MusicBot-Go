@@ -43,7 +43,7 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	}
 
 	client := NewClient(mediaUserToken, storefront, language, time.Duration(timeoutSec)*time.Second, logger)
-	client.wrapperURL = strings.TrimSpace(cfg.GetPluginString("applemusic", "wrapper_url"))
+	client.wrapperHost = strings.TrimSpace(cfg.GetPluginString("applemusic", "wrapper_host"))
 	client.persistFunc = func(pairs map[string]string) error {
 		if logger != nil {
 			logger.Debug("applemusic: persist plugin config", "pairs", pairs)
