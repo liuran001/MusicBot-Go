@@ -55,16 +55,9 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	}
 
 	// Load Widevine L3 device for native DRM decryption.
-	// Look for device files: client_id.bin + private_key.pem
-	// in configured path or default locations.
+	// Uses built-in default L3 credentials; can be overridden with files.
 	wvClientID := cfg.GetPluginString("applemusic", "wv_client_id")
 	wvPrivateKey := cfg.GetPluginString("applemusic", "wv_private_key")
-	if wvClientID == "" {
-		wvClientID = "widevine/client_id.bin"
-	}
-	if wvPrivateKey == "" {
-		wvPrivateKey = "widevine/private_key.pem"
-	}
 	if dev := loadWVDevice(wvClientID, wvPrivateKey, logger); dev != nil {
 		client.wvDevice = dev
 	}
@@ -76,36 +69,40 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	return &platformplugins.Contribution{Platform: NewPlatform(client)}, nil
 }
 
-// loadWVDevice tries to load Widevine L3 device credentials from files.
+// loadWVDevice loads Widevine L3 device credentials.
+// If file paths are provided, loads from files (override).
+// Otherwise uses built-in default L3 credentials.
 func loadWVDevice(clientIDPath, privKeyPath string, logger *logpkg.Logger) *widevine.Device {
-	clientID, err := os.ReadFile(clientIDPath)
-	if err != nil {
-		if logger != nil {
-			logger.Debug("applemusic: widevine client_id not found, native decrypt disabled",
-				"path", clientIDPath, "error", err)
+	// Try loading from files first (user override).
+	if clientIDPath != "" && privKeyPath != "" {
+		clientID, err1 := os.ReadFile(clientIDPath)
+		privKey, err2 := os.ReadFile(privKeyPath)
+		if err1 == nil && err2 == nil {
+			dev, err := widevine.NewDevice(widevine.FromRaw(clientID, privKey))
+			if err == nil {
+				if logger != nil {
+					logger.Info("applemusic: widevine device loaded from files")
+				}
+				return dev
+			}
+			if logger != nil {
+				logger.Warn("applemusic: widevine device file init failed, using built-in", "error", err)
+			}
 		}
-		return nil
 	}
 
-	privKey, err := os.ReadFile(privKeyPath)
-	if err != nil {
-		if logger != nil {
-			logger.Debug("applemusic: widevine private_key not found, native decrypt disabled",
-				"path", privKeyPath, "error", err)
-		}
-		return nil
-	}
-
+	// Use built-in default L3 credentials.
+	clientID, privKey := defaultWVCredentials()
 	dev, err := widevine.NewDevice(widevine.FromRaw(clientID, privKey))
 	if err != nil {
 		if logger != nil {
-			logger.Warn("applemusic: widevine device init failed", "error", err)
+			logger.Warn("applemusic: widevine built-in device init failed", "error", err)
 		}
 		return nil
 	}
 
 	if logger != nil {
-		logger.Info("applemusic: widevine native decrypt enabled")
+		logger.Info("applemusic: widevine native decrypt enabled (built-in L3)")
 	}
 	return dev
 }

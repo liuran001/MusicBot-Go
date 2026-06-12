@@ -191,6 +191,45 @@ concept_auto_refresh_enabled = false
 concept_auto_refresh_interval_sec = 21600
 ```
 
+#### Apple Music
+```ini
+[plugins.applemusic]
+enabled = true
+# media-user-token（登录 music.apple.com 后从浏览器 Cookie 复制）
+# 用于搜索、歌词、曲目下载等需要订阅权限的功能
+media_user_token = YOUR_MEDIA_USER_TOKEN
+# 国家/地区代码（默认 us，启动后会根据账号自动检测）
+# storefront = us
+# 无损/Hi-Res/Atmos 解密服务地址（可选，见下）
+# wrapper_host = 127.0.0.1
+```
+
+> **音质说明（两档解密能力）：**
+>
+> - **AAC 256kbps — 开箱即用，零配置。** 本插件内置原生 Go Widevine 解密（内置公共
+>   测试 L3 设备凭证），只要填了 `media_user_token` 即可下载 AAC 256k 完整曲目，无需
+>   任何额外服务或设备文件。
+> - **无损 ALAC / Hi-Res 24bit / Dolby Atmos — 需要外部 wrapper。** Apple 在服务端
+>   只对 AAC 发放 Widevine 授权，无损/Hi-Res/Atmos 走的是 FairPlay，必须通过外部
+>   [WorldObservationLog/wrapper](https://github.com/WorldObservationLog/wrapper)
+>   解密服务，并设置 `wrapper_host` 指向它。
+>
+> **Docker 用户**：`docker-compose.yml` 已内置 `wrapper` 服务。首次需用一个**有订阅
+> 的 Apple ID** 给 wrapper 单独登录一次（wrapper 模拟安卓 App，无法复用 bot 的
+> `media_user_token`，是两套独立认证）：
+>
+> ```bash
+> docker compose run --rm wrapper -L "appleid@example.com:password" -F -H 0.0.0.0
+> # 完成 2FA 后 Ctrl-C；会话持久化到 docker-data/wrapper/，之后无需再登
+> ```
+>
+> 然后在 `config.ini` 设 `wrapper_host = wrapper`，`docker compose up -d` 即可。
+> **裸核用户**：自行运行 wrapper，把 `wrapper_host` 指向其地址（如 `127.0.0.1`）。
+> 详见 [`docker/wrapper/README.md`](docker/wrapper/README.md)。
+>
+> 请求高于 AAC 的音质时，若没有可用的 wrapper，会自动回退到 AAC 256k。
+> 自定义 L3 设备可选：通过 `wv_client_id` / `wv_private_key` 指定文件路径覆盖内置凭证。
+
 管理员命令：
 
 - `/reload` 重载配置与插件

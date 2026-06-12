@@ -47,10 +47,9 @@ package-lock.json
 .DS_Store
 Thumbs.db
 
-# Apple Music wrapper binaries (download separately, see docker/wrapper/README.md)
-docker/wrapper/wrapper
-docker/wrapper/rootfs/
-docker/wrapper/*.zip
+# Docker runtime data (config, caches, and the Apple Music wrapper session —
+# the wrapper session contains an Apple ID login, never commit it)
+docker-data/
 
 # Widevine L3 device credentials (do NOT commit these)
 widevine/

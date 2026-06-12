@@ -9,11 +9,18 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
+	mp4 "github.com/Eyevinn/mp4ff/mp4"
 	widevine "github.com/iyear/gowidevine"
 	"github.com/iyear/gowidevine/widevinepb"
+	"google.golang.org/protobuf/proto"
 )
+
+// widevineSystemID is the Widevine DRM system ID (EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED).
+var widevineSystemID = []byte{
+	0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce,
+	0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
+}
 
 // decryptTrack performs the full Widevine DRM decryption pipeline:
 //  1. Call WebPlayback API to get the encrypted HLS m3u8 URL
@@ -81,12 +88,15 @@ func (c *Client) decryptTrack(ctx context.Context, trackID string, device *widev
 	}
 
 	// Step 4: Build PSSH and get license.
+	// kidB64 from the HLS manifest is a bare 16-byte key ID, not a full PSSH
+	// box. gowidevine's NewPSSH expects a complete MP4 'pssh' box, so we wrap
+	// the KID in a Widevine PSSH box first.
 	kidBytes, err := base64.StdEncoding.DecodeString(kidB64)
 	if err != nil {
 		return nil, fmt.Errorf("decode KID: %w", err)
 	}
 
-	pssh, err := widevine.NewPSSH(kidBytes)
+	pssh, err := buildWidevinePSSH(kidBytes)
 	if err != nil {
 		return nil, fmt.Errorf("build PSSH: %w", err)
 	}
@@ -172,7 +182,7 @@ func (c *Client) callWebPlayback(ctx context.Context, trackID string) ([]webPlay
 func (c *Client) acquireLicense(ctx context.Context, challenge []byte, adamId, uriPrefix, kidB64 string) ([]byte, error) {
 	const licenseURL = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"challenge":      base64.StdEncoding.EncodeToString(challenge),
 		"key-system":     "com.widevine.alpha",
 		"uri":            uriPrefix + "," + kidB64,
@@ -231,26 +241,22 @@ func (c *Client) acquireLicense(ctx context.Context, challenge []byte, adamId, u
 func parseWidevineHLS(m3u8URL, content string) (mp4URL, kidB64, uriPrefix string, err error) {
 	baseURL := m3u8URL[:strings.LastIndex(m3u8URL, "/")+1]
 
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 
-		// EXT-X-KEY:METHOD=ISO-23001-7,URI="data:;base64,<psshBoxData>"
-		// or URI="<uriPrefix>,<kidBase64>"
+		// EXT-X-KEY:METHOD=ISO-23001-7,URI="data:;base64,<base64-KID>"
+		// Split on the first comma into (uriPrefix, kidBase64). The license
+		// request later rebuilds the original URI as uriPrefix+","+kidBase64,
+		// so we must preserve the prefix verbatim (matches apple-music-downloader).
 		if strings.Contains(line, "EXT-X-KEY") {
 			if idx := strings.Index(line, `URI="`); idx >= 0 {
 				uriStart := idx + 5
 				uriEnd := strings.Index(line[uriStart:], `"`)
 				if uriEnd > 0 {
 					fullURI := line[uriStart : uriStart+uriEnd]
-					// Split on comma — format: "<uriPrefix>,<kidBase64>"
 					if parts := strings.SplitN(fullURI, ",", 2); len(parts) == 2 {
 						uriPrefix = parts[0]
 						kidB64 = parts[1]
-					} else if strings.HasPrefix(fullURI, "data:;base64,") {
-						// Inline PSSH box — extract KID from it.
-						psshData := strings.TrimPrefix(fullURI, "data:;base64,")
-						kidB64 = psshData
-						uriPrefix = ""
 					}
 				}
 			}
@@ -295,5 +301,31 @@ func parseWidevineHLS(m3u8URL, content string) (mp4URL, kidB64, uriPrefix string
 	return mp4URL, kidB64, uriPrefix, nil
 }
 
-// wvDeviceTimeout is the timeout for Widevine device credential loading.
-const wvDeviceTimeout = 5 * time.Second
+// buildWidevinePSSH wraps a raw 16-byte key ID into a complete Widevine PSSH
+// box and returns a parsed *widevine.PSSH. The HLS manifest only carries the
+// bare KID, but gowidevine's NewPSSH (and Apple's license server) expect a
+// full MP4 'pssh' box containing a WidevinePsshData protobuf.
+func buildWidevinePSSH(kid []byte) (*widevine.PSSH, error) {
+	// Inner Widevine protobuf: the key ID and content protection algorithm.
+	data, err := proto.Marshal(&widevinepb.WidevinePsshData{
+		KeyIds:    [][]byte{kid},
+		Algorithm: widevinepb.WidevinePsshData_AESCTR.Enum(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal widevine pssh data: %w", err)
+	}
+
+	// Wrap it in a version-0 MP4 'pssh' box with the Widevine system ID.
+	box := &mp4.PsshBox{
+		Version:  0,
+		Flags:    0,
+		SystemID: mp4.UUID(widevineSystemID),
+		Data:     data,
+	}
+	var buf bytes.Buffer
+	if err := box.Encode(&buf); err != nil {
+		return nil, fmt.Errorf("encode pssh box: %w", err)
+	}
+
+	return widevine.NewPSSH(buf.Bytes())
+}

@@ -27,7 +27,11 @@ func (p *AppleMusicPlatform) SupportsLyrics() bool { return true }
 func (p *AppleMusicPlatform) SupportsRecognition() bool { return false }
 
 func (p *AppleMusicPlatform) Capabilities() platform.Capabilities {
-	return platform.Capabilities{Download: true, Search: true, Lyrics: true, Recognition: false, HiRes: false}
+	// Hi-Res / lossless is only available through the external FairPlay wrapper;
+	// the built-in native path tops out at AAC 256k (Apple blocks Widevine for
+	// lossless). Report HiRes only when a wrapper is configured.
+	hiRes := p != nil && p.client != nil && strings.TrimSpace(p.client.wrapperHost) != ""
+	return platform.Capabilities{Download: true, Search: true, Lyrics: true, Recognition: false, HiRes: hiRes}
 }
 
 func (p *AppleMusicPlatform) Metadata() platform.Meta {
@@ -171,4 +175,3 @@ func (p *AppleMusicPlatform) MatchText(text string) (string, bool) {
 func (p *AppleMusicPlatform) ShortLinkHosts() []string {
 	return []string{"itunes.apple.com"}
 }
-

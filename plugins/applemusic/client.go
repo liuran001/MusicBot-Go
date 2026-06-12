@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	appleMusicBaseURL = "https://amp-api.music.apple.com"
-	appleMusicOrigin  = "https://music.apple.com"
-	appleMusicUA      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+	appleMusicBaseURL  = "https://amp-api.music.apple.com"
+	appleMusicOrigin   = "https://music.apple.com"
+	appleMusicUA       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
 	defaultArtworkSize = 1200
 )
 
@@ -38,7 +38,7 @@ type Client struct {
 	mediaUserToken     string
 	storefront         string
 	language           string
-	wrapperHost        string // Host of the wrapper service (e.g. "127.0.0.1"), empty = disabled
+	wrapperHost        string           // Host of the wrapper service (e.g. "127.0.0.1"), empty = disabled
 	wvDevice           *widevine.Device // Widevine L3 device for native decryption
 	storefrontDetected bool
 	logger             *logpkg.Logger
@@ -468,7 +468,7 @@ func (c *Client) GetLyrics(ctx context.Context, trackID string) (string, error) 
 // --- Download ---
 
 func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
-	// Fetch song details to get preview URL.
+	// Fetch song details to confirm the track exists / is available.
 	reqURL := fmt.Sprintf("%s/v1/catalog/%s/songs/%s?include=albums,artists&extend=extendedAssetUrls&l=%s",
 		appleMusicBaseURL, c.storefront, trackID, c.language)
 
@@ -485,19 +485,32 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		return nil, platform.NewNotFoundError("applemusic", "track", trackID)
 	}
 
-	attrs := resp.Data[0].Attributes
-	var previewURL string
-	if len(attrs.Previews) > 0 {
-		previewURL = attrs.Previews[0].URL
+	// Decide whether the request wants a lossless/Hi-Res/Atmos tier. Those are
+	// ONLY obtainable through the external FairPlay wrapper — Apple refuses
+	// Widevine licenses for enhancedHls (server-side, returns -1002), so the
+	// built-in native path tops out at AAC 256k.
+	wantsLossless := quality >= platform.QualityLossless
+	hasWrapper := strings.TrimSpace(c.wrapperHost) != ""
+
+	// Priority 1 (lossless tiers): external wrapper via enhancedHls.
+	if wantsLossless && hasWrapper {
+		info, err := c.fetchViaWrapper(ctx, trackID, quality, false)
+		if err == nil && info != nil {
+			return info, nil
+		}
+		if c.logger != nil {
+			c.logger.Warn("applemusic: wrapper lossless failed, falling back to AAC",
+				"track_id", trackID, "quality", quality.String(), "error", err)
+		}
+	} else if wantsLossless && !hasWrapper && c.logger != nil {
+		c.logger.Info("applemusic: lossless requested but no wrapper configured; serving AAC 256k",
+			"track_id", trackID, "quality", quality.String())
 	}
 
-	// Priority 1: Native Widevine decryption (built-in, no external dependencies).
+	// Priority 2: Native Widevine decryption (built-in, AAC 256k, zero-config).
 	if c.wvDevice != nil && strings.TrimSpace(c.mediaUserToken) != "" {
 		info, err := c.fetchDecrypted(ctx, trackID)
 		if err == nil && info != nil {
-			if previewURL != "" {
-				info.CandidateURLs = append(info.CandidateURLs, previewURL)
-			}
 			return info, nil
 		}
 		if c.logger != nil {
@@ -505,13 +518,10 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		}
 	}
 
-	// Priority 2: External wrapper service (TCP protocol).
-	if strings.TrimSpace(c.wrapperHost) != "" {
-		info, err := c.fetchViaWrapper(ctx, trackID)
+	// Priority 3: External wrapper for non-lossless requests (if available).
+	if !wantsLossless && hasWrapper {
+		info, err := c.fetchViaWrapper(ctx, trackID, quality, false)
 		if err == nil && info != nil {
-			if previewURL != "" {
-				info.CandidateURLs = append(info.CandidateURLs, previewURL)
-			}
 			return info, nil
 		}
 		if c.logger != nil {
@@ -519,36 +529,26 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		}
 	}
 
-	// Priority 3: WebPlayback encrypted mp4 (full track, DRM-encrypted).
+	// Priority 4: WebPlayback encrypted mp4 (full track, DRM-encrypted).
 	if strings.TrimSpace(c.mediaUserToken) != "" {
 		info, err := c.fetchWebPlayback(ctx, trackID)
 		if err == nil && info != nil {
-			if previewURL != "" {
-				info.CandidateURLs = append(info.CandidateURLs, previewURL)
-			}
 			return info, nil
 		}
 		if c.logger != nil {
-			c.logger.Debug("applemusic: webplayback failed, using preview", "track_id", trackID, "error", err)
+			c.logger.Debug("applemusic: webplayback failed", "track_id", trackID, "error", err)
 		}
 	}
 
-	// Priority 3: Preview URL (30-second playable AAC clip).
-	if previewURL == "" {
-		return nil, platform.NewUnavailableError("applemusic", "track", trackID)
-	}
-
-	return &platform.DownloadInfo{
-		URL:     previewURL,
-		Format:  "m4a",
-		Bitrate: 256,
-		Quality: platform.QualityStandard,
-	}, nil
+	// No full-quality source succeeded. We intentionally do NOT fall back to the
+	// 30-second preview clip — a preview is not a real download, so treat it as
+	// "track unavailable".
+	return nil, platform.NewUnavailableError("applemusic", "track", trackID)
 }
 
 // fetchDecrypted performs native Go Widevine decryption for a full quality track.
 // Uses a custom DownloadFunc to run the decryption pipeline and write to disk.
-func (c *Client) fetchDecrypted(ctx context.Context, trackID string) (*platform.DownloadInfo, error) {
+func (c *Client) fetchDecrypted(_ context.Context, trackID string) (*platform.DownloadInfo, error) {
 	if c.wvDevice == nil {
 		return nil, fmt.Errorf("widevine device not configured")
 	}
@@ -735,7 +735,7 @@ func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL st
 
 	// Find the mp4 segment filename (non-comment line ending in .mp4).
 	var mp4Name string
-	for _, line := range strings.Split(m3u8Content, "\n") {
+	for line := range strings.SplitSeq(m3u8Content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -788,113 +788,158 @@ func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL st
 //  3. Download the encrypted mp4 from CDN
 //  4. wrapper:10020 → send adamId + skd URI + encrypted samples → receive decrypted samples
 //  5. Reassemble decrypted mp4 and write to dest
-func (c *Client) fetchViaWrapper(ctx context.Context, trackID string) (*platform.DownloadInfo, error) {
+func (c *Client) fetchViaWrapper(ctx context.Context, trackID string, quality platform.Quality, wantAtmos bool) (*platform.DownloadInfo, error) {
 	host := strings.TrimSpace(c.wrapperHost)
 	if host == "" {
 		return nil, fmt.Errorf("wrapper host not configured")
 	}
 
+	// Resolve the enhancedHls master and pick the variant for the requested
+	// quality up front, so we can fail fast (and report the real quality)
+	// before returning a DownloadInfo.
+	masterURL, err := c.enhancedHLSMasterURL(ctx, trackID)
+	if err != nil {
+		return nil, fmt.Errorf("enhancedHls master: %w", err)
+	}
+	masterBody, err := c.downloadURL(ctx, masterURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch enhancedHls master: %w", err)
+	}
+	variants, err := parseEnhancedHLSMaster(string(masterBody))
+	if err != nil {
+		return nil, err
+	}
+	variant, ok := selectVariantForQuality(variants, quality, wantAtmos)
+	if !ok {
+		return nil, fmt.Errorf("no suitable enhancedHls variant for quality %s", quality)
+	}
+
+	mediaURL := variant.URI
+	if !strings.HasPrefix(mediaURL, "http") {
+		base := masterURL[:strings.LastIndex(masterURL, "/")+1]
+		mediaURL = base + mediaURL
+	}
+
 	wrapper := NewWrapperClient(host)
+	resolvedQuality := variantQuality(variant)
+	resolvedBitrate := variant.AvgBW / 1000
+	if resolvedBitrate <= 0 {
+		resolvedBitrate = 256
+	}
+	format := "m4a"
+	isALAC := variant.isALAC()
 
 	downloadFn := func(ctx context.Context, info *platform.DownloadInfo, destPath string, progress func(written, total int64)) (int64, error) {
-		// Step 1: Get m3u8 URL from wrapper.
-		m3u8URL, err := wrapper.GetM3U8URL(ctx, trackID)
+		// Fetch the variant's media playlist (per-segment keys + mp4 URL).
+		mediaBody, err := c.downloadURL(ctx, mediaURL)
 		if err != nil {
-			return 0, fmt.Errorf("get m3u8: %w", err)
+			return 0, fmt.Errorf("fetch media playlist: %w", err)
+		}
+		media, err := parseEnhancedHLSMedia(mediaURL, string(mediaBody))
+		if err != nil {
+			return 0, err
 		}
 
-		// Step 2: Fetch m3u8 and find mp4 URL + skd URI.
-		mp4URL, skdURI, err := c.parseHLSManifest(ctx, m3u8URL)
-		if err != nil {
-			return 0, fmt.Errorf("parse m3u8: %w", err)
-		}
-
-		// Step 3: Download the encrypted mp4 from CDN.
-		encData, err := c.downloadURL(ctx, mp4URL)
+		// Download the single byte-range mp4.
+		encData, err := c.downloadURL(ctx, media.MP4URL)
 		if err != nil {
 			return 0, fmt.Errorf("download encrypted mp4: %w", err)
 		}
-
 		if progress != nil {
 			progress(int64(len(encData))/2, int64(len(encData)))
 		}
 
-		// Step 4: Decrypt via wrapper.
-		// For simplicity, send the entire file as one sample.
-		decSamples, err := wrapper.DecryptSamples(ctx, trackID, skdURI, [][]byte{encData})
-		if err != nil {
-			return 0, fmt.Errorf("decrypt: %w", err)
-		}
-		if len(decSamples) == 0 {
-			return 0, fmt.Errorf("decrypt returned no data")
-		}
-
-		// Step 5: Write to dest.
 		f, err := createFile(destPath)
 		if err != nil {
 			return 0, err
 		}
-		defer f.Close()
 
-		n, err := f.Write(decSamples[0])
-		if progress != nil {
-			progress(int64(n), int64(n))
+		// Decrypt via the wrapper (FairPlay cbcs, per-fragment/per-sample).
+		if err := wrapper.DecryptEnhancedHLS(ctx, trackID, bytes.NewReader(encData), media.SegKeys, f); err != nil {
+			f.Close()
+			return 0, fmt.Errorf("wrapper decrypt: %w", err)
 		}
-		return int64(n), err
+		if err := f.Close(); err != nil {
+			return 0, fmt.Errorf("close output: %w", err)
+		}
+
+		// ALAC packets from Apple sometimes lack the TYPE_END terminator, which
+		// trips ffmpeg ("invalid element channel count"). Patch in place. This
+		// is a no-op for files without the defect; failures are non-fatal.
+		if isALAC {
+			if err := fixALACFile(destPath); err != nil && c.logger != nil {
+				c.logger.Warn("applemusic: alac fix failed (file may still play)",
+					"track_id", trackID, "error", err)
+			}
+		}
+
+		fi, statErr := os.Stat(destPath)
+		var n int64
+		if statErr == nil {
+			n = fi.Size()
+		}
+		if progress != nil {
+			progress(n, n)
+		}
+		return n, nil
 	}
 
 	if c.logger != nil {
 		c.logger.Debug("applemusic: using wrapper for decrypted download",
-			"track_id", trackID, "wrapper_host", host)
+			"track_id", trackID, "wrapper_host", host,
+			"codecs", variant.Codecs, "quality", resolvedQuality.String())
 	}
 
 	return &platform.DownloadInfo{
 		URL:        fmt.Sprintf("wrapper://%s/%s", host, trackID),
-		Format:     "m4a",
-		Bitrate:    256,
-		Quality:    platform.QualityHigh,
+		Format:     format,
+		Bitrate:    resolvedBitrate,
+		Quality:    resolvedQuality,
 		Downloader: downloadFn,
 	}, nil
 }
 
-// parseHLSManifest fetches an m3u8 and extracts the mp4 segment URL and skd:// key URI.
-func (c *Client) parseHLSManifest(ctx context.Context, m3u8URL string) (mp4URL, skdURI string, err error) {
-	body, err := c.downloadURL(ctx, m3u8URL)
+// variantQuality maps a selected enhancedHls variant to the unified Quality.
+func variantQuality(v enhancedHLSVariant) platform.Quality {
+	switch {
+	case v.isALAC():
+		if v.BitDepth >= 24 || v.SampleRate > 44100 {
+			return platform.QualityHiRes
+		}
+		return platform.QualityLossless
+	case v.isAtmos():
+		return platform.QualityHiRes
+	case v.isAAC():
+		if v.AvgBW >= 200000 {
+			return platform.QualityHigh
+		}
+		return platform.QualityStandard
+	default:
+		return platform.QualityHigh
+	}
+}
+
+// enhancedHLSMasterURL fetches the catalog song and returns its enhancedHls
+// master playlist URL (the source of lossless/Hi-Res/Atmos streams).
+func (c *Client) enhancedHLSMasterURL(ctx context.Context, trackID string) (string, error) {
+	reqURL := fmt.Sprintf("%s/v1/catalog/%s/songs/%s?extend=extendedAssetUrls&l=%s",
+		appleMusicBaseURL, c.storefront, trackID, c.language)
+	body, err := c.doRequest(ctx, reqURL)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-
-	content := string(body)
-	baseURL := m3u8URL[:strings.LastIndex(m3u8URL, "/")+1]
-
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		// Extract skd:// URI from EXT-X-KEY
-		if strings.Contains(line, "EXT-X-KEY") && strings.Contains(line, "skd://") {
-			start := strings.Index(line, "skd://")
-			end := strings.Index(line[start:], `"`)
-			if end > 0 {
-				skdURI = line[start : start+end]
-			}
-		}
-		// Extract mp4 segment filename
-		if !strings.HasPrefix(line, "#") && line != "" &&
-			(strings.HasSuffix(line, ".mp4") || strings.HasSuffix(line, ".m4a") || strings.HasSuffix(line, ".m4s")) {
-			if strings.HasPrefix(line, "http") {
-				mp4URL = line
-			} else {
-				mp4URL = baseURL + line
-			}
-		}
+	var resp appleMusicResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("parse song: %w", err)
 	}
-
-	if mp4URL == "" {
-		return "", "", fmt.Errorf("no mp4 segment in m3u8")
+	if len(resp.Data) == 0 || resp.Data[0].Attributes.ExtendedAssetUrls == nil {
+		return "", fmt.Errorf("no extendedAssetUrls (track may lack lossless entitlement)")
 	}
-	if skdURI == "" {
-		return "", "", fmt.Errorf("no skd:// key URI in m3u8")
+	url := strings.TrimSpace(resp.Data[0].Attributes.ExtendedAssetUrls.EnhancedHls)
+	if url == "" {
+		return "", fmt.Errorf("empty enhancedHls URL")
 	}
-	return mp4URL, skdURI, nil
+	return url, nil
 }
 
 // downloadURL downloads a URL and returns its content as bytes.
@@ -1153,9 +1198,9 @@ type ttmlDiv struct {
 }
 
 type ttmlP struct {
-	Begin string `xml:"begin,attr"`
-	End   string `xml:"end,attr"`
-	Text  string `xml:",chardata"`
+	Begin string     `xml:"begin,attr"`
+	End   string     `xml:"end,attr"`
+	Text  string     `xml:",chardata"`
 	Spans []ttmlSpan `xml:"span"`
 }
 
