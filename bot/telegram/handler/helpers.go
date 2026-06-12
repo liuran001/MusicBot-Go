@@ -995,6 +995,62 @@ type inlineResultPayload struct {
 	storedAt     time.Time
 }
 
+
+// ttlStore is a generic TTL-based in-memory store that evicts expired entries
+// on each write operation. It replaces multiple ad-hoc map+mutex+cleanup patterns.
+type ttlStore[V any] struct {
+	mu      sync.Mutex
+	entries map[string]ttlEntry[V]
+	ttl     time.Duration
+}
+
+type ttlEntry[V any] struct {
+	value    V
+	storedAt time.Time
+}
+
+func newTTLStore[V any](ttl time.Duration) *ttlStore[V] {
+	return &ttlStore[V]{
+		entries: make(map[string]ttlEntry[V]),
+		ttl:     ttl,
+	}
+}
+
+func (s *ttlStore[V]) Store(key string, value V) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, entry := range s.entries {
+		if now.Sub(entry.storedAt) > s.ttl {
+			delete(s.entries, k)
+		}
+	}
+	s.entries[key] = ttlEntry[V]{value: value, storedAt: now}
+}
+
+func (s *ttlStore[V]) Load(key string) (V, bool) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, entry := range s.entries {
+		if now.Sub(entry.storedAt) > s.ttl {
+			delete(s.entries, k)
+		}
+	}
+	entry, ok := s.entries[key]
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	return entry.value, true
+}
+
+func (s *ttlStore[V]) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, key)
+}
+
 type inlineMessageLockEntry struct {
 	mu   sync.Mutex
 	refs int
@@ -1010,15 +1066,8 @@ var callbackInFlightStore = struct {
 	entries map[string]time.Time
 }{entries: make(map[string]time.Time)}
 
-var inlineCallbackPayloadStore = struct {
-	mu      sync.Mutex
-	entries map[string]inlineCallbackPayload
-}{entries: make(map[string]inlineCallbackPayload)}
-
-var inlineResultPayloadStore = struct {
-	mu      sync.Mutex
-	entries map[string]inlineResultPayload
-}{entries: make(map[string]inlineResultPayload)}
+var inlineCallbackPayloads = newTTLStore[inlineCallbackPayload](30 * time.Minute)
+var inlineResultPayloads = newTTLStore[inlineResultPayload](30 * time.Minute)
 
 var inlineCallbackTokenCounter uint64
 var inlineResultTokenCounter uint64
@@ -1110,14 +1159,7 @@ func storeInlineCallbackPayload(payload inlineCallbackPayload) string {
 	}
 	payload.storedAt = time.Now()
 	token := strconv.FormatUint(uint64(time.Now().UnixNano()), 36) + strconv.FormatUint(atomic.AddUint64(&inlineCallbackTokenCounter, 1), 36)
-	inlineCallbackPayloadStore.mu.Lock()
-	defer inlineCallbackPayloadStore.mu.Unlock()
-	for key, entry := range inlineCallbackPayloadStore.entries {
-		if payload.storedAt.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
-			delete(inlineCallbackPayloadStore.entries, key)
-		}
-	}
-	inlineCallbackPayloadStore.entries[token] = payload
+	inlineCallbackPayloads.Store(token, payload)
 	return token
 }
 
@@ -1134,14 +1176,7 @@ func storeInlineResultPayload(payload inlineResultPayload) string {
 	}
 	payload.storedAt = time.Now()
 	token := strconv.FormatUint(uint64(time.Now().UnixNano()), 36) + strconv.FormatUint(atomic.AddUint64(&inlineResultTokenCounter, 1), 36)
-	inlineResultPayloadStore.mu.Lock()
-	defer inlineResultPayloadStore.mu.Unlock()
-	for key, entry := range inlineResultPayloadStore.entries {
-		if payload.storedAt.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
-			delete(inlineResultPayloadStore.entries, key)
-		}
-	}
-	inlineResultPayloadStore.entries[token] = payload
+	inlineResultPayloads.Store(token, payload)
 	return token
 }
 
@@ -1150,19 +1185,7 @@ func getInlineCallbackPayload(token string) (inlineCallbackPayload, bool) {
 	if token == "" {
 		return inlineCallbackPayload{}, false
 	}
-	now := time.Now()
-	inlineCallbackPayloadStore.mu.Lock()
-	defer inlineCallbackPayloadStore.mu.Unlock()
-	for key, entry := range inlineCallbackPayloadStore.entries {
-		if now.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
-			delete(inlineCallbackPayloadStore.entries, key)
-		}
-	}
-	payload, ok := inlineCallbackPayloadStore.entries[token]
-	if !ok {
-		return inlineCallbackPayload{}, false
-	}
-	return payload, true
+	return inlineCallbackPayloads.Load(token)
 }
 
 func getInlineResultPayload(token string) (inlineResultPayload, bool) {
@@ -1170,19 +1193,7 @@ func getInlineResultPayload(token string) (inlineResultPayload, bool) {
 	if token == "" {
 		return inlineResultPayload{}, false
 	}
-	now := time.Now()
-	inlineResultPayloadStore.mu.Lock()
-	defer inlineResultPayloadStore.mu.Unlock()
-	for key, entry := range inlineResultPayloadStore.entries {
-		if now.Sub(entry.storedAt) > inlineCallbackPayloadTTL {
-			delete(inlineResultPayloadStore.entries, key)
-		}
-	}
-	payload, ok := inlineResultPayloadStore.entries[token]
-	if !ok {
-		return inlineResultPayload{}, false
-	}
-	return payload, true
+	return inlineResultPayloads.Load(token)
 }
 
 func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {

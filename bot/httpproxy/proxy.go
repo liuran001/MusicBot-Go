@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -300,16 +301,7 @@ func sortedHeaderKeys(headers map[string]string) []string {
 		}
 		keys = append(keys, key)
 	}
-	if len(keys) <= 1 {
-		return keys
-	}
-	for i := 0; i < len(keys)-1; i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
+	sort.Strings(keys)
 	return keys
 }
 
