@@ -180,7 +180,16 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 			})
 		}
 
-		rows = append(rows, platformButtons)
+		// Show at most 3 platform buttons per row, wrapping to new rows beyond
+		// that (avoids an unreadably long single row when many platforms exist).
+		const platformsPerRow = 3
+		for i := 0; i < len(platformButtons); i += platformsPerRow {
+			end := i + platformsPerRow
+			if end > len(platformButtons) {
+				end = len(platformButtons)
+			}
+			rows = append(rows, platformButtons[i:end])
+		}
 	}
 
 	qualityButtons := []telego.InlineKeyboardButton{
