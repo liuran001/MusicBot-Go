@@ -38,6 +38,7 @@ type Client struct {
 	mediaUserToken     string
 	storefront         string
 	language           string
+	languageExplicit   bool             // user explicitly configured language; don't override on storefront auto-detect
 	wrapperHost        string           // Host of the wrapper service (e.g. "127.0.0.1"), empty = disabled
 	wvDevice           *widevine.Device // Widevine L3 device for native decryption
 	storefrontDetected bool
@@ -234,8 +235,10 @@ func (c *Client) autoDetectStorefront(ctx context.Context) {
 				"name", resp.Data[0].Attributes.Name)
 		}
 		c.storefront = detected
-		// Also set language to the detected storefront's default if currently using a generic one.
-		if resp.Data[0].Attributes.DefaultLanguageTag != "" {
+		// Follow the storefront's default language ONLY when the user did not
+		// explicitly configure one. An explicit language must always be honored
+		// (as long as the storefront supports it).
+		if !c.languageExplicit && resp.Data[0].Attributes.DefaultLanguageTag != "" {
 			c.language = resp.Data[0].Attributes.DefaultLanguageTag
 		}
 	}
