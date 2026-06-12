@@ -1488,7 +1488,10 @@ func platformTag(manager platform.Manager, platformName string) string {
 	if display == "" {
 		return "music"
 	}
-	return display
+	// A hashtag cannot contain spaces — Telegram would cut "#Apple Music" at the
+	// space and render "Music" as plain text. Strip internal whitespace so the
+	// whole name stays in one tag (e.g. "Apple Music" -> "AppleMusic").
+	return strings.Join(strings.Fields(display), "")
 }
 
 func resolvePlatformMeta(manager platform.Manager, platformName string) platform.Meta {

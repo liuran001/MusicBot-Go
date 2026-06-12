@@ -562,17 +562,36 @@ func (c *Client) fetchDecrypted(_ context.Context, trackID string) (*platform.Do
 			return 0, fmt.Errorf("applemusic: decrypt track %s: %w", trackID, err)
 		}
 
-		f, err := createFile(destPath)
-		if err != nil {
+		if err := func() error {
+			f, err := createFile(destPath)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = f.Write(decrypted)
+			return err
+		}(); err != nil {
 			return 0, err
 		}
-		defer f.Close()
 
-		n, err := f.Write(decrypted)
-		if progress != nil {
-			progress(int64(n), int64(n))
+		// Decryption yields a fragmented MP4, which won't show a progress bar /
+		// seek in Telegram or many desktop players. Remux to progressive MP4.
+		if err := remuxToProgressive(ctx, destPath); err != nil {
+			if c.logger != nil {
+				c.logger.Warn("applemusic: remux to progressive failed (file may not seek)",
+					"track_id", trackID, "error", err)
+			}
 		}
-		return int64(n), err
+
+		fi, statErr := os.Stat(destPath)
+		var n int64
+		if statErr == nil {
+			n = fi.Size()
+		}
+		if progress != nil {
+			progress(n, n)
+		}
+		return n, nil
 	}
 
 	if c.logger != nil {
@@ -872,6 +891,15 @@ func (c *Client) fetchViaWrapper(ctx context.Context, trackID string, quality pl
 		if isALAC {
 			if err := fixALACFile(destPath); err != nil && c.logger != nil {
 				c.logger.Warn("applemusic: alac fix failed (file may still play)",
+					"track_id", trackID, "error", err)
+			}
+		}
+
+		// The wrapper emits a fragmented MP4; remux to progressive so it shows a
+		// progress bar / seeks in Telegram and desktop players.
+		if err := remuxToProgressive(ctx, destPath); err != nil {
+			if c.logger != nil {
+				c.logger.Warn("applemusic: remux to progressive failed (file may not seek)",
 					"track_id", trackID, "error", err)
 			}
 		}
