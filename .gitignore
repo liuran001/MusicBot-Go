@@ -52,5 +52,9 @@ docker/wrapper/wrapper
 docker/wrapper/rootfs/
 docker/wrapper/*.zip
 
+# Widevine L3 device credentials (do NOT commit these)
+widevine/
+*.wvd
+
 # sisyphus sessions
 .sisyphus/

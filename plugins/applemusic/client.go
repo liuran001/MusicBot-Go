@@ -20,6 +20,8 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+
+	widevine "github.com/iyear/gowidevine"
 )
 
 const (
@@ -37,6 +39,7 @@ type Client struct {
 	storefront         string
 	language           string
 	wrapperHost        string // Host of the wrapper service (e.g. "127.0.0.1"), empty = disabled
+	wvDevice           *widevine.Device // Widevine L3 device for native decryption
 	storefrontDetected bool
 	logger             *logpkg.Logger
 	persistFunc        func(pairs map[string]string) error
@@ -488,7 +491,21 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		previewURL = attrs.Previews[0].URL
 	}
 
-	// Priority 1: Use the wrapper service for decrypted full-quality download.
+	// Priority 1: Native Widevine decryption (built-in, no external dependencies).
+	if c.wvDevice != nil && strings.TrimSpace(c.mediaUserToken) != "" {
+		info, err := c.fetchDecrypted(ctx, trackID)
+		if err == nil && info != nil {
+			if previewURL != "" {
+				info.CandidateURLs = append(info.CandidateURLs, previewURL)
+			}
+			return info, nil
+		}
+		if c.logger != nil {
+			c.logger.Warn("applemusic: native decrypt failed, trying fallback", "track_id", trackID, "error", err)
+		}
+	}
+
+	// Priority 2: External wrapper service (TCP protocol).
 	if strings.TrimSpace(c.wrapperHost) != "" {
 		info, err := c.fetchViaWrapper(ctx, trackID)
 		if err == nil && info != nil {
@@ -502,7 +519,7 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		}
 	}
 
-	// Priority 2: WebPlayback encrypted mp4 (full track, DRM-encrypted).
+	// Priority 3: WebPlayback encrypted mp4 (full track, DRM-encrypted).
 	if strings.TrimSpace(c.mediaUserToken) != "" {
 		info, err := c.fetchWebPlayback(ctx, trackID)
 		if err == nil && info != nil {
@@ -526,6 +543,45 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		Format:  "m4a",
 		Bitrate: 256,
 		Quality: platform.QualityStandard,
+	}, nil
+}
+
+// fetchDecrypted performs native Go Widevine decryption for a full quality track.
+// Uses a custom DownloadFunc to run the decryption pipeline and write to disk.
+func (c *Client) fetchDecrypted(ctx context.Context, trackID string) (*platform.DownloadInfo, error) {
+	if c.wvDevice == nil {
+		return nil, fmt.Errorf("widevine device not configured")
+	}
+
+	downloadFn := func(ctx context.Context, info *platform.DownloadInfo, destPath string, progress func(written, total int64)) (int64, error) {
+		decrypted, err := c.decryptTrack(ctx, trackID, c.wvDevice)
+		if err != nil {
+			return 0, fmt.Errorf("applemusic: decrypt track %s: %w", trackID, err)
+		}
+
+		f, err := createFile(destPath)
+		if err != nil {
+			return 0, err
+		}
+		defer f.Close()
+
+		n, err := f.Write(decrypted)
+		if progress != nil {
+			progress(int64(n), int64(n))
+		}
+		return int64(n), err
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("applemusic: using native widevine decrypt", "track_id", trackID)
+	}
+
+	return &platform.DownloadInfo{
+		URL:        "widevine://" + trackID,
+		Format:     "m4a",
+		Bitrate:    256,
+		Quality:    platform.QualityHigh,
+		Downloader: downloadFn,
 	}, nil
 }
 
