@@ -1,6 +1,7 @@
 package applemusic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -461,7 +462,7 @@ func (c *Client) GetLyrics(ctx context.Context, trackID string) (string, error) 
 // --- Download ---
 
 func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
-	// Fetch song details to get preview URL.
+	// Fetch song details to get preview URL and extended asset URLs.
 	reqURL := fmt.Sprintf("%s/v1/catalog/%s/songs/%s?include=albums,artists&extend=extendedAssetUrls&l=%s",
 		appleMusicBaseURL, c.storefront, trackID, c.language)
 
@@ -480,7 +481,24 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 
 	attrs := resp.Data[0].Attributes
 
-	// Use the preview URL as a fallback (30-second AAC clip).
+	// Try the WebPlayback API for the full track when media-user-token is available.
+	// WebPlayback returns an encrypted mp4 (Widevine DRM), but it contains the full track.
+	if strings.TrimSpace(c.mediaUserToken) != "" {
+		info, err := c.fetchWebPlayback(ctx, trackID)
+		if err == nil && info != nil {
+			// Prepend the preview URL as a candidate — it's a playable 30s AAC clip
+			// that serves as fallback if the DRM file can't be processed downstream.
+			if len(attrs.Previews) > 0 && attrs.Previews[0].URL != "" {
+				info.CandidateURLs = append([]string{attrs.Previews[0].URL}, info.CandidateURLs...)
+			}
+			return info, nil
+		}
+		if c.logger != nil {
+			c.logger.Debug("applemusic: webplayback fallback to preview", "track_id", trackID, "error", err)
+		}
+	}
+
+	// Fallback: use the preview URL (30-second AAC clip).
 	var previewURL string
 	if len(attrs.Previews) > 0 {
 		previewURL = attrs.Previews[0].URL
@@ -494,8 +512,199 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		URL:     previewURL,
 		Format:  "m4a",
 		Bitrate: 256,
-		Quality: platform.QualityHigh,
+		Quality: platform.QualityStandard,
 	}, nil
+}
+
+const webPlaybackURL = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/webPlayback"
+
+// webPlaybackResponse is the response from the WebPlayback API.
+type webPlaybackResponse struct {
+	SongList []webPlaybackSong `json:"songList"`
+}
+
+type webPlaybackSong struct {
+	SongID string             `json:"songId"`
+	Assets []webPlaybackAsset `json:"assets"`
+}
+
+type webPlaybackAsset struct {
+	Flavor   string              `json:"flavor"`
+	URL      string              `json:"URL"`
+	FileSize int64               `json:"file-size"`
+	Metadata webPlaybackMetadata `json:"metadata"`
+}
+
+type webPlaybackMetadata struct {
+	FileExtension string `json:"fileExtension"`
+	BitRate       int    `json:"bitRate"`
+	SampleRate    int    `json:"sampleRate"`
+	ItemName      string `json:"itemName"`
+	Duration      int    `json:"duration"` // millis
+}
+
+func (c *Client) fetchWebPlayback(ctx context.Context, trackID string) (*platform.DownloadInfo, error) {
+	if err := c.ensureDeveloperToken(ctx); err != nil {
+		return nil, err
+	}
+
+	payload, err := json.Marshal(map[string]string{"salableAdamId": trackID})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webPlaybackURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.getDeveloperToken())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", appleMusicOrigin)
+	req.Header.Set("User-Agent", appleMusicUA)
+	req.Header.Set("media-user-token", c.mediaUserToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("applemusic: webplayback HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return nil, err
+	}
+
+	var wpResp webPlaybackResponse
+	if err := json.Unmarshal(body, &wpResp); err != nil {
+		return nil, fmt.Errorf("applemusic: parse webplayback response: %w", err)
+	}
+	if len(wpResp.SongList) == 0 || len(wpResp.SongList[0].Assets) == 0 {
+		return nil, fmt.Errorf("applemusic: no assets in webplayback response")
+	}
+
+	// Select best asset: prefer ctrp256 (Widevine, highest quality downloadable).
+	assets := wpResp.SongList[0].Assets
+	selected := assets[0]
+	for _, a := range assets {
+		if a.Flavor == "28:ctrp256" {
+			selected = a
+			break
+		}
+	}
+	// Fallback preference order if ctrp256 not found.
+	if selected.Flavor != "28:ctrp256" {
+		for _, a := range assets {
+			if a.Metadata.BitRate > selected.Metadata.BitRate {
+				selected = a
+			}
+		}
+	}
+
+	hlsURL := strings.TrimSpace(selected.URL)
+	if hlsURL == "" {
+		return nil, fmt.Errorf("applemusic: empty HLS URL in webplayback response")
+	}
+
+	// Parse the m3u8 to find the actual mp4 segment URL.
+	mp4URL, mp4Size, err := c.resolveHLSToMP4(ctx, hlsURL)
+	if err != nil {
+		return nil, fmt.Errorf("applemusic: resolve HLS: %w", err)
+	}
+
+	bitrate := selected.Metadata.BitRate
+	if bitrate <= 0 {
+		bitrate = 256
+	}
+
+	quality := platform.QualityHigh
+	if bitrate >= 256 {
+		quality = platform.QualityHigh
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("applemusic: webplayback resolved",
+			"track_id", trackID, "flavor", selected.Flavor,
+			"bitrate", bitrate, "size", mp4Size)
+	}
+
+	return &platform.DownloadInfo{
+		URL:     mp4URL,
+		Format:  "m4a",
+		Size:    mp4Size,
+		Bitrate: bitrate,
+		Quality: quality,
+	}, nil
+}
+
+// resolveHLSToMP4 fetches an HLS m3u8 manifest and resolves the underlying mp4 segment URL.
+// Apple Music HLS playlists reference a single mp4 file with byte-range segments.
+func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL string, size int64, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m3u8URL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("User-Agent", appleMusicUA)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if err != nil {
+		return "", 0, err
+	}
+
+	m3u8Content := string(body)
+	baseURL := m3u8URL[:strings.LastIndex(m3u8URL, "/")+1]
+
+	// Find the mp4 segment filename (non-comment line ending in .mp4).
+	var mp4Name string
+	for _, line := range strings.Split(m3u8Content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasSuffix(line, ".mp4") || strings.HasSuffix(line, ".m4a") || strings.HasSuffix(line, ".m4s") {
+			mp4Name = line
+			break
+		}
+	}
+	if mp4Name == "" {
+		return "", 0, fmt.Errorf("no mp4 segment found in m3u8")
+	}
+
+	// Build absolute URL.
+	if strings.HasPrefix(mp4Name, "http") {
+		mp4URL = mp4Name
+	} else {
+		mp4URL = baseURL + mp4Name
+	}
+
+	// Get the file size via HEAD request.
+	headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, mp4URL, nil)
+	if err != nil {
+		return mp4URL, 0, nil
+	}
+	headReq.Header.Set("User-Agent", appleMusicUA)
+
+	headResp, err := c.httpClient.Do(headReq)
+	if err != nil {
+		return mp4URL, 0, nil
+	}
+	headResp.Body.Close()
+
+	if cl := headResp.Header.Get("Content-Length"); cl != "" {
+		size, _ = strconv.ParseInt(cl, 10, 64)
+	}
+
+	return mp4URL, size, nil
 }
 
 // --- API Types ---
