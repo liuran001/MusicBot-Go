@@ -28,14 +28,15 @@ const (
 
 // Client is the Apple Music API client.
 type Client struct {
-	httpClient     *http.Client
-	developerToken string
-	mediaUserToken string
-	storefront     string
-	language       string
-	logger         *logpkg.Logger
-	persistFunc    func(pairs map[string]string) error
-	tokenMu        sync.RWMutex
+	httpClient         *http.Client
+	developerToken     string
+	mediaUserToken     string
+	storefront         string
+	language           string
+	storefrontDetected bool
+	logger             *logpkg.Logger
+	persistFunc        func(pairs map[string]string) error
+	tokenMu            sync.RWMutex
 }
 
 // NewClient creates an Apple Music API client.
@@ -183,7 +184,54 @@ func (c *Client) doRequest(ctx context.Context, reqURL string) ([]byte, error) {
 	if err := c.ensureDeveloperToken(ctx); err != nil {
 		return nil, err
 	}
+	c.autoDetectStorefront(ctx)
 	return c.doRequestInner(ctx, reqURL, true)
+}
+
+// autoDetectStorefront queries /v1/me/storefront to match the account region.
+// Lyrics and some other endpoints require the storefront to match the account.
+func (c *Client) autoDetectStorefront(ctx context.Context) {
+	if c.storefrontDetected || strings.TrimSpace(c.mediaUserToken) == "" {
+		return
+	}
+	c.storefrontDetected = true // only try once
+
+	sfURL := appleMusicBaseURL + "/v1/me/storefront"
+	body, err := c.doRequestInner(ctx, sfURL, false)
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Debug("applemusic: storefront auto-detect failed", "error", err)
+		}
+		return
+	}
+
+	var resp struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Attributes struct {
+				DefaultLanguageTag string   `json:"defaultLanguageTag"`
+				Name               string   `json:"name"`
+				SupportedLangs     []string `json:"supportedLanguageTags"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || len(resp.Data) == 0 {
+		return
+	}
+
+	detected := resp.Data[0].ID
+	if detected != "" && detected != c.storefront {
+		if c.logger != nil {
+			c.logger.Info("applemusic: auto-detected storefront",
+				"configured", c.storefront, "detected", detected,
+				"name", resp.Data[0].Attributes.Name)
+		}
+		c.storefront = detected
+		// Also set language to the detected storefront's default if currently using a generic one.
+		if resp.Data[0].Attributes.DefaultLanguageTag != "" {
+			c.language = resp.Data[0].Attributes.DefaultLanguageTag
+		}
+	}
 }
 
 func (c *Client) doRequestInner(ctx context.Context, reqURL string, retry bool) ([]byte, error) {
@@ -730,6 +778,9 @@ func parseTTMLToLRC(ttml string) string {
 
 func parseTimeToMillis(timeStr string) int64 {
 	timeStr = strings.TrimSpace(timeStr)
+	if timeStr == "" {
+		return 0
+	}
 	parts := strings.Split(timeStr, ":")
 	var hours, minutes int64
 	var secStr string
@@ -739,9 +790,11 @@ func parseTimeToMillis(timeStr string) int64 {
 		hours, _ = strconv.ParseInt(parts[0], 10, 64)
 		minutes, _ = strconv.ParseInt(parts[1], 10, 64)
 		secStr = parts[2]
-	case 2: // MM:SS.mmm
+	case 2: // MM:SS.mmm or M:SS.mmm
 		minutes, _ = strconv.ParseInt(parts[0], 10, 64)
 		secStr = parts[1]
+	case 1: // SS.mmm (plain seconds, common in Apple Music TTML)
+		secStr = parts[0]
 	default:
 		return 0
 	}

@@ -158,6 +158,7 @@ func TestFormatArtworkURL(t *testing.T) {
 }
 
 func TestParseTTMLToLRC(t *testing.T) {
+	// Standard TTML format
 	ttml := `<?xml version="1.0" encoding="UTF-8"?>
 <tt xmlns="http://www.w3.org/ns/ttml">
   <body>
@@ -173,17 +174,43 @@ func TestParseTTMLToLRC(t *testing.T) {
 	if result == "" {
 		t.Fatal("parseTTMLToLRC returned empty")
 	}
-	// Check first line timestamp
 	if !contains(result, "[00:15.00]First line") {
 		t.Errorf("expected '[00:15.00]First line' in result:\n%s", result)
 	}
-	// Check second line
 	if !contains(result, "[00:25.50]Second line") {
 		t.Errorf("expected '[00:25.50]Second line' in result:\n%s", result)
 	}
-	// Check hour handling
 	if !contains(result, "[62:03.45]Third line") {
 		t.Errorf("expected '[62:03.45]Third line' in result:\n%s", result)
+	}
+}
+
+func TestParseTTMLToLRC_AppleMusic(t *testing.T) {
+	// Real Apple Music TTML format: uses plain seconds (e.g. "27.395") and MM:SS.mmm
+	ttml := `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xml:lang="en">
+<body dur="3:21.570">
+  <div begin="27.395" end="48.621">
+    <p begin="27.395" end="28.960">I been tryna call</p>
+    <p begin="30.189" end="32.529">On my own for long enough</p>
+  </div>
+  <div begin="1:00.964" end="1:24.335">
+    <p begin="1:00.964" end="1:06.652">I'm blinded by the lights</p>
+  </div>
+</body>
+</tt>`
+
+	result := parseTTMLToLRC(ttml)
+	if result == "" {
+		t.Fatal("parseTTMLToLRC returned empty for Apple Music format")
+	}
+	if !contains(result, "[00:27.39]I been tryna call") {
+		t.Errorf("expected '[00:27.39]I been tryna call' in result:\n%s", result)
+	}
+	if !contains(result, "[00:30.18]On my own for long enough") {
+		t.Errorf("expected '[00:30.18]On my own for long enough' in result:\n%s", result)
+	}
+	if !contains(result, "[01:00.96]I'm blinded by the lights") {
+		t.Errorf("expected '[01:00.96]I'm blinded by the lights' in result:\n%s", result)
 	}
 }
 
@@ -196,6 +223,12 @@ func TestParseTimeToMillis(t *testing.T) {
 		{"01:30.500", 90500},
 		{"1:02:03.456", 3723456},
 		{"00:00.000", 0},
+		// Apple Music TTML uses plain seconds (no colon prefix)
+		{"27.395", 27395},
+		{"48.621", 48621},
+		{"0.000", 0},
+		{"120.500", 120500},
+		{"", 0},
 	}
 	for _, tt := range tests {
 		got := parseTimeToMillis(tt.input)
