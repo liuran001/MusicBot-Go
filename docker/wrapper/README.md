@@ -9,19 +9,36 @@ Widevine 解密这些音质。它们需要外部
 作为**独立服务**运行（它模拟安卓版 Apple Music App，在安卓 userland 下运行，
 因此需要 `--privileged` 和它自己的登录）。
 
+## 镜像来源
+
+上游 wrapper **不发布 Docker 镜像**（只发 Release zip）。本仓库提供一个手动触发的
+GitHub Actions 工作流 `.github/workflows/build-wrapper.yml`，它会：
+
+1. 从上游 Release 下载预编译二进制（`Wrapper.x86_64.latest.zip`）；
+2. 用上游官方 Dockerfile 打包（自动跳过 Android NDK 编译，很快）；
+3. 推送到 `ghcr.io/<你的用户名>/musicbot-wrapper:latest`。
+
+**使用前先跑一次该工作流**：仓库 → Actions → “Build Apple Music Wrapper Image”
+→ Run workflow。之后 `docker-compose.yml` 里的 wrapper 服务就能 pull 到镜像。
+
+> 仅支持 x86_64（上游限制）。
+
 ## 配置方式（docker compose）
 
-`wrapper` 服务已经在 `docker-compose.yml` 中定义好了。启用无损：
+`wrapper` 服务已在 `docker-compose.yml` 中定义好。启用无损：
 
-1. **一次性登录**，使用一个**有有效订阅**的 Apple ID
-   （wrapper 无法复用 bot 的 `media_user_token` —— 两套独立认证）：
+1. **首次登录**：在 `docker-compose.yml` 的 wrapper 服务里填入一个**有有效订阅**
+   的 Apple ID（wrapper 无法复用 bot 的 `media_user_token`——两套独立认证）：
 
-   ```bash
-   docker compose run --rm wrapper -L "appleid@example.com:password" -F -H 0.0.0.0
+   ```yaml
+   environment:
+     USERNAME: "appleid@example.com"
+     PASSWORD: "your-password"
    ```
 
-   完成 2FA 验证后按 Ctrl-C。会话会保存到 `./docker-data/wrapper/`
-   （一个挂载的 volume），所以只需登录这一次。
+   首次启动时 wrapper 会自动登录（含 2FA 流程），会话保存到
+   `./docker-data/wrapper/`（挂载的 volume）。**登录成功后把这两项清空**即可，
+   之后凭持久化的会话运行。
 
 2. **让 bot 指向 wrapper。** 在 `config.ini` 中：
 
@@ -42,12 +59,13 @@ Widevine 解密这些音质。它们需要外部
 
 ## 裸核部署
 
-自行运行 wrapper（参见其 README），然后把 `wrapper_host` 设为它的地址
-（例如 `127.0.0.1`）。wrapper 监听 10020 / 20020 / 30020 端口。
+自行运行 wrapper（参见其 README：自行 `docker build` 或从 Release 取二进制），
+然后把 `wrapper_host` 设为它的地址（例如 `127.0.0.1`）。wrapper 监听
+10020 / 20020 / 30020 端口。
 
 ## 注意事项
 
 - `media_user_token`（bot）和 wrapper 的 Apple ID 登录是**两套独立**凭证；
   下载无损时两者都需要。
 - 不要提交任何 wrapper 会话数据或凭证。`./docker-data/` 是运行时 volume，
-  应排除在 git 之外（`.gitignore` 已忽略）。
+  已在 `.gitignore` 中忽略。

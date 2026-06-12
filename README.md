@@ -214,16 +214,15 @@ media_user_token = YOUR_MEDIA_USER_TOKEN
 >   [WorldObservationLog/wrapper](https://github.com/WorldObservationLog/wrapper)
 >   解密服务，并设置 `wrapper_host` 指向它。
 >
-> **Docker 用户**：`docker-compose.yml` 已内置 `wrapper` 服务。首次需用一个**有订阅
-> 的 Apple ID** 给 wrapper 单独登录一次（wrapper 模拟安卓 App，无法复用 bot 的
-> `media_user_token`，是两套独立认证）：
+> **Docker 用户**：`docker-compose.yml` 已内置 `wrapper` 服务。由于上游不发布
+> Docker 镜像，需先在本仓库 Actions 跑一次 **“Build Apple Music Wrapper Image”**
+> 工作流（从上游 Release 取预编译二进制打包并推到
+> `ghcr.io/<你的用户名>/musicbot-wrapper`）。然后在 `docker-compose.yml` 的 wrapper
+> 服务里填入一个**有订阅的 Apple ID**（`USERNAME`/`PASSWORD`，wrapper 模拟安卓
+> App，无法复用 bot 的 `media_user_token`，是两套独立认证），首次启动会自动登录
+> （含 2FA）并把会话持久化到 `docker-data/wrapper/`，之后可清空这两项。
 >
-> ```bash
-> docker compose run --rm wrapper -L "appleid@example.com:password" -F -H 0.0.0.0
-> # 完成 2FA 后 Ctrl-C；会话持久化到 docker-data/wrapper/，之后无需再登
-> ```
->
-> 然后在 `config.ini` 设 `wrapper_host = wrapper`，`docker compose up -d` 即可。
+> 最后在 `config.ini` 设 `wrapper_host = wrapper`，`docker compose up -d` 即可。
 > **裸核用户**：自行运行 wrapper，把 `wrapper_host` 指向其地址（如 `127.0.0.1`）。
 > 详见 [`docker/wrapper/README.md`](docker/wrapper/README.md)。
 >

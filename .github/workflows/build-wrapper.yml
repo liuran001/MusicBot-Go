@@ -1,0 +1,98 @@
+name: Build Apple Music Wrapper Image
+
+# 手动触发，从 WorldObservationLog/wrapper 的上游 Release 取预编译二进制，
+# 用其官方 Dockerfile 打包成镜像并推送到本仓库的 GHCR
+# (ghcr.io/<owner>/musicbot-wrapper)。
+#
+# 上游不发布 Docker 镜像（只发 Release zip），docker-compose.yml 里的 wrapper
+# 服务需要一个可 pull 的镜像，本工作流就是为此准备的。
+#
+# 上游 Dockerfile 会自动检测 build context 中预编译的 `wrapper` 二进制并跳过
+# Android NDK 编译，因此本工作流很快（无需下载 NDK / 从源码编译）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      wrapper_ref:
+        description: "上游 wrapper release tag（默认 x86_64 latest）"
+        required: false
+        default: "wrapper.x86_64.latest"
+      image_tag:
+        description: "推送的镜像 tag"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download upstream wrapper release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WRAPPER_REF: ${{ github.event.inputs.wrapper_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p wrapper-src
+          url="https://github.com/WorldObservationLog/wrapper/releases/download/${WRAPPER_REF}/Wrapper.x86_64.latest.zip"
+          echo "Downloading $url"
+          curl -fsSL -o wrapper.zip "$url"
+          unzip -q wrapper.zip -d wrapper-src
+          echo "--- extracted contents ---"
+          ls -la wrapper-src
+
+      - name: Verify build context (prebuilt binary + Dockerfile present)
+        run: |
+          set -euo pipefail
+          cd wrapper-src
+          test -f wrapper      || { echo "ERROR: prebuilt 'wrapper' binary missing from release zip" >&2; exit 1; }
+          test -f Dockerfile   || { echo "ERROR: Dockerfile missing from release zip" >&2; exit 1; }
+          test -d rootfs       || { echo "ERROR: rootfs/ missing from release zip" >&2; exit 1; }
+          test -f entrypoint.sh|| { echo "ERROR: entrypoint.sh missing from release zip" >&2; exit 1; }
+          chmod +x wrapper
+          echo "Build context OK (upstream Dockerfile will skip NDK build via /use_prebuild)."
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/musicbot-wrapper
+          tags: |
+            type=raw,value=${{ github.event.inputs.image_tag }}
+
+      - name: Build and push wrapper image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./wrapper-src
+          file: ./wrapper-src/Dockerfile
+          # 上游 wrapper 仅支持 x86_64（release 名即 x86_64）；不做多架构。
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+
+      - name: Summary
+        run: |
+          {
+            echo "### Wrapper 镜像已推送 :rocket:"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "在 docker-compose.yml 中引用此镜像即可（见 wrapper 服务）。"
+          } >> "$GITHUB_STEP_SUMMARY"
