@@ -24,22 +24,28 @@ services:
   # wrapper 模拟安卓版 Apple Music App，因此需要它自己的一次性 Apple ID 登录
   #（无法复用 bot 的 media_user_token——两套独立认证体系），且账号需有有效订阅。
   #
-  # 首次登录（只需一次；会话会持久化到挂载的 volume 中）：
-  #   docker compose run --rm wrapper -L "appleid@example.com:password" -F -H 0.0.0.0
-  # 完成 2FA 验证后按 Ctrl-C。之后直接 `docker compose up` 即可。
+  # 镜像来源：上游 WorldObservationLog/wrapper 不发布 Docker 镜像，本仓库通过
+  # .github/workflows/build-wrapper.yml（手动触发）从其 Release 取预编译二进制
+  # 打包并推到 ghcr.io/<owner>/musicbot-wrapper。首次使用前需先跑一次该工作流。
+  #
+  # 首次登录：填入下面的 USERNAME/PASSWORD（有订阅的 Apple ID），首次启动时
+  # wrapper 会自动登录（含 2FA），会话持久化到挂载的 volume，之后可清空这两项。
   #
   # 不需要无损的话，可删除整个 wrapper 服务。
   wrapper:
-    image: ghcr.io/worldobservationlog/wrapper:latest
+    image: ghcr.io/liuran001/musicbot-wrapper:latest
     container_name: musicbot-wrapper
     restart: unless-stopped
     # 必需：wrapper 内部运行一个安卓 userland（chroot）。
     privileged: true
-    command: ["-H", "0.0.0.0"]
     volumes:
       - ./docker-data/wrapper:/app/rootfs/data
-    # 端口通过 compose 网络以主机名 "wrapper" 暴露给 bot。
-    # 仅当你还需要从裸核工具访问时，才需要映射到宿主机：
+    environment:
+      # 仅首次登录需要；登录成功并持久化后可留空。
+      USERNAME: ""
+      PASSWORD: ""
+    # 端口通过 compose 网络以主机名 "wrapper" 暴露给 bot（config.ini 设
+    # wrapper_host = wrapper）。仅当还需从裸核工具访问时才映射到宿主机：
     # ports:
     #   - "10020:10020"
     #   - "20020:20020"
