@@ -13,6 +13,47 @@ func (a *AppleMusicPlatform) SupportedLoginMethods() []string {
 	return []string{"cookie"}
 }
 
+// ShowLanguage implements platform.LanguageProvider: report the account
+// storefront, current language, and the languages that storefront supports
+// (fetched live — the supported set varies per storefront).
+func (a *AppleMusicPlatform) ShowLanguage(ctx context.Context) (string, error) {
+	if a == nil || a.client == nil {
+		return "Apple Music 插件未初始化", nil
+	}
+	info, err := a.client.fetchStorefrontInfo(ctx)
+	if err != nil {
+		return fmt.Sprintf("🍎 Apple Music 语言\n- 当前 Storefront: %s\n- 当前语言: %s\n- 获取支持语言失败: %v",
+			a.client.CurrentStorefront(), a.client.CurrentLanguage(), err), nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "🍎 Apple Music 语言\n")
+	fmt.Fprintf(&b, "- 账号 Storefront: %s（%s）\n", info.ID, info.Name)
+	fmt.Fprintf(&b, "- 当前语言: %s\n", a.client.CurrentLanguage())
+	fmt.Fprintf(&b, "- 账号默认语言: %s\n", info.DefaultLang)
+	fmt.Fprintf(&b, "- 支持的语言:\n")
+	for _, lang := range info.SupportedLangs {
+		marker := "  •"
+		if strings.EqualFold(lang, a.client.CurrentLanguage()) {
+			marker = "  ✅"
+		}
+		fmt.Fprintf(&b, "%s %s\n", marker, lang)
+	}
+	fmt.Fprintf(&b, "\n用 /login applemusic lang <语言> 设置，例如 /login applemusic lang %s", info.DefaultLang)
+	return b.String(), nil
+}
+
+// SetLanguage implements platform.LanguageProvider: validate the language
+// against the storefront's supported set, apply it, and persist to config.
+func (a *AppleMusicPlatform) SetLanguage(ctx context.Context, lang string) (string, error) {
+	if a == nil || a.client == nil {
+		return "Apple Music 插件未初始化", nil
+	}
+	if err := a.client.SetLanguage(ctx, lang); err != nil {
+		return fmt.Sprintf("❌ 设置失败：%v", err), nil
+	}
+	return fmt.Sprintf("✅ Apple Music 语言已设为 %s 并写回配置。", a.client.CurrentLanguage()), nil
+}
+
 func (a *AppleMusicPlatform) AccountStatus(ctx context.Context) (platform.AccountStatus, error) {
 	status := platform.AccountStatus{
 		Platform:        a.Name(),
