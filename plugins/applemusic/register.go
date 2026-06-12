@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	platformplugins "github.com/liuran001/MusicBot-Go/bot/platform/plugins"
@@ -36,6 +37,7 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	}
 
 	language := cfg.GetPluginString("applemusic", "language")
+	languageExplicit := strings.TrimSpace(language) != ""
 	if language == "" {
 		language = "en-US"
 	}
@@ -46,6 +48,7 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	}
 
 	client := NewClient(mediaUserToken, storefront, language, time.Duration(timeoutSec)*time.Second, logger)
+	client.languageExplicit = languageExplicit
 	client.wrapperHost = strings.TrimSpace(cfg.GetPluginString("applemusic", "wrapper_host"))
 	client.persistFunc = func(pairs map[string]string) error {
 		if logger != nil {
@@ -66,7 +69,12 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return nil, err
 	}
 
-	return &platformplugins.Contribution{Platform: NewPlatform(client)}, nil
+	return &platformplugins.Contribution{
+		Platform: NewPlatform(client),
+		Commands: []admincmd.Command{
+			buildLanguageCommand(client),
+		},
+	}, nil
 }
 
 // loadWVDevice loads Widevine L3 device credentials.
