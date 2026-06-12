@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -34,6 +36,7 @@ type Client struct {
 	mediaUserToken     string
 	storefront         string
 	language           string
+	wrapperURL         string // URL of the Widevine decryption wrapper (e.g. http://localhost:11451)
 	storefrontDetected bool
 	logger             *logpkg.Logger
 	persistFunc        func(pairs map[string]string) error
@@ -462,7 +465,7 @@ func (c *Client) GetLyrics(ctx context.Context, trackID string) (string, error) 
 // --- Download ---
 
 func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
-	// Fetch song details to get preview URL and extended asset URLs.
+	// Fetch song details to get preview URL.
 	reqURL := fmt.Sprintf("%s/v1/catalog/%s/songs/%s?include=albums,artists&extend=extendedAssetUrls&l=%s",
 		appleMusicBaseURL, c.storefront, trackID, c.language)
 
@@ -480,30 +483,40 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 	}
 
 	attrs := resp.Data[0].Attributes
-
-	// Try the WebPlayback API for the full track when media-user-token is available.
-	// WebPlayback returns an encrypted mp4 (Widevine DRM), but it contains the full track.
-	if strings.TrimSpace(c.mediaUserToken) != "" {
-		info, err := c.fetchWebPlayback(ctx, trackID)
-		if err == nil && info != nil {
-			// Prepend the preview URL as a candidate — it's a playable 30s AAC clip
-			// that serves as fallback if the DRM file can't be processed downstream.
-			if len(attrs.Previews) > 0 && attrs.Previews[0].URL != "" {
-				info.CandidateURLs = append([]string{attrs.Previews[0].URL}, info.CandidateURLs...)
-			}
-			return info, nil
-		}
-		if c.logger != nil {
-			c.logger.Debug("applemusic: webplayback fallback to preview", "track_id", trackID, "error", err)
-		}
-	}
-
-	// Fallback: use the preview URL (30-second AAC clip).
 	var previewURL string
 	if len(attrs.Previews) > 0 {
 		previewURL = attrs.Previews[0].URL
 	}
 
+	// Priority 1: Use the wrapper API for decrypted full-quality download.
+	if strings.TrimSpace(c.wrapperURL) != "" {
+		info, err := c.fetchViaWrapper(ctx, trackID)
+		if err == nil && info != nil {
+			if previewURL != "" {
+				info.CandidateURLs = append(info.CandidateURLs, previewURL)
+			}
+			return info, nil
+		}
+		if c.logger != nil {
+			c.logger.Warn("applemusic: wrapper decrypt failed, trying fallback", "track_id", trackID, "error", err)
+		}
+	}
+
+	// Priority 2: WebPlayback encrypted mp4 (full track, DRM-encrypted).
+	if strings.TrimSpace(c.mediaUserToken) != "" {
+		info, err := c.fetchWebPlayback(ctx, trackID)
+		if err == nil && info != nil {
+			if previewURL != "" {
+				info.CandidateURLs = append(info.CandidateURLs, previewURL)
+			}
+			return info, nil
+		}
+		if c.logger != nil {
+			c.logger.Debug("applemusic: webplayback failed, using preview", "track_id", trackID, "error", err)
+		}
+	}
+
+	// Priority 3: Preview URL (30-second playable AAC clip).
 	if previewURL == "" {
 		return nil, platform.NewUnavailableError("applemusic", "track", trackID)
 	}
@@ -705,6 +718,109 @@ func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL st
 	}
 
 	return mp4URL, size, nil
+}
+
+// --- Wrapper Decryption ---
+
+// fetchViaWrapper calls an external Widevine decryption wrapper service
+// (https://github.com/WorldObservationLog/wrapper) to download and decrypt a track.
+// The wrapper returns the decrypted m4a file directly in the response body.
+// We use a custom DownloadFunc to stream from the wrapper instead of a direct URL.
+func (c *Client) fetchViaWrapper(ctx context.Context, trackID string) (*platform.DownloadInfo, error) {
+	wrapperURL := strings.TrimRight(strings.TrimSpace(c.wrapperURL), "/")
+	if wrapperURL == "" {
+		return nil, fmt.Errorf("wrapper URL not configured")
+	}
+
+	// The wrapper API: POST / with {"id": "<trackID>", "storefront": "<sf>"}
+	// returns the decrypted m4a as the response body.
+	downloadFn := func(ctx context.Context, info *platform.DownloadInfo, destPath string, progress func(written, total int64)) (int64, error) {
+		payload, err := json.Marshal(map[string]string{
+			"id":         trackID,
+			"storefront": c.storefront,
+		})
+		if err != nil {
+			return 0, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, wrapperURL, bytes.NewReader(payload))
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		// Use a longer timeout for decryption (can take 10-30s).
+		wrapperClient := &http.Client{Timeout: 120 * time.Second}
+		resp, err := wrapperClient.Do(req)
+		if err != nil {
+			return 0, fmt.Errorf("applemusic: wrapper request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			return 0, fmt.Errorf("applemusic: wrapper HTTP %d: %s", resp.StatusCode, string(errBody))
+		}
+
+		// Stream the decrypted file to destPath.
+		f, err := createFile(destPath)
+		if err != nil {
+			return 0, err
+		}
+		defer f.Close()
+
+		var total int64
+		if cl := resp.Header.Get("Content-Length"); cl != "" {
+			total, _ = strconv.ParseInt(cl, 10, 64)
+		}
+
+		var written int64
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				nw, writeErr := f.Write(buf[:n])
+				written += int64(nw)
+				if progress != nil {
+					progress(written, total)
+				}
+				if writeErr != nil {
+					return written, writeErr
+				}
+			}
+			if readErr != nil {
+				if readErr == io.EOF {
+					break
+				}
+				return written, readErr
+			}
+		}
+		return written, nil
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("applemusic: using wrapper for decrypted download",
+			"track_id", trackID, "wrapper_url", wrapperURL)
+	}
+
+	return &platform.DownloadInfo{
+		URL:        wrapperURL, // informational; actual download uses Downloader
+		Format:     "m4a",
+		Bitrate:    256,
+		Quality:    platform.QualityHigh,
+		Downloader: downloadFn,
+	}, nil
+}
+
+// createFile creates a file for writing, creating parent directories as needed.
+func createFile(path string) (*os.File, error) {
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	return os.Create(path)
 }
 
 // --- API Types ---
