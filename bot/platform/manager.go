@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -248,12 +249,19 @@ func (c *compositePlatform) GetLyrics(ctx context.Context, trackID string) (*Lyr
 }
 
 func (c *compositePlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*Track, error) {
+	// Buffer the audio data so fallback providers can re-read it after
+	// the first provider consumes the reader.
+	data, err := io.ReadAll(audioData)
+	if err != nil {
+		return nil, fmt.Errorf("read audio data: %w", err)
+	}
+
 	var lastErr error
 	for _, p := range c.providers {
 		if !p.SupportsRecognition() {
 			continue
 		}
-		track, err := p.RecognizeAudio(ctx, audioData)
+		track, err := p.RecognizeAudio(ctx, bytes.NewReader(data))
 		if err == nil {
 			return track, nil
 		}
