@@ -488,21 +488,27 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		return nil, platform.NewNotFoundError("applemusic", "track", trackID)
 	}
 
-	// Decide whether the request wants a lossless/Hi-Res/Atmos tier. Those are
-	// ONLY obtainable through the external FairPlay wrapper — Apple refuses
-	// Widevine licenses for enhancedHls (server-side, returns -1002), so the
-	// built-in native path tops out at AAC 256k.
-	wantsLossless := quality >= platform.QualityLossless
+	// Routing across the two decrypt paths:
+	//   - lossless / Hi-Res: ONLY obtainable via the external FairPlay wrapper
+	//     (Apple refuses Widevine for enhancedHls, returns -1002). Built-in
+	//     native decrypt tops out at AAC 256k.
+	//   - standard: prefer the wrapper's 128k AAC stream when a wrapper is
+	//     available (true "standard" tier); otherwise fall back to native AAC
+	//     256k (better than nothing, zero-config).
+	//   - high: native AAC 256k is exactly this tier, so use it directly.
 	hasWrapper := strings.TrimSpace(c.wrapperHost) != ""
+	wantsLossless := quality >= platform.QualityLossless
+	preferWrapper := wantsLossless || quality == platform.QualityStandard
 
-	// Priority 1 (lossless tiers): external wrapper via enhancedHls.
-	if wantsLossless && hasWrapper {
+	// Priority 1: external wrapper via enhancedHls (lossless/Hi-Res, or the
+	// 128k AAC stream for standard).
+	if preferWrapper && hasWrapper {
 		info, err := c.fetchViaWrapper(ctx, trackID, quality, false)
 		if err == nil && info != nil {
 			return info, nil
 		}
 		if c.logger != nil {
-			c.logger.Warn("applemusic: wrapper lossless failed, falling back to AAC",
+			c.logger.Warn("applemusic: wrapper fetch failed, falling back to native AAC",
 				"track_id", trackID, "quality", quality.String(), "error", err)
 		}
 	} else if wantsLossless && !hasWrapper && c.logger != nil {
@@ -521,8 +527,9 @@ func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality pl
 		}
 	}
 
-	// Priority 3: External wrapper for non-lossless requests (if available).
-	if !wantsLossless && hasWrapper {
+	// Priority 3: External wrapper for any remaining case (e.g. high, or when
+	// native decrypt was unavailable).
+	if !preferWrapper && hasWrapper {
 		info, err := c.fetchViaWrapper(ctx, trackID, quality, false)
 		if err == nil && info != nil {
 			return info, nil
