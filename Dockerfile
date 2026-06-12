@@ -113,13 +113,9 @@ COPY --from=node-runtime /usr/local/share /usr/local/share
 COPY plugins/netease/recognize /app/plugins/netease/recognize
 COPY --from=npm-builder /build/node_modules /app/plugins/netease/recognize/service/node_modules
 
-# --- Apple Music wrapper (optional, requires wrapper release zip at build time) ---
-# To enable: place the wrapper release zip at docker/wrapper/ before building.
-# The wrapper provides Widevine DRM decryption for Apple Music full-quality downloads.
-# At runtime, set APPLE_MUSIC_USERNAME / APPLE_MUSIC_PASSWORD env vars for first login.
-COPY docker/wrapper/ /app/wrapper/
-RUN if [ -f /app/wrapper/wrapper ]; then chmod +x /app/wrapper/wrapper; fi
-COPY docker/entrypoint-full.sh /app/entrypoint-full.sh
-RUN chmod +x /app/entrypoint-full.sh
-ENTRYPOINT ["/app/entrypoint-full.sh"]
+# Apple Music：AAC 256k 由 bot 内置原生解密（零配置）。无损 / Hi-Res / Atmos
+# 需要 FairPlay wrapper，它作为独立服务运行（见 docker-compose.yml）——需要
+# --privileged + 安卓 userland 以及它自己的 Apple ID 登录，因此特意不打包进本镜像。
+# 在 config.ini 中用 `wrapper_host = wrapper` 让 bot 指向它。
 CMD ["-c", "/app/config.ini"]
+
