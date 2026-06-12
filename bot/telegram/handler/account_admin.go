@@ -91,6 +91,23 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 			return nil, err
 		}
 		return &admincmd.Response{Text: message}, nil
+	case "lang", "language":
+		provider, ok := plat.(platform.LanguageProvider)
+		if !ok {
+			return &admincmd.Response{Text: fmt.Sprintf("%s 当前不支持语言设置", platformDisplayName(manager, platformName))}, nil
+		}
+		if strings.TrimSpace(payload) == "" {
+			message, err := provider.ShowLanguage(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return &admincmd.Response{Text: message}, nil
+		}
+		message, err := provider.SetLanguage(ctx, payload)
+		if err != nil {
+			return nil, err
+		}
+		return &admincmd.Response{Text: message}, nil
 	case "cookie":
 		importer, ok := plat.(platform.CookieImporter)
 		if !ok {
@@ -355,6 +372,9 @@ func buildPlatformLoginHelp(manager platform.Manager, plat platform.Platform) st
 	}
 	if containsLoginMethod(methods, "auto") || implementsAutoRenew(plat) {
 		examples = append(examples, fmt.Sprintf("/login %s auto on 21600", name), fmt.Sprintf("/login %s auto status", name), "/login auto status")
+	}
+	if _, ok := plat.(platform.LanguageProvider); ok {
+		examples = append(examples, fmt.Sprintf("/login %s lang", name), fmt.Sprintf("/login %s lang <语言>", name))
 	}
 	return fmt.Sprintf("%s 支持: %s\n\n示例:\n%s",
 		platformDisplayName(manager, name), strings.Join(methods, ", "), strings.Join(examples, "\n"))

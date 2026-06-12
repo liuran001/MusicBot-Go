@@ -70,3 +70,12 @@ type LoginMethodProvider interface {
 type SignInProvider interface {
 	SignIn(ctx context.Context) (string, error)
 }
+
+// LanguageProvider is implemented by platforms whose metadata language can be
+// viewed and changed at runtime (e.g. Apple Music). ShowLanguage returns a
+// human-readable status (current storefront/language + supported languages);
+// SetLanguage validates and applies a new language, persisting it.
+type LanguageProvider interface {
+	ShowLanguage(ctx context.Context) (string, error)
+	SetLanguage(ctx context.Context, lang string) (string, error)
+}

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	platformplugins "github.com/liuran001/MusicBot-Go/bot/platform/plugins"
@@ -69,12 +68,7 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return nil, err
 	}
 
-	return &platformplugins.Contribution{
-		Platform: NewPlatform(client),
-		Commands: []admincmd.Command{
-			buildLanguageCommand(client),
-		},
-	}, nil
+	return &platformplugins.Contribution{Platform: NewPlatform(client)}, nil
 }
 
 // loadWVDevice loads Widevine L3 device credentials.
