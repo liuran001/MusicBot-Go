@@ -84,6 +84,7 @@ type MusicHandler struct {
 	CacheDir           string
 	BotName            string
 	DefaultQuality     string
+	DefaultLyricFormat string
 	ProcessTimeout     time.Duration
 	InlineUploadChatID int64
 	DefaultPlatform    string
@@ -231,6 +232,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 				RateLimiter:              h.RateLimiter,
 				DefaultPlatform:          h.DefaultPlatform,
 				DefaultQuality:           h.DefaultQuality,
+				DefaultLyricFormat:       h.DefaultLyricFormat,
 				PluginSettingDefinitions: h.PluginSettingDefinitions,
 			}
 			settingsHandler.Handle(ctx, b, update)

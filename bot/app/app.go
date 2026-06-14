@@ -172,7 +172,7 @@ func initRepository(conf *config.Config, log *logpkg.Logger) (*db.Repository, er
 	if defaultPlatform == "" {
 		defaultPlatform = "netease"
 	}
-	repo.SetDefaults(defaultPlatform, conf.GetString("DefaultQuality"))
+	repo.SetDefaults(defaultPlatform, conf.GetString("DefaultQuality"), conf.GetString("DefaultLyricFormat"))
 	return repo, nil
 }
 
@@ -371,6 +371,10 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	defaultQuality := a.Config.GetString("DefaultQuality")
+	defaultLyricFormat := strings.TrimSpace(a.Config.GetString("DefaultLyricFormat"))
+	if defaultLyricFormat == "" {
+		defaultLyricFormat = "lrc"
+	}
 	pageSize := a.Config.GetInt("ListPageSize")
 	inlinePageSize := a.Config.GetInt("InlineListPageSize")
 	playlistHandler := &handler.PlaylistHandler{
@@ -389,6 +393,7 @@ func (a *App) Start(ctx context.Context) error {
 		CacheDir:                 cacheDir,
 		BotName:                  botName,
 		DefaultQuality:           defaultQuality,
+		DefaultLyricFormat:       defaultLyricFormat,
 		InlineUploadChatID:       int64(a.Config.GetInt("InlineUploadChatID")),
 		DefaultPlatform:          defaultPlatform,
 		FallbackPlatform:         searchFallback,
@@ -419,6 +424,7 @@ func (a *App) Start(ctx context.Context) error {
 		RateLimiter:              rateLimiter,
 		DefaultPlatform:          defaultPlatform,
 		DefaultQuality:           defaultQuality,
+		DefaultLyricFormat:       defaultLyricFormat,
 		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
 	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
@@ -455,7 +461,7 @@ func (a *App) Start(ctx context.Context) error {
 		SearchCallback:           searchCallback,
 		PlaylistCallback:         playlistCallback,
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
-		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},

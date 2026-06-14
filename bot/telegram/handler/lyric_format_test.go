@@ -7,6 +7,7 @@ import (
 
 	lyricpkg "github.com/liuran001/MusicBot-Go/bot/lyric"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/mymmrac/telego"
 )
 
 func TestParseTrailingLyricFormat(t *testing.T) {
@@ -85,7 +86,7 @@ func TestBuildLyricFileNameForFormat(t *testing.T) {
 }
 
 func TestBuildLyricFormatKeyboard(t *testing.T) {
-	state := lyricRenderState{format: "ttml", includeTranslation: true, includeRoma: false}
+	state := lyricRenderState{format: "ttml", includeTranslation: true, includeRoma: false, showSettings: true}
 	kb := buildLyricFormatKeyboard("netease", "123456", state, 42)
 	if kb == nil || len(kb.InlineKeyboard) == 0 {
 		t.Fatal("expected a non-empty keyboard")
@@ -120,9 +121,56 @@ func TestBuildLyricFormatKeyboard(t *testing.T) {
 	}
 }
 
+func TestBuildLyricFormatKeyboardCollapsedByDefault(t *testing.T) {
+	// A fresh /lyric render (showSettings false) collapses to a single entry
+	// button that opens the format grid — no format buttons yet.
+	state := lyricRenderState{format: "lrc"}
+	kb := buildLyricFormatKeyboard("netease", "123456", state, 42)
+	if kb == nil || len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 1 {
+		t.Fatalf("expected a single entry button, got %+v", kb)
+	}
+	btn := kb.InlineKeyboard[0][0]
+	if !strings.HasPrefix(btn.CallbackData, "lyric o ") {
+		t.Errorf("entry button should open the grid via 'lyric o ', got %q", btn.CallbackData)
+	}
+	if len(btn.CallbackData) > 64 {
+		t.Errorf("callback data exceeds 64 bytes: %q", btn.CallbackData)
+	}
+}
+
+func TestBuildLyricFormatKeyboardSaveDefaultButton(t *testing.T) {
+	// When the displayed format differs from the saved default, the save button
+	// appears; when it matches the default, it does not.
+	changed := lyricRenderState{format: "yrc", defaultFormat: "lrc", showSettings: true}
+	kb := buildLyricFormatKeyboard("netease", "123456", changed, 42)
+	if !lyricKeyboardHasSaveButton(kb) {
+		t.Error("expected a save-as-default button when format differs from default")
+	}
+
+	same := lyricRenderState{format: "lrc", defaultFormat: "lrc", showSettings: true}
+	kb = buildLyricFormatKeyboard("netease", "123456", same, 42)
+	if lyricKeyboardHasSaveButton(kb) {
+		t.Error("save-as-default button should be hidden when format equals default")
+	}
+}
+
+func lyricKeyboardHasSaveButton(kb *telego.InlineKeyboardMarkup) bool {
+	if kb == nil {
+		return false
+	}
+	for _, row := range kb.InlineKeyboard {
+		for _, btn := range row {
+			if strings.HasPrefix(btn.CallbackData, "lyric d ") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestLyricFormatKeyboardNoTogglesForYRC(t *testing.T) {
 	// Pure word-by-word formats like yrc don't carry side tracks → no toggles.
-	state := lyricRenderState{format: "yrc"}
+	state := lyricRenderState{format: "yrc", showSettings: true}
 	kb := buildLyricFormatKeyboard("netease", "123456", state, 42)
 	for _, row := range kb.InlineKeyboard {
 		for _, btn := range row {
