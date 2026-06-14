@@ -38,7 +38,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	if args == "" && message.ReplyToMessage == nil {
 		params := &telego.SendMessageParams{
 			ChatID:          telego.ChatID{ID: message.Chat.ID},
-			Text:            inputContent,
+			Text:            inputLyricContent,
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {

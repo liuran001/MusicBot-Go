@@ -84,7 +84,7 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *tel
 func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) string {
 	var sb strings.Builder
 
-	sb.WriteString("⚙️ 设置中心\n\n")
+	sb.WriteString("⚙️ 设置\n\n")
 
 	platformName := h.DefaultPlatform
 	qualityValue := h.DefaultQuality
@@ -104,10 +104,14 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 		qualityValue = settings.DefaultQuality
 	}
 	platformEmoji := h.getPlatformEmoji(platformName)
-	sb.WriteString(fmt.Sprintf("🎵 默认平台: %s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
+	sb.WriteString(fmt.Sprintf("🎵 平台：%s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
 
 	qualityEmoji := h.getQualityEmoji(qualityValue)
-	sb.WriteString(fmt.Sprintf("🎧 默认音质: %s %s\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
+	sb.WriteString(fmt.Sprintf("🎧 音质：%s %s\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
+
+	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
+	sb.WriteString(fmt.Sprintf("🎤 歌词：%s\n", lyricFormatDisplayName(lyricFormat)))
+
 	autoDeleteEnabled := h.resolveAutoDeleteList(chatType, settings, groupSettings)
 	autoDeleteText := "关闭"
 	if autoDeleteEnabled {
@@ -118,32 +122,29 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	if autoLinkDetectEnabled {
 		autoLinkDetectText = "开启"
 	}
-	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删除列表消息: %s\n", autoDeleteText))
-	sb.WriteString(fmt.Sprintf("🔗 会话内链接自动识别: %s\n", autoLinkDetectText))
-
-	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
-	sb.WriteString(fmt.Sprintf("🎤 默认歌词格式: %s\n", lyricFormatDisplayName(lyricFormat)))
+	sb.WriteString("\n")
+	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删列表：%s\n", autoDeleteText))
+	sb.WriteString(fmt.Sprintf("🔗 会话内自动识别链接：%s\n", autoLinkDetectText))
 
 	for _, def := range h.sortedPluginSettingDefinitions() {
 		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
 			continue
 		}
 		value := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
-		sb.WriteString(fmt.Sprintf("🔌 %s: %s\n", def.Title, def.LabelOf(value)))
+		sb.WriteString(fmt.Sprintf("🔌 %s：%s\n", def.Title, def.LabelOf(value)))
 	}
-	sb.WriteString("\n")
 
 	if len(platforms) > 1 {
-		sb.WriteString("💡 可用平台: ")
+		sb.WriteString("\n💡 可用平台\n")
 		var platformNames []string
 		for _, p := range platforms {
 			platformNames = append(platformNames, h.getPlatformDisplayName(p))
 		}
-		sb.WriteString(strings.Join(platformNames, ", "))
+		sb.WriteString(strings.Join(platformNames, " / "))
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n点击下方按钮修改设置")
+	sb.WriteString("\n点击下方按钮修改")
 
 	return sb.String()
 }
@@ -221,18 +222,18 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
 	rows = append(rows, []telego.InlineKeyboardButton{
 		{
-			Text:         h.formatToggleButton("自动删列表", autoDeleteEnabled),
+			Text:         h.formatToggleButton("🧹 自动删列表", autoDeleteEnabled),
 			CallbackData: fmt.Sprintf("settings autodelete %s", h.toggleValue(autoDeleteEnabled)),
 		},
 		{
-			Text:         h.formatToggleButton("自动识别链接", autoLinkDetectEnabled),
+			Text:         h.formatToggleButton("🔗 识别链接", autoLinkDetectEnabled),
 			CallbackData: fmt.Sprintf("settings autolink %s", h.toggleValue(autoLinkDetectEnabled)),
 		},
 	})
 
 	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	rows = append(rows, []telego.InlineKeyboardButton{{
-		Text:         fmt.Sprintf("🎤 默认歌词格式: %s", lyricFormatDisplayName(lyricFormat)),
+		Text:         fmt.Sprintf("🎤 歌词：%s", lyricFormatDisplayName(lyricFormat)),
 		CallbackData: "settings lyricmenu",
 	}})
 	for _, def := range h.sortedPluginSettingDefinitions() {
@@ -244,11 +245,11 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 		}
 		current := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
 		rows = append(rows, []telego.InlineKeyboardButton{{
-			Text:         fmt.Sprintf("%s: %s", def.Title, def.LabelOf(current)),
+			Text:         fmt.Sprintf("🔌 %s：%s", def.Title, def.LabelOf(current)),
 			CallbackData: fmt.Sprintf("settings pcycle %s %s", def.Plugin, def.Key),
 		}})
 	}
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: "settings close"}})
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "✖️ 关闭", CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -339,17 +340,17 @@ func (h *SettingsHandler) buildLyricFormatMenuText(chatType string, settings *bo
 	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	var sb strings.Builder
 	sb.WriteString("🎤 默认歌词格式\n\n")
-	sb.WriteString(fmt.Sprintf("当前: %s\n\n", lyricFormatDisplayName(current)))
+	sb.WriteString(fmt.Sprintf("当前：%s\n\n", lyricFormatDisplayName(current)))
 	sb.WriteString("选择 /lyric 默认导出的歌词格式（音频内嵌歌词始终为 LRC，不受影响）")
 	return sb.String()
 }
 
 func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string {
-	state := "关闭"
+	state := "关"
 	if enabled {
-		state = "开启"
+		state = "开"
 	}
-	return fmt.Sprintf("%s: %s", label, state)
+	return fmt.Sprintf("%s：%s", label, state)
 }
 
 func (h *SettingsHandler) sortedPluginSettingDefinitions() []botpkg.PluginSettingDefinition {

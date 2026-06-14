@@ -30,7 +30,7 @@ func (h *AboutHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	buildTimeText := mdV2Replacer.Replace(h.BuildTime)
 	buildArchText := mdV2Replacer.Replace(h.BuildArch)
 	pluginText := h.pluginSummary()
-	msg := fmt.Sprintf(aboutText, versionText, runtimeText, buildTimeText, buildArchText, pluginText)
+	msg := fmt.Sprintf(aboutText, versionText, pluginText, runtimeText, buildTimeText, buildArchText)
 	params := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: update.Message.Chat.ID},
 		Text:            msg,
@@ -74,23 +74,22 @@ func (h *AboutHandler) pluginSummary() string {
 		plugins = h.DynPlugins.PluginInfos()
 	}
 	if len(plugins) == 0 {
-		return mdV2Replacer.Replace("插件: 无")
+		return mdV2Replacer.Replace("无")
 	}
-	lines := make([]string, 0, len(plugins)+1)
-	lines = append(lines, mdV2Replacer.Replace("插件:"))
+	lines := make([]string, 0, len(plugins))
 	for _, plugin := range plugins {
 		name := strings.TrimSpace(plugin.Name)
 		if name == "" {
 			name = "unknown"
 		}
-		line := "- " + name
+		line := "\\- " + mdV2Replacer.Replace(name)
 		if strings.TrimSpace(plugin.Version) != "" {
-			line += " (" + plugin.Version + ")"
+			line += " " + mdV2Replacer.Replace("("+plugin.Version+")")
 		}
 		if strings.TrimSpace(plugin.URL) != "" {
-			line += " " + plugin.URL
+			line += " " + mdV2Replacer.Replace(plugin.URL)
 		}
-		lines = append(lines, mdV2Replacer.Replace(line))
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
