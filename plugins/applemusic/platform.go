@@ -62,14 +62,21 @@ func (p *AppleMusicPlatform) GetLyrics(ctx context.Context, trackID string) (*pl
 	if p == nil || p.client == nil {
 		return nil, platform.NewUnavailableError("applemusic", "lyrics", trackID)
 	}
-	plain, err := p.client.GetLyrics(ctx, trackID)
+	ttml, err := p.client.GetLyricsTTML(ctx, trackID)
 	if err != nil {
 		return nil, err
 	}
+	plain := parseTTMLToLRC(ttml)
 	if strings.TrimSpace(plain) == "" {
 		return nil, platform.NewUnavailableError("applemusic", "lyrics", trackID)
 	}
-	return &platform.Lyrics{Plain: plain, Timestamped: platform.ParseLRCTimestampedLines(plain)}, nil
+	// Surface the raw word-timed TTML so the format converter can emit it
+	// directly (and derive yrc/qrc/lys/etc from Apple's word spans).
+	return &platform.Lyrics{
+		Plain:       plain,
+		Timestamped: platform.ParseLRCTimestampedLines(plain),
+		RawTTML:     ttml,
+	}, nil
 }
 
 func (p *AppleMusicPlatform) RecognizeAudio(_ context.Context, _ io.Reader) (*platform.Track, error) {

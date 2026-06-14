@@ -180,6 +180,24 @@ func (q *QQMusicPlatform) GetLyrics(ctx context.Context, trackID string) (*platf
 	if songMid == "" {
 		return nil, platform.NewNotFoundError("qqmusic", "lyrics", trackID)
 	}
+
+	// Prefer the word-by-word ("逐词") QRC endpoint; fall back to plain LRC.
+	if qrc, qerr := q.client.GetLyricsQRC(ctx, songMid); qerr == nil && qrc != nil {
+		plain := strings.TrimSpace(qrc.Lyric)
+		if plain != "" || strings.TrimSpace(qrc.RawQRC) != "" {
+			result := &platform.Lyrics{
+				Plain:       qrc.Lyric,
+				Translation: strings.TrimSpace(qrc.Translation),
+				Roma:        strings.TrimSpace(qrc.Roma),
+				RawQRC:      strings.TrimSpace(qrc.RawQRC),
+			}
+			if parsed := parseLyricLines(qrc.Lyric); len(parsed) > 0 {
+				result.Timestamped = parsed
+			}
+			return result, nil
+		}
+	}
+
 	lyric, trans, err := q.client.GetLyrics(ctx, songMid)
 	if err != nil {
 		return nil, err

@@ -136,6 +136,19 @@ type Lyrics struct {
 
 	// Translation contains translated lyrics (if available).
 	Translation string `json:"translation,omitempty"`
+
+	// Roma contains romanization/pronunciation lyrics (if available).
+	Roma string `json:"roma,omitempty"`
+
+	// RawYRC / RawQRC / RawLYS hold a platform-native word-by-word ("逐词")
+	// raw lyric track when the platform can provide one. These feed the lyric
+	// format converter; at most one is typically set.
+	RawYRC string `json:"raw_yrc,omitempty"`
+	RawQRC string `json:"raw_qrc,omitempty"`
+	RawLYS string `json:"raw_lys,omitempty"`
+
+	// RawTTML is Apple Music's native word-timed TTML document, when available.
+	RawTTML string `json:"raw_ttml,omitempty"`
 }
 
 // LyricLine represents a single line of synchronized lyrics.

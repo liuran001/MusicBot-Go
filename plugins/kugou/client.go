@@ -221,6 +221,35 @@ func (c *Client) GetLyrics(ctx context.Context, trackID string) (string, error) 
 	return lyrics, nil
 }
 
+// resolveHash returns the audio file hash for a track, used to fetch KRC
+// word-by-word lyrics. It prefers the trackID itself (Kugou track IDs are
+// hashes) and falls back to the resolved song's stored hash.
+func (c *Client) resolveHash(ctx context.Context, trackID string) string {
+	if hash := normalizeHash(trackID); hash != "" {
+		return hash
+	}
+	song, err := c.GetTrack(ctx, trackID)
+	if err != nil || song == nil {
+		return ""
+	}
+	if song.Extra != nil {
+		if hash := normalizeHash(song.Extra["hash"]); hash != "" {
+			return hash
+		}
+	}
+	return normalizeHash(song.ID)
+}
+
+// GetLyricsKRC fetches and decrypts Kugou's word-by-word KRC lyric for a track,
+// returning nil (no error) when unavailable so callers fall back to plain LRC.
+func (c *Client) GetLyricsKRC(ctx context.Context, trackID string) (*krcResult, error) {
+	hash := c.resolveHash(ctx, trackID)
+	if hash == "" {
+		return nil, nil
+	}
+	return c.fetchKRC(ctx, hash)
+}
+
 func (c *Client) GetDownloadInfo(ctx context.Context, trackID string) (*model.Song, error) {
 	requested := platform.QualityHigh
 	song, err := c.GetTrack(ctx, trackID)

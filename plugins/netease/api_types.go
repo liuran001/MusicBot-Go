@@ -112,6 +112,16 @@ type SongLyricData struct {
 		Version int    `json:"version"`
 		Lyric   string `json:"lyric"`
 	} `json:"tlyric"`
+	// Yrc is NetEase's word-by-word ("逐词") karaoke lyric track.
+	Yrc struct {
+		Version int    `json:"version"`
+		Lyric   string `json:"lyric"`
+	} `json:"yrc"`
+	// Romalrc is the romanization side-track.
+	Romalrc struct {
+		Version int    `json:"version"`
+		Lyric   string `json:"lyric"`
+	} `json:"romalrc"`
 	Code int `json:"code"`
 }
 

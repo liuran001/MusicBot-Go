@@ -18,6 +18,7 @@ import (
 
 	"github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
+	lyricpkg "github.com/liuran001/MusicBot-Go/bot/lyric"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
@@ -693,6 +694,157 @@ func (c *Client) GetLyrics(ctx context.Context, songMid string) (string, string,
 	lyric := decodeBase64Text(resp.Lyric)
 	trans := decodeBase64Text(resp.Trans)
 	return lyric, trans, nil
+}
+
+// QQLyricResult carries the lyric tracks fetched from the verbatim (QRC)
+// endpoint: the plain LRC, translation, romanization, and the raw word-by-word
+// QRC token body (already decrypted to "[start,dur]word(start,dur)…" form).
+type QQLyricResult struct {
+	Lyric       string
+	Translation string
+	Roma        string
+	RawQRC      string
+}
+
+// GetLyricsQRC fetches word-by-word ("逐词") lyrics via the musicu.fcg
+// GetPlayLyricInfo module (qrc=1, roma=1) and decrypts the QRC payload. It
+// returns ErrUnavailable-style empties gracefully; callers should fall back to
+// the plain GetLyrics endpoint when RawQRC is empty.
+func (c *Client) GetLyricsQRC(ctx context.Context, songMid string) (*QQLyricResult, error) {
+	payload := map[string]interface{}{
+		"comm": map[string]interface{}{
+			"_channelid":   "0",
+			"_os_version":  "6.2.9200-2",
+			"authst":       "",
+			"ct":           "19",
+			"cv":           "1873",
+			"patch":        "118",
+			"tmeAppID":     "qqmusic",
+			"tmeLoginType": 2,
+			"uin":          "0",
+			"wid":          "0",
+		},
+		"req_1": map[string]interface{}{
+			"method": "GetPlayLyricInfo",
+			"module": "music.musichallSong.PlayLyricInfo",
+			"param": map[string]interface{}{
+				"songMID": songMid,
+				"qrc":     1,
+				"roma":    1,
+				"trans":   1,
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("qqmusic: encode qrc lyric payload: %w", err)
+	}
+	respBytes, err := c.postJSONRaw(ctx, musicuEndpoint+"?format=json&inCharset=utf8&outCharset=utf8", body)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Req1 struct {
+			Code int `json:"code"`
+			Data struct {
+				Lyric string `json:"lyric"`
+				// Translation appears under varying field names across versions.
+				Trans      string `json:"trans"`
+				LyricTrans string `json:"lyricTrans"`
+				TransLyric string `json:"trans_lyric"`
+				// Romanization likewise.
+				Roma      string `json:"roma"`
+				RomaLyric string `json:"romaLyric"`
+				LyricRoma string `json:"lyricRoma"`
+				RomaT     string `json:"roma_t"`
+				QRC       int    `json:"qrc"`
+			} `json:"data"`
+		} `json:"req_1"`
+	}
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, fmt.Errorf("qqmusic: decode qrc lyric: %w", err)
+	}
+
+	data := resp.Req1.Data
+	rawTrans := firstNonEmptyStr(data.Trans, data.LyricTrans, data.TransLyric)
+	rawRoma := firstNonEmptyStr(data.Roma, data.RomaLyric, data.LyricRoma, data.RomaT)
+	out := &QQLyricResult{
+		Translation: decodeLyricPayload(rawTrans),
+		Roma:        decodeLyricPayload(rawRoma),
+	}
+	if data.QRC == 0 {
+		// Plain lyric returned base64-encoded; no verbatim track available.
+		out.Lyric = decodeBase64Text(data.Lyric)
+		return out, nil
+	}
+	// Verbatim path: data.lyric is a hex-encoded encrypted QRC blob. Decrypt to
+	// XML first so we can also salvage an embedded roma track if needed.
+	xmlContent, xerr := lyricpkg.DecodeQRCXML(data.Lyric)
+	if xerr != nil || strings.TrimSpace(xmlContent) == "" {
+		out.Lyric = decodeBase64Text(data.Lyric)
+		return out, nil
+	}
+	tokenBody := lyricpkg.ExtractQRCLyricContent(xmlContent)
+	if strings.TrimSpace(tokenBody) == "" {
+		out.Lyric = decodeBase64Text(data.Lyric)
+		return out, nil
+	}
+	out.RawQRC = tokenBody
+	out.Lyric = lyricpkg.Convert(lyricpkg.Payload{RawQRC: tokenBody}, "lrc", lyricpkg.Options{})
+
+	// Some songs carry romanization in the QRC XML's secondary Lyric nodes.
+	if strings.TrimSpace(out.Roma) == "" {
+		if romaQrc := lyricpkg.ExtractQRCExtraContent(xmlContent); romaQrc != "" {
+			if lineHeadLooksLikeToken(romaQrc) {
+				out.Roma = lyricpkg.Convert(lyricpkg.Payload{RawQRC: romaQrc}, "lrc", lyricpkg.Options{})
+			} else {
+				out.Roma = romaQrc
+			}
+		}
+	}
+	return out, nil
+}
+
+// firstNonEmptyStr returns the first non-blank string.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// lineHeadLooksLikeToken reports whether s begins with a "[start,dur]" token tag.
+func lineHeadLooksLikeToken(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "[") && strings.Contains(s, ",") && strings.Contains(s, "]")
+}
+
+// decodeLyricPayload normalizes a QQ lyric side-track field that may be plain
+// text, base64, or (rarely) an encrypted QRC hex blob, into LRC text.
+func decodeLyricPayload(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if strings.HasPrefix(text, "[") || strings.HasPrefix(text, "<") {
+		return text
+	}
+	if decoded := decodeBase64Text(text); decoded != "" {
+		if strings.Contains(decoded, "[") || strings.Contains(decoded, "<Lyric_") {
+			if strings.Contains(decoded, "<Lyric_") {
+				if tok, err := lyricpkg.DecodeQRC(decoded); err == nil && tok != "" {
+					return lyricpkg.Convert(lyricpkg.Payload{RawQRC: tok}, "lrc", lyricpkg.Options{})
+				}
+			}
+			return decoded
+		}
+	}
+	if tok, err := lyricpkg.DecodeQRC(text); err == nil && tok != "" {
+		return lyricpkg.Convert(lyricpkg.Payload{RawQRC: tok}, "lrc", lyricpkg.Options{})
+	}
+	return decodeBase64Text(text)
 }
 
 func (c *Client) GetSongFileInfo(ctx context.Context, songMid string) (*qqFileInfo, error) {
