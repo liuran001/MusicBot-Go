@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	lyricpkg "github.com/liuran001/MusicBot-Go/bot/lyric"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
@@ -20,8 +21,11 @@ const lyricCaptionMaxChars = 1000
 
 // LyricHandler handles /lyric command.
 type LyricHandler struct {
-	PlatformManager platform.Manager
-	RateLimiter     *telegram.RateLimiter
+	PlatformManager  platform.Manager
+	RateLimiter      *telegram.RateLimiter
+	Repo             botpkg.SongRepository
+	DefaultPlatform  string
+	FallbackPlatform string
 }
 
 func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -82,6 +86,11 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	}
 
 	platformName, trackID, found := extractPlatformTrackFromMessage(ctx, args, h.PlatformManager)
+	if !found {
+		// Not a URL/ID — treat the argument as a song name, search the default
+		// platform, and use the first result's lyrics.
+		platformName, trackID, found = h.searchFirstTrackForLyric(ctx, message, args)
+	}
 	if !found {
 		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: noResults}
 		if h.RateLimiter != nil {
@@ -161,6 +170,77 @@ func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mg
 	return "", "", false
 }
 
+// searchFirstTrackForLyric searches the default platform for the given song
+// name and returns the first result's platform/trackID. It is the fallback for
+// "/lyric <name>" where the argument is neither a URL nor a track ID.
+func (h *LyricHandler) searchFirstTrackForLyric(ctx context.Context, message *telego.Message, query string) (platformName, trackID string, found bool) {
+	if h.PlatformManager == nil {
+		return "", "", false
+	}
+	keyword := strings.TrimSpace(query)
+	if keyword == "" {
+		return "", "", false
+	}
+
+	// Allow an explicit trailing platform/quality token, e.g. "lemon qq".
+	keyword, requestedPlatform, _ := parseTrailingOptions(keyword, h.PlatformManager)
+	if strings.TrimSpace(keyword) == "" {
+		return "", "", false
+	}
+
+	primaryPlatform := h.resolveDefaultPlatform(ctx, message)
+	fallbackPlatform := strings.TrimSpace(h.FallbackPlatform)
+	if fallbackPlatform == "" {
+		fallbackPlatform = "netease"
+	}
+	if strings.TrimSpace(requestedPlatform) != "" {
+		primaryPlatform = requestedPlatform
+		fallbackPlatform = ""
+	}
+
+	tracks, matchedPlatform, _, err := searchTracksWithFallback(ctx, h.PlatformManager, primaryPlatform, fallbackPlatform, keyword, nil, true)
+	if err != nil || len(tracks) == 0 {
+		return "", "", false
+	}
+	first := tracks[0]
+	resolvedPlatform := strings.TrimSpace(first.Platform)
+	if resolvedPlatform == "" {
+		resolvedPlatform = matchedPlatform
+	}
+	if resolvedPlatform == "" || strings.TrimSpace(first.ID) == "" {
+		return "", "", false
+	}
+	return resolvedPlatform, first.ID, true
+}
+
+// resolveDefaultPlatform resolves the lyric search platform: configured default,
+// then group/user settings from the repository (mirroring the search handler).
+func (h *LyricHandler) resolveDefaultPlatform(ctx context.Context, message *telego.Message) string {
+	platformName := strings.TrimSpace(h.DefaultPlatform)
+	if platformName == "" {
+		platformName = "netease"
+	}
+	if h.Repo == nil || message == nil {
+		return platformName
+	}
+	if message.Chat.Type != "private" {
+		if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+			if strings.TrimSpace(settings.DefaultPlatform) != "" {
+				platformName = settings.DefaultPlatform
+			}
+		}
+		return platformName
+	}
+	if message.From != nil {
+		if settings, err := h.Repo.GetUserSettings(ctx, message.From.ID); err == nil && settings != nil {
+			if strings.TrimSpace(settings.DefaultPlatform) != "" {
+				platformName = settings.DefaultPlatform
+			}
+		}
+	}
+	return platformName
+}
+
 // parseTrailingLyricFormat strips a recognized trailing format token (e.g.
 // "ttml", "yrc", "qrc") from the argument text, returning the remaining text
 // and the resolved format. When no format token is present it returns the
@@ -226,10 +306,20 @@ func (h *LyricHandler) sendLyricDocument(ctx context.Context, b *telego.Bot, cha
 	h.sendLyricDocumentState(ctx, b, chatID, replyToMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
 }
 
-// sendLyricDocumentState converts the lyrics per the render state, sends the
-// file with a caption showing the current format/toggles, and attaches the
-// format + translation/roma toggle keyboard.
-func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
+// lyricRenderedDoc holds the rendered artifacts for a lyric document: the temp
+// file (owned by the caller, who must os.Remove it), its display name, the
+// caption, and the format-switch keyboard.
+type lyricRenderedDoc struct {
+	filePath string
+	fileName string
+	caption  string
+	keyboard *telego.InlineKeyboardMarkup
+}
+
+// renderLyricDocument converts the lyrics per the render state and writes a temp
+// file, returning everything needed to send or edit the document message. The
+// caller owns filePath and must os.Remove it. ok is false if writing failed.
+func (h *LyricHandler) renderLyricDocument(lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) (lyricRenderedDoc, bool) {
 	payload := lyricPayloadFrom(lyrics, platformName)
 	resolved := lyricpkg.NormalizeFormat(state.format)
 
@@ -253,29 +343,45 @@ func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot
 	fileName := buildLyricFileNameForFormat(baseName, resolved)
 	filePath, err := writeLyricTempFile(content, fileName)
 	if err != nil {
+		return lyricRenderedDoc{}, false
+	}
+
+	return lyricRenderedDoc{
+		filePath: filePath,
+		fileName: fileName,
+		caption:  buildLyricCaption(payload, content, state),
+		keyboard: buildLyricFormatKeyboard(platformName, trackID, state, requesterID),
+	}, true
+}
+
+// sendLyricDocumentState converts the lyrics per the render state, sends the
+// file with a caption showing the current format/toggles, and attaches the
+// format + translation/roma toggle keyboard.
+func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
+	doc, ok := h.renderLyricDocument(lyrics, baseName, platformName, trackID, state, requesterID)
+	if !ok {
 		h.sendLyricFallbackError(ctx, b, chatID, replyToMessageID)
 		return
 	}
-	defer os.Remove(filePath)
+	defer os.Remove(doc.filePath)
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(doc.filePath)
 	if err != nil {
 		h.sendLyricFallbackError(ctx, b, chatID, replyToMessageID)
 		return
 	}
 	defer file.Close()
 
-	caption := buildLyricCaption(payload, content, state)
-	keyboard := buildLyricFormatKeyboard(platformName, trackID, state, requesterID)
-
 	docParams := &telego.SendDocumentParams{
-		ChatID:          telego.ChatID{ID: chatID},
-		Document:        telego.InputFile{File: telegoutil.NameReader(file, fileName)},
-		ReplyParameters: &telego.ReplyParameters{MessageID: replyToMessageID},
-		ReplyMarkup:     keyboard,
+		ChatID:      telego.ChatID{ID: chatID},
+		Document:    telego.InputFile{File: telegoutil.NameReader(file, doc.fileName)},
+		ReplyMarkup: doc.keyboard,
 	}
-	if caption != "" {
-		docParams.Caption = caption
+	if replyToMessageID > 0 {
+		docParams.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMessageID}
+	}
+	if doc.caption != "" {
+		docParams.Caption = doc.caption
 		docParams.ParseMode = telego.ModeHTML
 	}
 
@@ -286,7 +392,7 @@ func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot
 		_, sendErr = b.SendDocument(ctx, docParams)
 	}
 
-	if sendErr != nil && caption != "" {
+	if sendErr != nil && doc.caption != "" {
 		docParams.Caption = ""
 		docParams.ParseMode = ""
 		if h.RateLimiter != nil {
@@ -295,6 +401,62 @@ func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot
 			_, _ = b.SendDocument(ctx, docParams)
 		}
 	}
+}
+
+// editLyricDocumentState re-renders the lyric document for a new format/toggle
+// state and edits the existing message in place (file + caption + keyboard) via
+// EditMessageMedia. When the edit fails for any reason other than a no-op
+// "message is not modified", it deletes the old document and sends a fresh one
+// so the user always ends up seeing the requested format.
+func (h *LyricHandler) editLyricDocumentState(ctx context.Context, b *telego.Bot, chatID int64, messageID, fallbackReplyToID int, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
+	doc, ok := h.renderLyricDocument(lyrics, baseName, platformName, trackID, state, requesterID)
+	if !ok {
+		h.sendLyricFallbackError(ctx, b, chatID, fallbackReplyToID)
+		return
+	}
+	defer os.Remove(doc.filePath)
+
+	file, err := os.Open(doc.filePath)
+	if err != nil {
+		h.sendLyricFallbackError(ctx, b, chatID, fallbackReplyToID)
+		return
+	}
+	defer file.Close()
+
+	media := &telego.InputMediaDocument{
+		Type:  telego.MediaTypeDocument,
+		Media: telego.InputFile{File: telegoutil.NameReader(file, doc.fileName)},
+	}
+	if doc.caption != "" {
+		media.Caption = doc.caption
+		media.ParseMode = telego.ModeHTML
+	}
+	editParams := &telego.EditMessageMediaParams{
+		ChatID:      telego.ChatID{ID: chatID},
+		MessageID:   messageID,
+		Media:       media,
+		ReplyMarkup: doc.keyboard,
+	}
+
+	var editErr error
+	if h.RateLimiter != nil {
+		_, editErr = telegram.EditMessageMediaWithRetry(ctx, h.RateLimiter, b, editParams)
+	} else {
+		_, editErr = b.EditMessageMedia(ctx, editParams)
+	}
+	if editErr == nil || telegram.IsMessageNotModified(editErr) {
+		return
+	}
+
+	// In-place edit failed — delete the old document and resend a new one so the
+	// user still gets the requested format.
+	deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: chatID}, MessageID: messageID}
+	if h.RateLimiter != nil {
+		_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+	} else {
+		_ = b.DeleteMessage(ctx, deleteParams)
+	}
+	h.sendLyricDocumentState(ctx, b, chatID, fallbackReplyToID, lyrics, baseName, platformName, trackID, state, requesterID)
 }
 
 // lyricFormatDefaultTranslation reports the default translation-merge state for
