@@ -148,6 +148,10 @@ type UserSettingsModel struct {
 	AutoDeleteList     bool   `gorm:"not null;default:false"`
 	AutoLinkDetect     bool   `gorm:"not null;default:true"`
 	DefaultLyricFormat string `gorm:"not null;default:'lrc'"`
+	// Nullable side-track defaults: NULL means "unset" (use the per-format
+	// default); a non-NULL value is the user's explicit choice.
+	DefaultLyricIncludeTranslation *bool
+	DefaultLyricIncludeRoma        *bool
 }
 
 func (UserSettingsModel) TableName() string {
@@ -163,6 +167,10 @@ type GroupSettingsModel struct {
 	AutoDeleteList     bool   `gorm:"not null;default:true"`
 	AutoLinkDetect     bool   `gorm:"not null;default:true"`
 	DefaultLyricFormat string `gorm:"not null;default:'lrc'"`
+	// Nullable side-track defaults: NULL means "unset" (use the per-format
+	// default); a non-NULL value is the group's explicit choice.
+	DefaultLyricIncludeTranslation *bool
+	DefaultLyricIncludeRoma        *bool
 }
 
 func (GroupSettingsModel) TableName() string {

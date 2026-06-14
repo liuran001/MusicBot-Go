@@ -131,6 +131,86 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 }
 
+func TestRepositoryDefaultLyricFlagsPersistence(t *testing.T) {
+	file, err := os.CreateTemp("", "music163bot-*.db")
+	if err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+	path := file.Name()
+	_ = file.Close()
+	defer os.Remove(path)
+
+	file2, err := os.CreateTemp("", "music163bot-data-*.db")
+	if err != nil {
+		t.Fatalf("create temp data db: %v", err)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	defer os.Remove(dataPath)
+
+	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+
+	// Freshly-created settings must leave the flags unset (nil), so /lyric keeps
+	// the per-format defaults instead of being forced on/off.
+	settings, err := repo.GetUserSettings(ctx, 555)
+	if err != nil {
+		t.Fatalf("get user settings: %v", err)
+	}
+	if settings.DefaultLyricIncludeTranslation != nil || settings.DefaultLyricIncludeRoma != nil {
+		t.Fatalf("new settings should have nil lyric flags, got (%v,%v)",
+			settings.DefaultLyricIncludeTranslation, settings.DefaultLyricIncludeRoma)
+	}
+
+	// Set explicit values and persist.
+	on := true
+	off := false
+	settings.DefaultLyricIncludeTranslation = &off
+	settings.DefaultLyricIncludeRoma = &on
+	if err := repo.UpdateUserSettings(ctx, settings); err != nil {
+		t.Fatalf("update user settings: %v", err)
+	}
+
+	reloaded, err := repo.GetUserSettings(ctx, 555)
+	if err != nil {
+		t.Fatalf("reget user settings: %v", err)
+	}
+	if reloaded.DefaultLyricIncludeTranslation == nil || *reloaded.DefaultLyricIncludeTranslation {
+		t.Errorf("translation flag should persist as false, got %v", reloaded.DefaultLyricIncludeTranslation)
+	}
+	if reloaded.DefaultLyricIncludeRoma == nil || !*reloaded.DefaultLyricIncludeRoma {
+		t.Errorf("roma flag should persist as true, got %v", reloaded.DefaultLyricIncludeRoma)
+	}
+
+	// Same for group settings.
+	group, err := repo.GetGroupSettings(ctx, -1009)
+	if err != nil {
+		t.Fatalf("get group settings: %v", err)
+	}
+	if group.DefaultLyricIncludeTranslation != nil {
+		t.Fatalf("new group settings should have nil translation flag")
+	}
+	group.DefaultLyricIncludeTranslation = &on
+	if err := repo.UpdateGroupSettings(ctx, group); err != nil {
+		t.Fatalf("update group settings: %v", err)
+	}
+	regroup, err := repo.GetGroupSettings(ctx, -1009)
+	if err != nil {
+		t.Fatalf("reget group settings: %v", err)
+	}
+	if regroup.DefaultLyricIncludeTranslation == nil || !*regroup.DefaultLyricIncludeTranslation {
+		t.Errorf("group translation flag should persist as true, got %v", regroup.DefaultLyricIncludeTranslation)
+	}
+	if regroup.DefaultLyricIncludeRoma != nil {
+		t.Errorf("group roma flag should stay nil, got %v", regroup.DefaultLyricIncludeRoma)
+	}
+}
+
 func TestRepositoryCreateAfterSoftDeleteByTrackQuality(t *testing.T) {
 	file, err := os.CreateTemp("", "music163bot-*.db")
 	if err != nil {

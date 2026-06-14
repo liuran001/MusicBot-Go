@@ -154,7 +154,10 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	if !explicitFormat {
 		format = defaultFormat
 	}
-	h.sendLyricDocument(ctx, b, message.Chat.ID, message.MessageID, lyrics, baseName, platformName, trackID, format, defaultFormat, requesterID)
+	// Initial translation/roma toggles come from the persisted per-scope defaults,
+	// falling back to the per-format default when unset.
+	includeTranslation, includeRoma := h.resolveDefaultLyricFlags(ctx, message, format)
+	h.sendLyricDocument(ctx, b, message.Chat.ID, message.MessageID, lyrics, baseName, platformName, trackID, format, defaultFormat, includeTranslation, includeRoma, requesterID)
 }
 
 func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mgr platform.Manager) (platformName, trackID string, found bool) {
@@ -309,20 +312,52 @@ func (h *LyricHandler) formatLyricsError(err error) string {
 	return getLrcFailed
 }
 
-// sendLyricDocument is the initial entry from the /lyric command. It derives
-// the default translation/roma toggles for the requested format, then renders
-// with a collapsed keyboard (only the "更换歌词格式" entry button). defaultFormat
-// is the persisted per-scope default, carried so the format-switch keyboard can
-// later decide when to offer "保存为默认".
-func (h *LyricHandler) sendLyricDocument(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID, format, defaultFormat string, requesterID int64) {
+// sendLyricDocument is the initial entry from the /lyric command. It renders
+// with a collapsed keyboard (only the "更换歌词格式" entry button). The initial
+// translation/roma toggles are resolved by the caller (persisted per-scope
+// defaults, falling back to per-format defaults). defaultFormat is the persisted
+// per-scope default, carried so the format-switch keyboard can later decide when
+// to offer "保存为默认".
+func (h *LyricHandler) sendLyricDocument(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID, format, defaultFormat string, includeTranslation, includeRoma bool, requesterID int64) {
 	state := lyricRenderState{
 		format:             lyricpkg.NormalizeFormat(format),
 		defaultFormat:      lyricpkg.NormalizeFormat(defaultFormat),
-		includeTranslation: lyricFormatDefaultTranslation(format),
-		includeRoma:        false,
+		includeTranslation: includeTranslation,
+		includeRoma:        includeRoma,
 		showSettings:       false,
 	}
 	h.sendLyricDocumentState(ctx, b, chatID, replyToMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
+// resolveDefaultLyricFlags resolves the initial translation/roma toggles for a
+// /lyric render: the persisted per-scope side-track defaults when set, otherwise
+// the per-format defaults (document formats default translation on; roma always
+// defaults off). A nil stored pointer means "unset".
+func (h *LyricHandler) resolveDefaultLyricFlags(ctx context.Context, message *telego.Message, format string) (includeTranslation, includeRoma bool) {
+	includeTranslation = lyricFormatDefaultTranslation(format)
+	includeRoma = false
+	if h.Repo == nil || message == nil {
+		return includeTranslation, includeRoma
+	}
+	var transPtr, romaPtr *bool
+	if message.Chat.Type != "private" {
+		if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+			transPtr = settings.DefaultLyricIncludeTranslation
+			romaPtr = settings.DefaultLyricIncludeRoma
+		}
+	} else if message.From != nil {
+		if settings, err := h.Repo.GetUserSettings(ctx, message.From.ID); err == nil && settings != nil {
+			transPtr = settings.DefaultLyricIncludeTranslation
+			romaPtr = settings.DefaultLyricIncludeRoma
+		}
+	}
+	if transPtr != nil {
+		includeTranslation = *transPtr
+	}
+	if romaPtr != nil {
+		includeRoma = *romaPtr
+	}
+	return includeTranslation, includeRoma
 }
 
 // resolveDefaultLyricFormat resolves the per-scope default lyric format: group
@@ -573,7 +608,7 @@ func buildLRCFromTimestamped(lines []platform.LyricLine) string {
 func buildLyricCaption(payload lyricpkg.Payload, content string, state lyricRenderState) string {
 	format := lyricpkg.NormalizeFormat(state.format)
 	preview := strings.TrimSpace(lyricPreviewText(payload, content, format))
-	label := lyricFormatDisplayName(format)
+	label := lyricFormatDisplayNameForPayload(format, payload)
 	header := fmt.Sprintf("当前歌词格式: %s", html.EscapeString(label))
 	if extras := lyricCaptionToggleSuffix(payload, format, state); extras != "" {
 		header += extras
@@ -598,23 +633,50 @@ func buildLyricCaption(payload lyricpkg.Payload, content string, state lyricRend
 	return header
 }
 
-// lyricCaptionToggleSuffix appends a " · 翻译 · 罗马音" note listing the active
-// side-tracks, only for formats that support them and when data is present.
+// lyricFormatDisplayNameForPayload is lyricFormatDisplayName, but drops the
+// "逐词" wording when the song carries no actual word-by-word timing (e.g. a
+// yrc/ttml request that falls back to line-level lyrics). The format itself is
+// unchanged — only the human-facing label reflects what was really produced.
+func lyricFormatDisplayNameForPayload(format string, payload lyricpkg.Payload) string {
+	name := lyricFormatDisplayName(format)
+	if strings.Contains(name, "逐词") && !lyricpkg.HasWordTiming(payload) {
+		name = strings.TrimSpace(strings.ReplaceAll(name, "逐词", ""))
+	}
+	return name
+}
+
+// lyricCaptionToggleSuffix appends a " · 含翻译/罗马音" note listing the active
+// side-tracks, only for formats that support them and when the track actually
+// has that content. A toggle being on but the song lacking the data adds
+// nothing — the caption never claims content that isn't in the file.
 func lyricCaptionToggleSuffix(payload lyricpkg.Payload, format string, state lyricRenderState) string {
 	if !lyricFormatSupportsSideTracks(format) {
 		return ""
 	}
 	var parts []string
-	if state.includeTranslation && strings.TrimSpace(payload.Translation) != "" {
+	if state.includeTranslation && lyricPayloadHasTranslation(payload) {
 		parts = append(parts, "翻译")
 	}
-	if state.includeRoma && strings.TrimSpace(payload.Roma) != "" {
+	if state.includeRoma && lyricPayloadHasRoma(payload) {
 		parts = append(parts, "罗马音")
 	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return " · 含" + strings.Join(parts, "/")
+}
+
+// lyricPayloadHasTranslation reports whether the payload yields any actual
+// translation text once converted (raw fields can be present but contain only
+// timestamps/placeholders that convert to nothing).
+func lyricPayloadHasTranslation(payload lyricpkg.Payload) bool {
+	return strings.TrimSpace(lyricpkg.Convert(payload, "trans", lyricpkg.Options{})) != ""
+}
+
+// lyricPayloadHasRoma reports whether the payload yields any actual
+// romanization text once converted.
+func lyricPayloadHasRoma(payload lyricpkg.Payload) bool {
+	return strings.TrimSpace(lyricpkg.Convert(payload, "roma", lyricpkg.Options{})) != ""
 }
 
 // lyricPreviewText returns a readable preview for the caption: the plain-text

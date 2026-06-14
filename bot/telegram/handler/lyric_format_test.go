@@ -200,3 +200,32 @@ func TestLyricFormatDisplayName(t *testing.T) {
 		t.Errorf("unexpected display name for yrc: %q", lyricFormatDisplayName("yrc"))
 	}
 }
+
+func TestLyricFormatDisplayNameForPayloadDropsWordLabel(t *testing.T) {
+	// A yrc request on a song that only has line-level lyrics falls back to LRC
+	// content — the label must not claim "逐词".
+	lineOnly := lyricpkg.Payload{Lyric: "[00:01.00]Hello\n[00:03.00]World"}
+	if got := lyricFormatDisplayNameForPayload("yrc", lineOnly); strings.Contains(got, "逐词") {
+		t.Errorf("line-only payload should drop 逐词, got %q", got)
+	}
+	// With a real word-by-word track the 逐词 wording stays.
+	word := lyricpkg.Payload{RawYRC: "[1000,500](1000,500,0)Hello"}
+	if got := lyricFormatDisplayNameForPayload("yrc", word); !strings.Contains(got, "逐词") {
+		t.Errorf("word payload should keep 逐词, got %q", got)
+	}
+}
+
+func TestLyricCaptionToggleSuffixSuppressedWhenNoContent(t *testing.T) {
+	// Toggles on, but the song has neither translation nor roma → no "含…" note.
+	payload := lyricpkg.Payload{Lyric: "[00:01.00]Hello"}
+	state := lyricRenderState{format: "ttml", includeTranslation: true, includeRoma: true}
+	if suffix := lyricCaptionToggleSuffix(payload, "ttml", state); suffix != "" {
+		t.Errorf("expected empty suffix when no side-track content, got %q", suffix)
+	}
+
+	// Real translation present and toggle on → note mentions only 翻译.
+	payload.Translation = "[00:01.00]你好"
+	if suffix := lyricCaptionToggleSuffix(payload, "ttml", state); !strings.Contains(suffix, "翻译") || strings.Contains(suffix, "罗马音") {
+		t.Errorf("expected only 翻译 in suffix, got %q", suffix)
+	}
+}

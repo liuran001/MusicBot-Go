@@ -212,6 +212,36 @@ func TestIsCreditLikeLineBareWords(t *testing.T) {
 	}
 }
 
+func TestHasWordTiming(t *testing.T) {
+	// Raw word-by-word tracks carry real timing.
+	if !HasWordTiming(Payload{RawYRC: sampleYRC}) {
+		t.Error("RawYRC should report word timing")
+	}
+	if !HasWordTiming(Payload{RawQRC: sampleQRC}) {
+		t.Error("RawQRC should report word timing")
+	}
+	// Word-level Apple TTML (per-word spans with timing) counts.
+	wordTTML := `<tt><body><div><p begin="00:01.000" end="00:02.000">` +
+		`<span begin="00:01.000" end="00:01.500">Hello</span>` +
+		`<span begin="00:01.500" end="00:02.000">world</span></p></div></body></tt>`
+	if !HasWordTiming(Payload{RawTTML: wordTTML}) {
+		t.Error("word-level TTML should report word timing")
+	}
+	// Line-level Apple TTML (no per-word spans) does NOT count.
+	lineTTML := `<tt><body><div><p begin="00:01.000" end="00:02.000">Hello world</p></div></body></tt>`
+	if HasWordTiming(Payload{RawTTML: lineTTML}) {
+		t.Error("line-level TTML must not report word timing")
+	}
+	// Plain line LRC carries no word timing.
+	if HasWordTiming(Payload{Lyric: "[00:01.00]Hello world\n[00:03.00]Test line"}) {
+		t.Error("plain LRC must not report word timing")
+	}
+	// Nothing at all.
+	if HasWordTiming(Payload{}) {
+		t.Error("empty payload must not report word timing")
+	}
+}
+
 func TestTTMLCreditGuardSkipsTranslation(t *testing.T) {
 	// A QQ-style payload: credit lines have "//" translation, real lines have text.
 	// The credit line must NOT borrow the next line's translation via fuzzy match.
