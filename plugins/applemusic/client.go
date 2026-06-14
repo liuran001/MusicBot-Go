@@ -445,6 +445,16 @@ func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*platform.
 // --- Lyrics ---
 
 func (c *Client) GetLyrics(ctx context.Context, trackID string) (string, error) {
+	ttml, err := c.GetLyricsTTML(ctx, trackID)
+	if err != nil {
+		return "", err
+	}
+	return parseTTMLToLRC(ttml), nil
+}
+
+// GetLyricsTTML returns Apple Music's native word-timed TTML document for a
+// track. This is the raw form used by the lyric format converter.
+func (c *Client) GetLyricsTTML(ctx context.Context, trackID string) (string, error) {
 	reqURL := fmt.Sprintf("%s/v1/catalog/%s/songs/%s/lyrics?l=%s",
 		appleMusicBaseURL, c.storefront, trackID, c.language)
 
@@ -465,7 +475,7 @@ func (c *Client) GetLyrics(ctx context.Context, trackID string) (string, error) 
 	if ttml == "" {
 		return "", platform.NewUnavailableError("applemusic", "lyrics", trackID)
 	}
-	return parseTTMLToLRC(ttml), nil
+	return ttml, nil
 }
 
 // --- Download ---

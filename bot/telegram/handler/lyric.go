@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	lyricpkg "github.com/liuran001/MusicBot-Go/bot/lyric"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
 	"github.com/mymmrac/telego"
@@ -50,6 +51,9 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 			return
 		}
 	}
+
+	// A trailing token may request a specific lyric format, e.g. "/lyric <id> ttml".
+	args, format := parseTrailingLyricFormat(args)
 
 	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
@@ -121,8 +125,21 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		return
 	}
 
-	fileName := h.buildLyricFileName(ctx, plat, trackID)
-	h.sendLyrics(ctx, b, msgResult, message, lyrics, fileName)
+	baseName := h.buildLyricBaseName(ctx, plat, trackID)
+
+	// Delete the "fetching" status message before sending the document.
+	deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID}
+	if h.RateLimiter != nil {
+		_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+	} else {
+		_ = b.DeleteMessage(ctx, deleteParams)
+	}
+
+	requesterID := int64(0)
+	if message.From != nil {
+		requesterID = message.From.ID
+	}
+	h.sendLyricDocument(ctx, b, message.Chat.ID, message.MessageID, lyrics, baseName, platformName, trackID, format, requesterID)
 }
 
 func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mgr platform.Manager) (platformName, trackID string, found bool) {
@@ -144,6 +161,42 @@ func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mg
 	return "", "", false
 }
 
+// parseTrailingLyricFormat strips a recognized trailing format token (e.g.
+// "ttml", "yrc", "qrc") from the argument text, returning the remaining text
+// and the resolved format. When no format token is present it returns the
+// original text and "lrc".
+func parseTrailingLyricFormat(text string) (rest, format string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", "lrc"
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 {
+		return trimmed, "lrc"
+	}
+	last := strings.ToLower(fields[len(fields)-1])
+	if isKnownLyricFormat(last) {
+		resolved := lyricpkg.NormalizeFormat(last)
+		rest = strings.TrimSpace(strings.Join(fields[:len(fields)-1], " "))
+		return rest, resolved
+	}
+	return trimmed, "lrc"
+}
+
+// lyricFormatAliases maps user-typed format tokens to their canonical form.
+// Only tokens here are accepted as a trailing /lyric format argument.
+var lyricFormatAliases = map[string]bool{
+	"lrc": true, "yrc": true, "qrc": true, "lys": true, "krc": true,
+	"elrc": true, "lrcx": true, "alrc": true, "enhancedlrc": true,
+	"spl": true, "ass": true, "lqe": true, "ttml": true,
+	"amjson": true, "applemusicjson": true, "srt": true, "txt": true,
+	"trans": true, "roma": true,
+}
+
+func isKnownLyricFormat(token string) bool {
+	return lyricFormatAliases[strings.ToLower(strings.TrimSpace(token))]
+}
+
 func (h *LyricHandler) formatLyricsError(err error) string {
 	if err == nil {
 		return getLrcFailed
@@ -162,65 +215,64 @@ func (h *LyricHandler) formatLyricsError(err error) string {
 	return getLrcFailed
 }
 
-func (h *LyricHandler) sendLyrics(ctx context.Context, b *telego.Bot, msgResult *telego.Message, originalMsg *telego.Message, lyrics *platform.Lyrics, fileName string) {
-	lrcText, plainText := buildLyricTexts(lyrics)
-	if strings.TrimSpace(lrcText) == "" {
-		lrcText = "暂无歌词信息\n"
+// sendLyricDocument is the initial entry from the /lyric command. It derives
+// the default translation/roma toggles for the requested format, then renders.
+func (h *LyricHandler) sendLyricDocument(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID, format string, requesterID int64) {
+	state := lyricRenderState{
+		format:             lyricpkg.NormalizeFormat(format),
+		includeTranslation: lyricFormatDefaultTranslation(format),
+		includeRoma:        false,
+	}
+	h.sendLyricDocumentState(ctx, b, chatID, replyToMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
+// sendLyricDocumentState converts the lyrics per the render state, sends the
+// file with a caption showing the current format/toggles, and attaches the
+// format + translation/roma toggle keyboard.
+func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
+	payload := lyricPayloadFrom(lyrics, platformName)
+	resolved := lyricpkg.NormalizeFormat(state.format)
+
+	includeTranslation := state.includeTranslation
+	opts := lyricpkg.Options{
+		IncludeTranslation: &includeTranslation,
+		IncludeRoma:        state.includeRoma,
 	}
 
-	deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID}
-	if h.RateLimiter != nil {
-		_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
-	} else {
-		_ = b.DeleteMessage(ctx, deleteParams)
+	content := lyricpkg.Convert(payload, resolved, opts)
+	if strings.TrimSpace(content) == "" {
+		// Fall back to plain LRC if the requested format yielded nothing.
+		resolved = "lrc"
+		state.format = "lrc"
+		content = lyricpkg.Convert(payload, "lrc", opts)
+	}
+	if strings.TrimSpace(content) == "" {
+		content = "暂无歌词信息\n"
 	}
 
-	filePath, err := writeLyricTempFile(lrcText)
+	fileName := buildLyricFileNameForFormat(baseName, resolved)
+	filePath, err := writeLyricTempFile(content, fileName)
 	if err != nil {
-		sendFallback := &telego.SendMessageParams{
-			ChatID:          telego.ChatID{ID: originalMsg.Chat.ID},
-			Text:            getLrcFailed,
-			ReplyParameters: &telego.ReplyParameters{MessageID: originalMsg.MessageID},
-		}
-		if h.RateLimiter != nil {
-			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendFallback)
-		} else {
-			_, _ = b.SendMessage(ctx, sendFallback)
-		}
+		h.sendLyricFallbackError(ctx, b, chatID, replyToMessageID)
 		return
 	}
 	defer os.Remove(filePath)
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		sendFallback := &telego.SendMessageParams{
-			ChatID:          telego.ChatID{ID: originalMsg.Chat.ID},
-			Text:            getLrcFailed,
-			ReplyParameters: &telego.ReplyParameters{MessageID: originalMsg.MessageID},
-		}
-		if h.RateLimiter != nil {
-			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendFallback)
-		} else {
-			_, _ = b.SendMessage(ctx, sendFallback)
-		}
+		h.sendLyricFallbackError(ctx, b, chatID, replyToMessageID)
 		return
 	}
 	defer file.Close()
 
-	docParams := &telego.SendDocumentParams{
-		ChatID:          telego.ChatID{ID: originalMsg.Chat.ID},
-		Document:        telego.InputFile{File: telegoutil.NameReader(file, fileName)},
-		ReplyParameters: &telego.ReplyParameters{MessageID: originalMsg.MessageID},
-	}
+	caption := buildLyricCaption(payload, content, state)
+	keyboard := buildLyricFormatKeyboard(platformName, trackID, state, requesterID)
 
-	plainText = strings.TrimSpace(plainText)
-	caption := ""
-	if plainText != "" {
-		escaped := html.EscapeString(plainText)
-		candidate := fmt.Sprintf("<blockquote expandable>%s</blockquote>", escaped)
-		if len([]rune(candidate)) <= lyricCaptionMaxChars {
-			caption = candidate
-		}
+	docParams := &telego.SendDocumentParams{
+		ChatID:          telego.ChatID{ID: chatID},
+		Document:        telego.InputFile{File: telegoutil.NameReader(file, fileName)},
+		ReplyParameters: &telego.ReplyParameters{MessageID: replyToMessageID},
+		ReplyMarkup:     keyboard,
 	}
 	if caption != "" {
 		docParams.Caption = caption
@@ -245,39 +297,175 @@ func (h *LyricHandler) sendLyrics(ctx context.Context, b *telego.Bot, msgResult 
 	}
 }
 
-func buildLyricTexts(lyrics *platform.Lyrics) (lrcText, plainText string) {
-	if lyrics == nil {
-		return "", ""
+// lyricFormatDefaultTranslation reports the default translation-merge state for
+// a format: document formats (spl/ttml/amjson/ass/lqe) default on, others off.
+func lyricFormatDefaultTranslation(format string) bool {
+	switch lyricpkg.NormalizeFormat(format) {
+	case "spl", "ttml", "amjson", "ass", "lqe":
+		return true
 	}
-
-	if len(lyrics.Timestamped) > 0 {
-		lrcLines := make([]string, 0, len(lyrics.Timestamped))
-		plainLines := make([]string, 0, len(lyrics.Timestamped))
-		for _, line := range lyrics.Timestamped {
-			lineText := strings.TrimSpace(line.Text)
-			if lineText == "" {
-				continue
-			}
-			timestamp := formatDuration(line.Time)
-			lrcLines = append(lrcLines, fmt.Sprintf("[%s] %s", timestamp, lineText))
-			plainLines = append(plainLines, fmt.Sprintf("[%s] %s", timestamp, lineText))
-		}
-		lrcText = strings.Join(lrcLines, "\n")
-		plainText = strings.Join(plainLines, "\n")
-	}
-
-	if strings.TrimSpace(lrcText) == "" && strings.TrimSpace(lyrics.Plain) != "" {
-		lrcText = platform.NormalizeLRCTimestamps(lyrics.Plain)
-	}
-	if strings.TrimSpace(plainText) == "" && strings.TrimSpace(lyrics.Plain) != "" {
-		plainText = lyrics.Plain
-	}
-
-	return strings.TrimSpace(lrcText), strings.TrimSpace(plainText)
+	return false
 }
 
-func writeLyricTempFile(text string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "musicbot-lyrics-*.lrc")
+func (h *LyricHandler) sendLyricFallbackError(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int) {
+	sendFallback := &telego.SendMessageParams{
+		ChatID:          telego.ChatID{ID: chatID},
+		Text:            getLrcFailed,
+		ReplyParameters: &telego.ReplyParameters{MessageID: replyToMessageID},
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, sendFallback)
+	} else {
+		_, _ = b.SendMessage(ctx, sendFallback)
+	}
+}
+
+// lyricPayloadFrom builds a lyric.Payload from a platform.Lyrics, deriving a
+// plain LRC track when only timestamped lines are present.
+func lyricPayloadFrom(lyrics *platform.Lyrics, platformName string) lyricpkg.Payload {
+	if lyrics == nil {
+		return lyricpkg.Payload{}
+	}
+	plain := strings.TrimSpace(lyrics.Plain)
+	if plain == "" && len(lyrics.Timestamped) > 0 {
+		plain = buildLRCFromTimestamped(lyrics.Timestamped)
+	} else if plain != "" {
+		plain = platform.NormalizeLRCTimestamps(lyrics.Plain)
+	}
+	source := platformName
+	if source == "qqmusic" {
+		source = "tencent"
+	}
+	return lyricpkg.Payload{
+		Lyric:       plain,
+		Translation: lyrics.Translation,
+		Roma:        lyrics.Roma,
+		RawYRC:      lyrics.RawYRC,
+		RawQRC:      lyrics.RawQRC,
+		RawLYS:      lyrics.RawLYS,
+		RawTTML:     lyrics.RawTTML,
+		Source:      source,
+	}
+}
+
+func buildLRCFromTimestamped(lines []platform.LyricLine) string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		text := strings.TrimSpace(line.Text)
+		if text == "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("[%s]%s", formatDuration(line.Time), text))
+	}
+	return strings.Join(out, "\n")
+}
+
+// buildLyricCaption renders an expandable preview of the lyric content plus a
+// line naming the current format and active translation/roma toggles. For
+// structured/markup formats the raw output is unreadable, so it previews the
+// plain-text lyric instead.
+func buildLyricCaption(payload lyricpkg.Payload, content string, state lyricRenderState) string {
+	format := lyricpkg.NormalizeFormat(state.format)
+	preview := strings.TrimSpace(lyricPreviewText(payload, content, format))
+	label := lyricFormatDisplayName(format)
+	header := fmt.Sprintf("当前歌词格式: %s", html.EscapeString(label))
+	if extras := lyricCaptionToggleSuffix(payload, format, state); extras != "" {
+		header += extras
+	}
+	if preview == "" {
+		return header
+	}
+	escaped := html.EscapeString(preview)
+	candidate := fmt.Sprintf("%s\n<blockquote expandable>%s</blockquote>", header, escaped)
+	if len([]rune(candidate)) <= lyricCaptionMaxChars {
+		return candidate
+	}
+	// Trim the preview to fit the caption budget.
+	runes := []rune(escaped)
+	if len(runes) > 400 {
+		escaped = string(runes[:400]) + "…"
+	}
+	candidate = fmt.Sprintf("%s\n<blockquote expandable>%s</blockquote>", header, escaped)
+	if len([]rune(candidate)) <= lyricCaptionMaxChars {
+		return candidate
+	}
+	return header
+}
+
+// lyricCaptionToggleSuffix appends a " · 翻译 · 罗马音" note listing the active
+// side-tracks, only for formats that support them and when data is present.
+func lyricCaptionToggleSuffix(payload lyricpkg.Payload, format string, state lyricRenderState) string {
+	if !lyricFormatSupportsSideTracks(format) {
+		return ""
+	}
+	var parts []string
+	if state.includeTranslation && strings.TrimSpace(payload.Translation) != "" {
+		parts = append(parts, "翻译")
+	}
+	if state.includeRoma && strings.TrimSpace(payload.Roma) != "" {
+		parts = append(parts, "罗马音")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " · 含" + strings.Join(parts, "/")
+}
+
+// lyricPreviewText returns a readable preview for the caption: the plain-text
+// form for word-by-word/markup formats, or the content itself for plain ones.
+func lyricPreviewText(payload lyricpkg.Payload, content, format string) string {
+	switch format {
+	case "txt", "trans", "roma":
+		return content
+	case "lrc", "elrc", "yrc", "qrc", "lys", "krc", "spl", "srt":
+		// Show the plain text so timing tags don't clutter the preview.
+		return lyricpkg.Convert(payload, "txt", lyricpkg.Options{})
+	default:
+		// ttml/amjson/ass/lqe and anything else: preview the plain lyric text.
+		return lyricpkg.Convert(payload, "txt", lyricpkg.Options{})
+	}
+}
+
+func lyricFormatDisplayName(format string) string {
+	switch format {
+	case "lrc":
+		return "LRC"
+	case "yrc":
+		return "YRC 逐词"
+	case "qrc":
+		return "QRC 逐词"
+	case "lys":
+		return "Lyricify Syllable"
+	case "krc":
+		return "KRC 逐词"
+	case "elrc":
+		return "Enhanced LRC 逐词"
+	case "spl":
+		return "SPL 逐词"
+	case "ass":
+		return "ASS 字幕"
+	case "lqe":
+		return "Lyricify Quick Export"
+	case "ttml":
+		return "TTML 逐词"
+	case "amjson":
+		return "Apple Music JSON"
+	case "srt":
+		return "SRT 字幕"
+	case "txt":
+		return "纯文本"
+	case "trans":
+		return "翻译"
+	case "roma":
+		return "罗马音"
+	default:
+		return strings.ToUpper(format)
+	}
+}
+
+func writeLyricTempFile(text, fileName string) (string, error) {
+	ext := lyricFileExt(fileName)
+	tmpFile, err := os.CreateTemp("", "musicbot-lyrics-*"+ext)
 	if err != nil {
 		return "", err
 	}
@@ -291,17 +479,24 @@ func writeLyricTempFile(text string) (string, error) {
 	return path, nil
 }
 
-func (h *LyricHandler) buildLyricFileName(ctx context.Context, plat platform.Platform, trackID string) string {
-	defaultName := "歌词.lrc"
+func lyricFileExt(fileName string) string {
+	if idx := strings.LastIndex(fileName, "."); idx >= 0 {
+		return fileName[idx:]
+	}
+	return ".lrc"
+}
+
+// buildLyricBaseName resolves the "artist - title" stem (without extension) for
+// the lyric file, falling back to "歌词".
+func (h *LyricHandler) buildLyricBaseName(ctx context.Context, plat platform.Platform, trackID string) string {
+	const defaultName = "歌词"
 	if plat == nil || strings.TrimSpace(trackID) == "" {
 		return defaultName
 	}
-
 	track, err := plat.GetTrack(ctx, trackID)
 	if err != nil || track == nil {
 		return defaultName
 	}
-
 	artists := make([]string, 0, len(track.Artists))
 	for _, artist := range track.Artists {
 		name := strings.TrimSpace(artist.Name)
@@ -309,18 +504,27 @@ func (h *LyricHandler) buildLyricFileName(ctx context.Context, plat platform.Pla
 			artists = append(artists, name)
 		}
 	}
-	artistJoined := strings.Join(artists, "/")
+	artistJoined := strings.ReplaceAll(strings.Join(artists, "/"), "/", ",")
 	title := strings.TrimSpace(track.Title)
-	if artistJoined == "" && title == "" {
+	switch {
+	case artistJoined == "" && title == "":
 		return defaultName
+	case artistJoined == "":
+		return title
+	case title == "":
+		return artistJoined
+	default:
+		return fmt.Sprintf("%s - %s", artistJoined, title)
 	}
-	if artistJoined == "" {
-		return sanitizeFileName(title + ".lrc")
+}
+
+func buildLyricFileNameForFormat(baseName, format string) string {
+	baseName = strings.TrimSpace(baseName)
+	if baseName == "" {
+		baseName = "歌词"
 	}
-	if title == "" {
-		return sanitizeFileName(strings.ReplaceAll(artistJoined, "/", ",") + ".lrc")
-	}
-	return sanitizeFileName(fmt.Sprintf("%s - %s.lrc", strings.ReplaceAll(artistJoined, "/", ","), title))
+	ext := lyricpkg.FileExtension(format)
+	return sanitizeFileName(baseName + "." + ext)
 }
 
 func formatDuration(d time.Duration) string {

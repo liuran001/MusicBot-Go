@@ -455,6 +455,7 @@ func (a *App) Start(ctx context.Context) error {
 		SearchCallback:           searchCallback,
 		PlaylistCallback:         playlistCallback,
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
+		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},

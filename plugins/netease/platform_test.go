@@ -129,3 +129,28 @@ func TestParseLyricLines(t *testing.T) {
 func TestImplementsInterface(t *testing.T) {
 	var _ platform.Platform = (*NeteasePlatform)(nil)
 }
+
+// TestConvertLyricsSurfacesRawTracks verifies that convertLyrics surfaces the
+// word-by-word yrc and roma side-tracks for the lyric format converter.
+func TestConvertLyricsSurfacesRawTracks(t *testing.T) {
+	p := &NeteasePlatform{}
+	data := &SongLyricData{}
+	data.Lrc.Lyric = "[00:01.00]hello"
+	data.Tlyric.Lyric = "[00:01.00]你好"
+	data.Romalrc.Lyric = "[00:01.00]haro"
+	data.Yrc.Lyric = "[1000,500](1000,500,0)hello"
+
+	got := p.convertLyrics(data)
+	if got.RawYRC != data.Yrc.Lyric {
+		t.Errorf("RawYRC = %q, want %q", got.RawYRC, data.Yrc.Lyric)
+	}
+	if got.Roma != data.Romalrc.Lyric {
+		t.Errorf("Roma = %q, want %q", got.Roma, data.Romalrc.Lyric)
+	}
+	if got.Translation != data.Tlyric.Lyric {
+		t.Errorf("Translation = %q, want %q", got.Translation, data.Tlyric.Lyric)
+	}
+	if got.Plain != data.Lrc.Lyric {
+		t.Errorf("Plain = %q, want %q", got.Plain, data.Lrc.Lyric)
+	}
+}

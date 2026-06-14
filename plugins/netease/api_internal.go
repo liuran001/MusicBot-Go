@@ -74,9 +74,12 @@ func GetSongLyric(ctx context.Context, data RequestData, id int) (SongLyricData,
 		Lv int `json:"lv"`
 		Kv int `json:"kv"`
 		Tv int `json:"tv"`
+		Rv int `json:"rv"`
 		Yv int `json:"yv"`
 	}
-	bodyJSON, _ := json.Marshal(reqBody{ID: id, Lv: -1, Kv: -1, Tv: -1, Yv: -1})
+	// lv/kv/tv/rv/yv = lrc/klyric/translation/roma/yrc versions; -1 requests
+	// the latest of each, including the word-by-word yrc and roma tracks.
+	bodyJSON, _ := json.Marshal(reqBody{ID: id, Lv: -1, Kv: -1, Tv: -1, Rv: -1, Yv: -1})
 	return doJSONRequest[SongLyricData](ctx, data, EAPIOption{Path: songLyricAPI, Url: "https://music.163.com/eapi/song/lyric", Json: string(bodyJSON)})
 }
 

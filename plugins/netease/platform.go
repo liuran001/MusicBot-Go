@@ -642,6 +642,17 @@ func (n *NeteasePlatform) convertLyrics(lyricData *SongLyricData) *platform.Lyri
 		lyrics.Translation = lyricData.Tlyric.Lyric
 	}
 
+	// Romanization side-track (used by word-by-word format conversions).
+	if lyricData.Romalrc.Lyric != "" {
+		lyrics.Roma = lyricData.Romalrc.Lyric
+	}
+
+	// NetEase yrc is the native word-by-word ("逐词") track. Surface it raw so
+	// the lyric format converter can emit yrc/qrc/lys/ttml/etc.
+	if lyricData.Yrc.Lyric != "" {
+		lyrics.RawYRC = lyricData.Yrc.Lyric
+	}
+
 	// Parse timestamped lyrics
 	if lyricData.Lrc.Lyric != "" {
 		lyrics.Timestamped = n.parseLyricLines(lyricData.Lrc.Lyric)

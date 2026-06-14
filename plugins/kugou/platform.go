@@ -246,6 +246,21 @@ func (k *KugouPlatform) GetLyrics(ctx context.Context, trackID string) (*platfor
 	if k == nil || k.client == nil {
 		return nil, platform.NewUnavailableError("kugou", "lyrics", trackID)
 	}
+
+	// Prefer the word-by-word ("逐词") KRC lyric; fall back to plain LRC.
+	if krc, err := k.client.GetLyricsKRC(ctx, trackID); err == nil && krc != nil && strings.TrimSpace(krc.RawQRC) != "" {
+		result := &platform.Lyrics{
+			Plain:       krc.Lyric,
+			Translation: strings.TrimSpace(krc.Translation),
+			Roma:        strings.TrimSpace(krc.Roma),
+			RawQRC:      strings.TrimSpace(krc.RawQRC),
+		}
+		if parsed := platform.ParseLRCTimestampedLines(krc.Lyric); len(parsed) > 0 {
+			result.Timestamped = parsed
+		}
+		return result, nil
+	}
+
 	lyric, err := k.client.GetLyrics(ctx, trackID)
 	if err != nil {
 		return nil, err
