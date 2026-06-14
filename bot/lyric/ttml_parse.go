@@ -50,6 +50,46 @@ func ttmlToTokenTrack(ttmlXML string) string {
 	return strings.Join(lines, "\n")
 }
 
+// ttmlHasWordSpans reports whether a TTML document contains primary word spans
+// with timing — i.e. genuine word-by-word lyrics. Apple commonly serves
+// line-level TTML (itunes:timing="Line") with no per-word spans; that returns
+// false. Translation/romanization/background spans are ignored.
+func ttmlHasWordSpans(ttmlXML string) bool {
+	var doc ttmlInDoc
+	if err := xml.Unmarshal([]byte(ttmlXML), &doc); err != nil {
+		return false
+	}
+	for _, div := range doc.Body.Divs {
+		for _, p := range div.Ps {
+			for _, sp := range p.Spans {
+				if ttmlSpanHasPrimaryWord(sp) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// ttmlSpanHasPrimaryWord reports whether a span (or one of its nested spans) is
+// a primary word span carrying timing and text. Non-primary roles
+// (translation/romanization/background) are skipped.
+func ttmlSpanHasPrimaryWord(sp ttmlInSpan) bool {
+	role := strings.TrimSpace(strings.ToLower(sp.Role))
+	if strings.Contains(role, "translation") || strings.Contains(role, "roman") || strings.Contains(role, "bg") {
+		return false
+	}
+	if strings.TrimSpace(sp.Text) != "" && strings.TrimSpace(sp.Begin) != "" && strings.TrimSpace(sp.End) != "" {
+		return true
+	}
+	for _, child := range sp.Spans {
+		if ttmlSpanHasPrimaryWord(child) {
+			return true
+		}
+	}
+	return false
+}
+
 func ttmlLineToToken(p ttmlInP) string {
 	lineStart := ttmlTimeToMs(p.Begin)
 	lineEnd := ttmlTimeToMs(p.End)

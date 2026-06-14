@@ -49,6 +49,12 @@ type UserSettings struct {
 	AutoDeleteList     bool
 	AutoLinkDetect     bool
 	DefaultLyricFormat string
+	// DefaultLyricIncludeTranslation / DefaultLyricIncludeRoma are the persisted
+	// default translation/roma side-track toggles for /lyric. A nil pointer means
+	// "unset" — fall back to the per-format default. Only meaningful for formats
+	// that support side tracks.
+	DefaultLyricIncludeTranslation *bool
+	DefaultLyricIncludeRoma        *bool
 }
 
 // GroupSettings represents group-level preferences for the bot.
@@ -63,4 +69,9 @@ type GroupSettings struct {
 	AutoDeleteList     bool
 	AutoLinkDetect     bool
 	DefaultLyricFormat string
+	// DefaultLyricIncludeTranslation / DefaultLyricIncludeRoma mirror the
+	// UserSettings fields for groups. A nil pointer means "unset" — fall back to
+	// the per-format default.
+	DefaultLyricIncludeTranslation *bool
+	DefaultLyricIncludeRoma        *bool
 }

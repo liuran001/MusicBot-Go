@@ -277,6 +277,44 @@ func Convert(p Payload, format string, opts Options) string {
 
 func pickRoma(p Payload) string { return p.Roma }
 
+// HasWordTiming reports whether the payload actually carries word-by-word
+// ("逐词") timing, as opposed to only line-level lyrics. It is used to decide
+// whether a "逐词"-labeled format truly renders word-by-word for this song or
+// silently falls back to line-level output.
+//
+// Platform-native raw tracks (yrc/qrc/lys) count whenever they parse to at
+// least one timed token. Apple Music TTML counts only when it contains primary
+// word spans — a line-level TTML document does not. A token-shaped plain LRC is
+// also honored for the rare platforms that inline word tags there.
+func HasWordTiming(p Payload) bool {
+	for _, t := range []string{p.RawYRC, p.RawQRC, p.RawLYS} {
+		if hasTokenTrack(t) {
+			return true
+		}
+	}
+	if strings.TrimSpace(p.RawTTML) != "" && ttmlHasWordSpans(p.RawTTML) {
+		return true
+	}
+	if t := strings.TrimSpace(p.Lyric); t != "" && lineHeadRe.MatchString(t) {
+		return hasTokenTrack(p.Lyric)
+	}
+	return false
+}
+
+// hasTokenTrack reports whether a yrc/qrc/lys token track parses to at least one
+// line carrying word tokens.
+func hasTokenTrack(token string) bool {
+	if strings.TrimSpace(token) == "" {
+		return false
+	}
+	for _, line := range parseTokenLines(token) {
+		if len(line.Tokens) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func ternary(cond bool, a, b string) string {
 	if cond {
 		return a

@@ -110,7 +110,21 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	sb.WriteString(fmt.Sprintf("🎧 音质：%s %s\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
 
 	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
-	sb.WriteString(fmt.Sprintf("🎤 歌词：%s\n", lyricFormatDisplayName(lyricFormat)))
+	lyricSummary := lyricFormatDisplayName(lyricFormat)
+	if lyricFormatSupportsSideTracks(lyricFormat) {
+		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, lyricFormat)
+		var extras []string
+		if includeTranslation {
+			extras = append(extras, "翻译")
+		}
+		if includeRoma {
+			extras = append(extras, "罗马音")
+		}
+		if len(extras) > 0 {
+			lyricSummary += " · 含" + strings.Join(extras, "/")
+		}
+	}
+	sb.WriteString(fmt.Sprintf("🎤 歌词：%s\n", lyricSummary))
 
 	autoDeleteEnabled := h.resolveAutoDeleteList(chatType, settings, groupSettings)
 	autoDeleteText := "关闭"
@@ -297,6 +311,32 @@ func (h *SettingsHandler) resolveDefaultLyricFormat(chatType string, settings *b
 	return lyricpkg.NormalizeFormat(format)
 }
 
+// resolveDefaultLyricFlags resolves the persisted translation/roma side-track
+// defaults for the current scope. A nil stored pointer means "unset", in which
+// case the per-format default applies (document formats default translation on;
+// roma always defaults off). Only meaningful for side-track-capable formats.
+func (h *SettingsHandler) resolveDefaultLyricFlags(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, format string) (includeTranslation, includeRoma bool) {
+	includeTranslation = lyricFormatDefaultTranslation(format)
+	includeRoma = false
+	var transPtr, romaPtr *bool
+	if chatType != "private" {
+		if groupSettings != nil {
+			transPtr = groupSettings.DefaultLyricIncludeTranslation
+			romaPtr = groupSettings.DefaultLyricIncludeRoma
+		}
+	} else if settings != nil {
+		transPtr = settings.DefaultLyricIncludeTranslation
+		romaPtr = settings.DefaultLyricIncludeRoma
+	}
+	if transPtr != nil {
+		includeTranslation = *transPtr
+	}
+	if romaPtr != nil {
+		includeRoma = *romaPtr
+	}
+	return includeTranslation, includeRoma
+}
+
 // settingsLyricFormatRows groups the selectable default lyric formats for the
 // submenu, mirroring the /lyric format grid.
 var settingsLyricFormatRows = [][]string{
@@ -331,6 +371,21 @@ func (h *SettingsHandler) buildLyricFormatMenuKeyboard(chatType string, settings
 			rows = append(rows, buttons)
 		}
 	}
+	// Translation/roma side-track toggles, shown only when the chosen default
+	// format can carry them. They persist independently of the format pick.
+	if lyricFormatSupportsSideTracks(current) {
+		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, current)
+		rows = append(rows, []telego.InlineKeyboardButton{
+			{
+				Text:         h.formatToggleButton("🌐 翻译", includeTranslation),
+				CallbackData: fmt.Sprintf("settings lyrictrans %s", h.toggleValue(includeTranslation)),
+			},
+			{
+				Text:         h.formatToggleButton("🔤 罗马音", includeRoma),
+				CallbackData: fmt.Sprintf("settings lyricroma %s", h.toggleValue(includeRoma)),
+			},
+		})
+	}
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "⬅️ 返回", CallbackData: "settings lyricback"}})
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -340,9 +395,24 @@ func (h *SettingsHandler) buildLyricFormatMenuText(chatType string, settings *bo
 	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	var sb strings.Builder
 	sb.WriteString("🎤 默认歌词格式\n\n")
-	sb.WriteString(fmt.Sprintf("当前：%s\n\n", lyricFormatDisplayName(current)))
-	sb.WriteString("选择 /lyric 默认导出的歌词格式（音频内嵌歌词始终为 LRC，不受影响）")
+	sb.WriteString(fmt.Sprintf("当前：%s\n", lyricFormatDisplayName(current)))
+	if lyricFormatSupportsSideTracks(current) {
+		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, current)
+		sb.WriteString(fmt.Sprintf("翻译：%s ｜ 罗马音：%s\n", enabledText(includeTranslation), enabledText(includeRoma)))
+	}
+	sb.WriteString("\n选择 /lyric 默认导出的歌词格式（音频内嵌歌词始终为 LRC，不受影响）")
+	if lyricFormatSupportsSideTracks(current) {
+		sb.WriteString("\n该格式支持翻译/罗马音，可在下方开关")
+	}
 	return sb.String()
+}
+
+// enabledText renders a bool as a 开/关 label for settings summaries.
+func enabledText(enabled bool) string {
+	if enabled {
+		return "开"
+	}
+	return "关"
 }
 
 func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string {
@@ -795,6 +865,35 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			changed = true
 			responseText = fmt.Sprintf("✅ 默认歌词格式已设置为 %s", lyricFormatDisplayName(resolved))
 		}
+	case "lyrictrans", "lyricroma":
+		if settingValue != "on" && settingValue != "off" {
+			break
+		}
+		enabled := settingValue == "on"
+		label := "翻译"
+		if settingType == "lyricroma" {
+			label = "罗马音"
+		}
+		if msg != nil && msg.Chat.Type != "private" {
+			if groupSettings != nil {
+				if settingType == "lyrictrans" {
+					groupSettings.DefaultLyricIncludeTranslation = &enabled
+				} else {
+					groupSettings.DefaultLyricIncludeRoma = &enabled
+				}
+				changed = true
+			}
+		} else if settings != nil {
+			if settingType == "lyrictrans" {
+				settings.DefaultLyricIncludeTranslation = &enabled
+			} else {
+				settings.DefaultLyricIncludeRoma = &enabled
+			}
+			changed = true
+		}
+		if changed {
+			responseText = fmt.Sprintf("✅ 默认%s已%s", label, map[bool]string{true: "开启", false: "关闭"}[enabled])
+		}
 	}
 
 	if changed {
@@ -827,8 +926,8 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			chatType := string(msg.Chat.Type)
 			var text string
 			var keyboard *telego.InlineKeyboardMarkup
-			if settingType == "lyricfmt" {
-				// Stay in the lyric-format submenu so the ✅ moves to the new pick.
+			if settingType == "lyricfmt" || settingType == "lyrictrans" || settingType == "lyricroma" {
+				// Stay in the lyric-format submenu so the ✅/toggle state updates.
 				text = h.SettingsHandler.buildLyricFormatMenuText(chatType, settings, groupSettings)
 				keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(chatType, settings, groupSettings)
 			} else {

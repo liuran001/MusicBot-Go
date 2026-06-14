@@ -87,6 +87,9 @@ func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface) 
 	if err := migrateSettingsDefaultLyricFormat(dataDB); err != nil {
 		return nil, err
 	}
+	if err := migrateSettingsDefaultLyricFlags(dataDB); err != nil {
+		return nil, err
+	}
 	if err := migratePluginSettingsFromLegacyBilibiliParse(dataDB); err != nil {
 		return nil, err
 	}
@@ -333,6 +336,37 @@ func migrateSettingsDefaultLyricFormat(db *gorm.DB) error {
 		}
 	}
 
+	return nil
+}
+
+// migrateSettingsDefaultLyricFlags adds the nullable default_lyric_include_*
+// columns to the user/group settings tables. They are intentionally NULLABLE:
+// a NULL means "unset" (fall back to the per-format default), so existing rows
+// keep the historical behavior instead of being forced to a concrete on/off.
+func migrateSettingsDefaultLyricFlags(db *gorm.DB) error {
+	type column struct{ table, name string }
+	columns := []column{
+		{"user_settings", "default_lyric_include_translation"},
+		{"user_settings", "default_lyric_include_roma"},
+		{"group_settings", "default_lyric_include_translation"},
+		{"group_settings", "default_lyric_include_roma"},
+	}
+	for _, col := range columns {
+		var exists bool
+		if err := db.Raw(
+			fmt.Sprintf("SELECT COUNT(*) > 0 FROM pragma_table_info('%s') WHERE name='%s'", col.table, col.name),
+		).Scan(&exists).Error; err != nil {
+			return fmt.Errorf("check %s.%s column: %w", col.table, col.name, err)
+		}
+		if exists {
+			continue
+		}
+		if err := db.Exec(
+			fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s NUMERIC", col.table, col.name),
+		).Error; err != nil {
+			return fmt.Errorf("add %s.%s column: %w", col.table, col.name, err)
+		}
+	}
 	return nil
 }
 
@@ -748,16 +782,18 @@ func userSettingsToInternal(settings UserSettingsModel) *bot.UserSettings {
 		deletedAt = &settings.DeletedAt.Time
 	}
 	return &bot.UserSettings{
-		ID:                 settings.ID,
-		CreatedAt:          settings.CreatedAt,
-		UpdatedAt:          settings.UpdatedAt,
-		DeletedAt:          deletedAt,
-		UserID:             settings.UserID,
-		DefaultPlatform:    settings.DefaultPlatform,
-		DefaultQuality:     settings.DefaultQuality,
-		AutoDeleteList:     settings.AutoDeleteList,
-		AutoLinkDetect:     settings.AutoLinkDetect,
-		DefaultLyricFormat: settings.DefaultLyricFormat,
+		ID:                             settings.ID,
+		CreatedAt:                      settings.CreatedAt,
+		UpdatedAt:                      settings.UpdatedAt,
+		DeletedAt:                      deletedAt,
+		UserID:                         settings.UserID,
+		DefaultPlatform:                settings.DefaultPlatform,
+		DefaultQuality:                 settings.DefaultQuality,
+		AutoDeleteList:                 settings.AutoDeleteList,
+		AutoLinkDetect:                 settings.AutoLinkDetect,
+		DefaultLyricFormat:             settings.DefaultLyricFormat,
+		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
+		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
 	}
 }
 
@@ -767,16 +803,18 @@ func groupSettingsToInternal(settings GroupSettingsModel) *bot.GroupSettings {
 		deletedAt = &settings.DeletedAt.Time
 	}
 	return &bot.GroupSettings{
-		ID:                 settings.ID,
-		CreatedAt:          settings.CreatedAt,
-		UpdatedAt:          settings.UpdatedAt,
-		DeletedAt:          deletedAt,
-		ChatID:             settings.ChatID,
-		DefaultPlatform:    settings.DefaultPlatform,
-		DefaultQuality:     settings.DefaultQuality,
-		AutoDeleteList:     settings.AutoDeleteList,
-		AutoLinkDetect:     settings.AutoLinkDetect,
-		DefaultLyricFormat: settings.DefaultLyricFormat,
+		ID:                             settings.ID,
+		CreatedAt:                      settings.CreatedAt,
+		UpdatedAt:                      settings.UpdatedAt,
+		DeletedAt:                      deletedAt,
+		ChatID:                         settings.ChatID,
+		DefaultPlatform:                settings.DefaultPlatform,
+		DefaultQuality:                 settings.DefaultQuality,
+		AutoDeleteList:                 settings.AutoDeleteList,
+		AutoLinkDetect:                 settings.AutoLinkDetect,
+		DefaultLyricFormat:             settings.DefaultLyricFormat,
+		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
+		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
 	}
 }
 
@@ -846,6 +884,9 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 		AutoDeleteList:     settings.AutoDeleteList,
 		AutoLinkDetect:     settings.AutoLinkDetect,
 		DefaultLyricFormat: settings.DefaultLyricFormat,
+
+		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
+		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
@@ -867,6 +908,9 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 		AutoDeleteList:     settings.AutoDeleteList,
 		AutoLinkDetect:     settings.AutoLinkDetect,
 		DefaultLyricFormat: settings.DefaultLyricFormat,
+
+		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
+		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
