@@ -232,11 +232,13 @@ func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update
 
 	lh := &LyricHandler{PlatformManager: h.PlatformManager, RateLimiter: h.RateLimiter}
 	baseName := lh.buildLyricBaseName(ctx, plat, payload.trackID)
-	lh.sendLyricDocumentState(ctx, b, chatID, replyToID, lyrics, baseName, payload.platformName, payload.trackID, state, payload.requesterID)
+	lh.editLyricDocumentState(ctx, b, chatID, messageID, replyToID, lyrics, baseName, payload.platformName, payload.trackID, state, payload.requesterID)
 }
 
-// lyricCallbackMessageTarget resolves where to reply with the new document. It
-// replies to the lyric document message itself so the new file threads under it.
+// lyricCallbackMessageTarget resolves where to update the lyric document. It
+// returns the document message itself (chatID + messageID) to edit in place,
+// plus replyToID — the document's own reply target (the original command) used
+// only when an in-place edit fails and the document must be deleted and resent.
 func lyricCallbackMessageTarget(query *telego.CallbackQuery) (chatID int64, messageID, replyToID int, ok bool) {
 	if query == nil || query.Message == nil {
 		return 0, 0, 0, false
@@ -245,7 +247,11 @@ func lyricCallbackMessageTarget(query *telego.CallbackQuery) (chatID int64, mess
 	if msg == nil {
 		return 0, 0, 0, false
 	}
-	return msg.Chat.ID, msg.MessageID, msg.MessageID, true
+	replyToID = 0
+	if msg.ReplyToMessage != nil {
+		replyToID = msg.ReplyToMessage.MessageID
+	}
+	return msg.Chat.ID, msg.MessageID, replyToID, true
 }
 
 func (h *LyricCallbackHandler) answer(ctx context.Context, b *telego.Bot, callbackQueryID, text string) {

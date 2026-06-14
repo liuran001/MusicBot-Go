@@ -444,7 +444,7 @@ func (a *App) Start(ctx context.Context) error {
 		Playlist:                 playlistHandler,
 		Artist:                   musicHandler.Artist,
 		Search:                   searchHandler,
-		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter},
+		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback},
 		Recognize:                recognizeHandler,
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},

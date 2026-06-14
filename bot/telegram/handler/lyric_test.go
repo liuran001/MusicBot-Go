@@ -70,6 +70,55 @@ func TestExtractPlatformTrackFromMessage_NilManager(t *testing.T) {
 	}
 }
 
+func TestSearchFirstTrackForLyric(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{
+		name:           "netease",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+			if query != "lemon" {
+				return nil, nil
+			}
+			return []platform.Track{
+				{ID: "777", Platform: "netease", Title: "Lemon"},
+				{ID: "888", Platform: "netease", Title: "Lemon (Live)"},
+			}, nil
+		},
+	})
+
+	h := &LyricHandler{PlatformManager: mgr, DefaultPlatform: "netease", FallbackPlatform: "netease"}
+	gotPlatform, gotTrackID, gotFound := h.searchFirstTrackForLyric(context.Background(), nil, "lemon")
+	if !gotFound || gotPlatform != "netease" || gotTrackID != "777" {
+		t.Errorf("searchFirstTrackForLyric() = (%q, %q, %v), want (netease, 777, true)",
+			gotPlatform, gotTrackID, gotFound)
+	}
+}
+
+func TestSearchFirstTrackForLyric_NoResults(t *testing.T) {
+	mgr := newStubManager()
+	mgr.Register(&fallbackTestPlatform{
+		name:           "netease",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+			return nil, nil
+		},
+	})
+
+	h := &LyricHandler{PlatformManager: mgr, DefaultPlatform: "netease", FallbackPlatform: "netease"}
+	_, _, gotFound := h.searchFirstTrackForLyric(context.Background(), nil, "nonexistent")
+	if gotFound {
+		t.Errorf("searchFirstTrackForLyric() found = true, want false for empty search results")
+	}
+}
+
+func TestSearchFirstTrackForLyric_NilManager(t *testing.T) {
+	h := &LyricHandler{}
+	_, _, gotFound := h.searchFirstTrackForLyric(context.Background(), nil, "lemon")
+	if gotFound {
+		t.Errorf("searchFirstTrackForLyric(nil manager) found = true, want false")
+	}
+}
+
 func TestFormatLyricsError(t *testing.T) {
 	handler := &LyricHandler{}
 
