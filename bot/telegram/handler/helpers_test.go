@@ -84,7 +84,8 @@ func TestBuildMusicCaption(t *testing.T) {
 		SongName:    "Song",
 		SongArtists: "Artist",
 		SongAlbum:   "Album",
-		FileExt:     "mp3",
+		Quality:     "hires",
+		FileExt:     "flac",
 		MusicSize:   1024,
 		BitRate:     320000,
 	}
@@ -94,6 +95,29 @@ func TestBuildMusicCaption(t *testing.T) {
 	}
 	if !strings.Contains(caption, "专辑: Album") {
 		t.Fatalf("expected caption contains album line")
+	}
+	if !strings.Contains(caption, "#HiRes #flac") {
+		t.Fatalf("expected caption contains quality tag before format tag, got %q", caption)
+	}
+}
+
+func TestQualityTag(t *testing.T) {
+	tests := []struct {
+		quality string
+		want    string
+	}{
+		{"standard", "标准音质"},
+		{"high", "高品质"},
+		{"lossless", "无损"},
+		{"hires", "HiRes"},
+		{"HiRes", "HiRes"},
+		{"", ""},
+		{"unknown", ""},
+	}
+	for _, tt := range tests {
+		if got := qualityTag(tt.quality); got != tt.want {
+			t.Fatalf("qualityTag(%q)=%q want=%q", tt.quality, got, tt.want)
+		}
 	}
 }
 

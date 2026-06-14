@@ -697,7 +697,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	if infoLine != "" {
 		infoLine += "\n"
 	}
-	tags := strings.Join(formatInfoTags(manager, songInfo.Platform, songInfo.FileExt), " ")
+	tags := strings.Join(formatInfoTags(manager, songInfo.Platform, songInfo.Quality, songInfo.FileExt), " ")
 
 	if strings.TrimSpace(songInfo.TrackURL) != "" {
 		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(songInfo.TrackURL), songNameText)
@@ -1438,12 +1438,33 @@ func parseInlineCollectionResultID(resultID string) (platformName, collectionID,
 	return platformName, collectionID, qualityValue, true
 }
 
-func formatInfoTags(manager platform.Manager, platformName, fileExt string) []string {
+func formatInfoTags(manager platform.Manager, platformName, quality, fileExt string) []string {
 	tags := []string{"#" + platformTag(manager, platformName)}
+	if qt := qualityTag(quality); qt != "" {
+		tags = append(tags, "#"+qt)
+	}
 	if strings.TrimSpace(fileExt) != "" {
 		tags = append(tags, "#"+fileExt)
 	}
 	return tags
+}
+
+// qualityTag maps a quality value to its hashtag label. Hi-Res uses "HiRes"
+// (no hyphen) because Telegram terminates a hashtag at "-". Returns "" for
+// empty/unknown quality so no tag is emitted.
+func qualityTag(quality string) string {
+	switch strings.TrimSpace(strings.ToLower(quality)) {
+	case "standard":
+		return "标准音质"
+	case "high":
+		return "高品质"
+	case "lossless":
+		return "无损"
+	case "hires":
+		return "HiRes"
+	default:
+		return ""
+	}
 }
 
 func formatFileSize(musicSize int) string {
