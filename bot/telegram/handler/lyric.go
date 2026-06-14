@@ -57,7 +57,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	}
 
 	// A trailing token may request a specific lyric format, e.g. "/lyric <id> ttml".
-	args, format := parseTrailingLyricFormat(args)
+	args, format, explicitFormat := parseTrailingLyricFormatExplicit(args)
 
 	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
@@ -148,7 +148,13 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	if message.From != nil {
 		requesterID = message.From.ID
 	}
-	h.sendLyricDocument(ctx, b, message.Chat.ID, message.MessageID, lyrics, baseName, platformName, trackID, format, requesterID)
+	// The per-scope default lyric format drives the initial render (when no
+	// explicit trailing format was given) and the "保存为默认" comparison.
+	defaultFormat := h.resolveDefaultLyricFormat(ctx, message)
+	if !explicitFormat {
+		format = defaultFormat
+	}
+	h.sendLyricDocument(ctx, b, message.Chat.ID, message.MessageID, lyrics, baseName, platformName, trackID, format, defaultFormat, requesterID)
 }
 
 func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mgr platform.Manager) (platformName, trackID string, found bool) {
@@ -246,21 +252,29 @@ func (h *LyricHandler) resolveDefaultPlatform(ctx context.Context, message *tele
 // and the resolved format. When no format token is present it returns the
 // original text and "lrc".
 func parseTrailingLyricFormat(text string) (rest, format string) {
+	rest, format, _ = parseTrailingLyricFormatExplicit(text)
+	return rest, format
+}
+
+// parseTrailingLyricFormatExplicit is parseTrailingLyricFormat plus an explicit
+// flag reporting whether a format token was actually present. Callers use it to
+// fall back to the per-scope default format when the user did not specify one.
+func parseTrailingLyricFormatExplicit(text string) (rest, format string, explicit bool) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return "", "lrc"
+		return "", "lrc", false
 	}
 	fields := strings.Fields(trimmed)
 	if len(fields) < 2 {
-		return trimmed, "lrc"
+		return trimmed, "lrc", false
 	}
 	last := strings.ToLower(fields[len(fields)-1])
 	if isKnownLyricFormat(last) {
 		resolved := lyricpkg.NormalizeFormat(last)
 		rest = strings.TrimSpace(strings.Join(fields[:len(fields)-1], " "))
-		return rest, resolved
+		return rest, resolved, true
 	}
-	return trimmed, "lrc"
+	return trimmed, "lrc", false
 }
 
 // lyricFormatAliases maps user-typed format tokens to their canonical form.
@@ -296,14 +310,44 @@ func (h *LyricHandler) formatLyricsError(err error) string {
 }
 
 // sendLyricDocument is the initial entry from the /lyric command. It derives
-// the default translation/roma toggles for the requested format, then renders.
-func (h *LyricHandler) sendLyricDocument(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID, format string, requesterID int64) {
+// the default translation/roma toggles for the requested format, then renders
+// with a collapsed keyboard (only the "更换歌词格式" entry button). defaultFormat
+// is the persisted per-scope default, carried so the format-switch keyboard can
+// later decide when to offer "保存为默认".
+func (h *LyricHandler) sendLyricDocument(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID, format, defaultFormat string, requesterID int64) {
 	state := lyricRenderState{
 		format:             lyricpkg.NormalizeFormat(format),
+		defaultFormat:      lyricpkg.NormalizeFormat(defaultFormat),
 		includeTranslation: lyricFormatDefaultTranslation(format),
 		includeRoma:        false,
+		showSettings:       false,
 	}
 	h.sendLyricDocumentState(ctx, b, chatID, replyToMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
+// resolveDefaultLyricFormat resolves the per-scope default lyric format: group
+// settings in groups, user settings in private chats, falling back to "lrc".
+func (h *LyricHandler) resolveDefaultLyricFormat(ctx context.Context, message *telego.Message) string {
+	format := "lrc"
+	if h.Repo == nil || message == nil {
+		return format
+	}
+	if message.Chat.Type != "private" {
+		if settings, err := h.Repo.GetGroupSettings(ctx, message.Chat.ID); err == nil && settings != nil {
+			if f := strings.TrimSpace(settings.DefaultLyricFormat); f != "" {
+				format = f
+			}
+		}
+		return lyricpkg.NormalizeFormat(format)
+	}
+	if message.From != nil {
+		if settings, err := h.Repo.GetUserSettings(ctx, message.From.ID); err == nil && settings != nil {
+			if f := strings.TrimSpace(settings.DefaultLyricFormat); f != "" {
+				format = f
+			}
+		}
+	}
+	return lyricpkg.NormalizeFormat(format)
 }
 
 // lyricRenderedDoc holds the rendered artifacts for a lyric document: the temp

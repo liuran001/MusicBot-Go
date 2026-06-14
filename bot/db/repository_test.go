@@ -38,7 +38,7 @@ func TestRepositoryCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
-	repo.SetDefaults("netease", "hires")
+	repo.SetDefaults("netease", "hires", "lrc")
 
 	ctx := context.Background()
 	count, err := repo.Count(ctx)

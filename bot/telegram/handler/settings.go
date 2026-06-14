@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	lyricpkg "github.com/liuran001/MusicBot-Go/bot/lyric"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
 	"github.com/mymmrac/telego"
@@ -18,6 +19,7 @@ type SettingsHandler struct {
 	RateLimiter              *telegram.RateLimiter
 	DefaultPlatform          string
 	DefaultQuality           string
+	DefaultLyricFormat       string
 	PluginSettingDefinitions []botpkg.PluginSettingDefinition
 }
 
@@ -118,6 +120,9 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	}
 	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删除列表消息: %s\n", autoDeleteText))
 	sb.WriteString(fmt.Sprintf("🔗 会话内链接自动识别: %s\n", autoLinkDetectText))
+
+	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
+	sb.WriteString(fmt.Sprintf("🎤 默认歌词格式: %s\n", lyricFormatDisplayName(lyricFormat)))
 
 	for _, def := range h.sortedPluginSettingDefinitions() {
 		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
@@ -224,6 +229,12 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 			CallbackData: fmt.Sprintf("settings autolink %s", h.toggleValue(autoLinkDetectEnabled)),
 		},
 	})
+
+	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
+	rows = append(rows, []telego.InlineKeyboardButton{{
+		Text:         fmt.Sprintf("🎤 默认歌词格式: %s", lyricFormatDisplayName(lyricFormat)),
+		CallbackData: "settings lyricmenu",
+	}})
 	for _, def := range h.sortedPluginSettingDefinitions() {
 		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
 			continue
@@ -266,6 +277,71 @@ func (h *SettingsHandler) resolveAutoLinkDetect(chatType string, settings *botpk
 		return settings.AutoLinkDetect
 	}
 	return true
+}
+
+// resolveDefaultLyricFormat resolves the effective default lyric format for the
+// current scope, falling back to the configured default and finally "lrc".
+func (h *SettingsHandler) resolveDefaultLyricFormat(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) string {
+	format := strings.TrimSpace(h.DefaultLyricFormat)
+	if format == "" {
+		format = "lrc"
+	}
+	if chatType != "private" {
+		if groupSettings != nil && strings.TrimSpace(groupSettings.DefaultLyricFormat) != "" {
+			format = groupSettings.DefaultLyricFormat
+		}
+	} else if settings != nil && strings.TrimSpace(settings.DefaultLyricFormat) != "" {
+		format = settings.DefaultLyricFormat
+	}
+	return lyricpkg.NormalizeFormat(format)
+}
+
+// settingsLyricFormatRows groups the selectable default lyric formats for the
+// submenu, mirroring the /lyric format grid.
+var settingsLyricFormatRows = [][]string{
+	{"lrc", "yrc", "qrc"},
+	{"lys", "krc", "elrc"},
+	{"spl", "ass", "ttml"},
+	{"lqe", "amjson", "srt"},
+	{"txt", "trans", "roma"},
+}
+
+// buildLyricFormatMenuKeyboard builds the default-lyric-format submenu: a grid
+// of formats (current marked "✅") plus a back button to the main settings.
+func (h *SettingsHandler) buildLyricFormatMenuKeyboard(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) *telego.InlineKeyboardMarkup {
+	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
+	rows := make([][]telego.InlineKeyboardButton, 0, len(settingsLyricFormatRows)+1)
+	for _, row := range settingsLyricFormatRows {
+		buttons := make([]telego.InlineKeyboardButton, 0, len(row))
+		for _, format := range row {
+			label := lyricFormatButtonLabels[format]
+			if label == "" {
+				label = strings.ToUpper(format)
+			}
+			if format == current {
+				label = "✅ " + label
+			}
+			buttons = append(buttons, telego.InlineKeyboardButton{
+				Text:         label,
+				CallbackData: fmt.Sprintf("settings lyricfmt %s", format),
+			})
+		}
+		if len(buttons) > 0 {
+			rows = append(rows, buttons)
+		}
+	}
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "⬅️ 返回", CallbackData: "settings lyricback"}})
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// buildLyricFormatMenuText is the header text shown above the format submenu.
+func (h *SettingsHandler) buildLyricFormatMenuText(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) string {
+	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
+	var sb strings.Builder
+	sb.WriteString("🎤 默认歌词格式\n\n")
+	sb.WriteString(fmt.Sprintf("当前: %s\n\n", lyricFormatDisplayName(current)))
+	sb.WriteString("选择 /lyric 默认导出的歌词格式（音频内嵌歌词始终为 LRC，不受影响）")
+	return sb.String()
 }
 
 func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string {
@@ -409,11 +485,68 @@ type SettingsCallbackHandler struct {
 	RateLimiter     *telegram.RateLimiter
 }
 
+// handleLyricMenuNavigation swaps the message between the main settings view and
+// the default-lyric-format submenu. enterMenu picks the direction. It only edits
+// text+keyboard; persistence happens via the "lyricfmt" case. In groups, opening
+// the submenu still requires admin (mirroring the rest of group settings).
+func (h *SettingsCallbackHandler) handleLyricMenuNavigation(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, msg *telego.Message, enterMenu bool) {
+	userID := query.From.ID
+	var settings *botpkg.UserSettings
+	var groupSettings *botpkg.GroupSettings
+	var err error
+	if msg.Chat.Type != "private" {
+		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, userID, 0) {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+				CallbackQueryID: query.ID,
+				Text:            "❌ 仅管理员可修改群组设置",
+				ShowAlert:       true,
+			})
+			return
+		}
+		groupSettings, err = h.Repo.GetGroupSettings(ctx, msg.Chat.ID)
+	} else {
+		settings, err = h.Repo.GetUserSettings(ctx, userID)
+	}
+	if err != nil {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+			CallbackQueryID: query.ID,
+			Text:            "❌ 获取设置失败",
+			ShowAlert:       true,
+		})
+		return
+	}
+
+	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
+
+	chatType := string(msg.Chat.Type)
+	var text string
+	var keyboard *telego.InlineKeyboardMarkup
+	if enterMenu {
+		text = h.SettingsHandler.buildLyricFormatMenuText(chatType, settings, groupSettings)
+		keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(chatType, settings, groupSettings)
+	} else {
+		platforms := h.PlatformManager.List()
+		text = h.SettingsHandler.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
+		keyboard = h.SettingsHandler.buildSettingsKeyboard(ctx, chatType, settings, groupSettings, platforms)
+	}
+
+	params := &telego.EditMessageTextParams{
+		ChatID:      telego.ChatID{ID: msg.Chat.ID},
+		MessageID:   msg.MessageID,
+		Text:        text,
+		ReplyMarkup: keyboard,
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageText(ctx, params)
+	}
+}
+
 func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.CallbackQuery == nil {
 		return
 	}
-
 	query := update.CallbackQuery
 	args := strings.Split(query.Data, " ")
 
@@ -438,6 +571,14 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		}
 		return
 	}
+
+	// Navigate into / back out of the default-lyric-format submenu. These only
+	// swap the keyboard+text; no setting changes here.
+	if args[1] == "lyricmenu" || args[1] == "lyricback" {
+		h.handleLyricMenuNavigation(ctx, b, query, msg, args[1] == "lyricmenu")
+		return
+	}
+
 	if len(args) < 3 {
 		return
 	}
@@ -637,6 +778,22 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		}
 		changed = true
 		responseText = fmt.Sprintf("✅ %s 已设置为: %s", def.Title, def.LabelOf(next))
+	case "lyricfmt":
+		if !isKnownLyricFormat(settingValue) {
+			break
+		}
+		resolved := lyricpkg.NormalizeFormat(settingValue)
+		if msg != nil && msg.Chat.Type != "private" {
+			if groupSettings != nil && groupSettings.DefaultLyricFormat != resolved {
+				groupSettings.DefaultLyricFormat = resolved
+				changed = true
+				responseText = fmt.Sprintf("✅ 默认歌词格式已设置为 %s", lyricFormatDisplayName(resolved))
+			}
+		} else if settings != nil && settings.DefaultLyricFormat != resolved {
+			settings.DefaultLyricFormat = resolved
+			changed = true
+			responseText = fmt.Sprintf("✅ 默认歌词格式已设置为 %s", lyricFormatDisplayName(resolved))
+		}
 	}
 
 	if changed {
@@ -666,10 +823,18 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		})
 
 		if msg != nil {
-			platforms := h.PlatformManager.List()
 			chatType := string(msg.Chat.Type)
-			text := h.SettingsHandler.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
-			keyboard := h.SettingsHandler.buildSettingsKeyboard(ctx, chatType, settings, groupSettings, platforms)
+			var text string
+			var keyboard *telego.InlineKeyboardMarkup
+			if settingType == "lyricfmt" {
+				// Stay in the lyric-format submenu so the ✅ moves to the new pick.
+				text = h.SettingsHandler.buildLyricFormatMenuText(chatType, settings, groupSettings)
+				keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(chatType, settings, groupSettings)
+			} else {
+				platforms := h.PlatformManager.List()
+				text = h.SettingsHandler.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
+				keyboard = h.SettingsHandler.buildSettingsKeyboard(ctx, chatType, settings, groupSettings, platforms)
+			}
 
 			params := &telego.EditMessageTextParams{
 				ChatID:      telego.ChatID{ID: msg.Chat.ID},

@@ -39,26 +39,28 @@ type SongInfo struct {
 
 // UserSettings represents user preferences for the bot.
 type UserSettings struct {
-	ID              uint
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time
-	UserID          int64
-	DefaultPlatform string
-	DefaultQuality  string
-	AutoDeleteList  bool
-	AutoLinkDetect  bool
+	ID                 uint
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+	UserID             int64
+	DefaultPlatform    string
+	DefaultQuality     string
+	AutoDeleteList     bool
+	AutoLinkDetect     bool
+	DefaultLyricFormat string
 }
 
 // GroupSettings represents group-level preferences for the bot.
 type GroupSettings struct {
-	ID              uint
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time
-	ChatID          int64
-	DefaultPlatform string
-	DefaultQuality  string
-	AutoDeleteList  bool
-	AutoLinkDetect  bool
+	ID                 uint
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+	ChatID             int64
+	DefaultPlatform    string
+	DefaultQuality     string
+	AutoDeleteList     bool
+	AutoLinkDetect     bool
+	DefaultLyricFormat string
 }

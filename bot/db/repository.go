@@ -20,10 +20,11 @@ import (
 
 // Repository provides access to the song cache and configuration databases.
 type Repository struct {
-	cacheDB         *gorm.DB
-	dataDB          *gorm.DB
-	defaultPlatform string
-	defaultQuality  string
+	cacheDB            *gorm.DB
+	dataDB             *gorm.DB
+	defaultPlatform    string
+	defaultQuality     string
+	defaultLyricFormat string
 }
 
 // NewSQLiteRepository creates a repository backed by SQLite.
@@ -83,6 +84,9 @@ func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface) 
 	if err := migrateSettingsAutoLinkDetect(dataDB); err != nil {
 		return nil, err
 	}
+	if err := migrateSettingsDefaultLyricFormat(dataDB); err != nil {
+		return nil, err
+	}
 	if err := migratePluginSettingsFromLegacyBilibiliParse(dataDB); err != nil {
 		return nil, err
 	}
@@ -109,10 +113,11 @@ func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface) 
 	dataSQLDB.SetConnMaxLifetime(maxLifetime)
 
 	return &Repository{
-		cacheDB:         cacheDB,
-		dataDB:          dataDB,
-		defaultPlatform: "netease",
-		defaultQuality:  "hires",
+		cacheDB:            cacheDB,
+		dataDB:             dataDB,
+		defaultPlatform:    "netease",
+		defaultQuality:     "hires",
+		defaultLyricFormat: "lrc",
 	}, nil
 }
 
@@ -211,7 +216,7 @@ func (r *Repository) ConfigurePool(maxOpen, maxIdle int, maxLifetime time.Durati
 }
 
 // SetDefaults sets repository defaults for new settings records.
-func (r *Repository) SetDefaults(defaultPlatform, defaultQuality string) {
+func (r *Repository) SetDefaults(defaultPlatform, defaultQuality, defaultLyricFormat string) {
 	if r == nil {
 		return
 	}
@@ -220,6 +225,9 @@ func (r *Repository) SetDefaults(defaultPlatform, defaultQuality string) {
 	}
 	if strings.TrimSpace(defaultQuality) != "" {
 		r.defaultQuality = defaultQuality
+	}
+	if strings.TrimSpace(defaultLyricFormat) != "" {
+		r.defaultLyricFormat = defaultLyricFormat
 	}
 }
 
@@ -295,6 +303,33 @@ func migrateSettingsAutoLinkDetect(db *gorm.DB) error {
 	if !groupColumnExists {
 		if err := db.Exec("ALTER TABLE group_settings ADD COLUMN auto_link_detect NUMERIC NOT NULL DEFAULT 1").Error; err != nil {
 			return fmt.Errorf("add group_settings.auto_link_detect column: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migrateSettingsDefaultLyricFormat adds the default_lyric_format column to the
+// user/group settings tables for installs created before the per-scope default
+// lyric format setting existed.
+func migrateSettingsDefaultLyricFormat(db *gorm.DB) error {
+	var userColumnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('user_settings') WHERE name='default_lyric_format'").Scan(&userColumnExists).Error; err != nil {
+		return fmt.Errorf("check user_settings.default_lyric_format column: %w", err)
+	}
+	if !userColumnExists {
+		if err := db.Exec("ALTER TABLE user_settings ADD COLUMN default_lyric_format TEXT NOT NULL DEFAULT 'lrc'").Error; err != nil {
+			return fmt.Errorf("add user_settings.default_lyric_format column: %w", err)
+		}
+	}
+
+	var groupColumnExists bool
+	if err := db.Raw("SELECT COUNT(*) > 0 FROM pragma_table_info('group_settings') WHERE name='default_lyric_format'").Scan(&groupColumnExists).Error; err != nil {
+		return fmt.Errorf("check group_settings.default_lyric_format column: %w", err)
+	}
+	if !groupColumnExists {
+		if err := db.Exec("ALTER TABLE group_settings ADD COLUMN default_lyric_format TEXT NOT NULL DEFAULT 'lrc'").Error; err != nil {
+			return fmt.Errorf("add group_settings.default_lyric_format column: %w", err)
 		}
 	}
 
@@ -713,15 +748,16 @@ func userSettingsToInternal(settings UserSettingsModel) *bot.UserSettings {
 		deletedAt = &settings.DeletedAt.Time
 	}
 	return &bot.UserSettings{
-		ID:              settings.ID,
-		CreatedAt:       settings.CreatedAt,
-		UpdatedAt:       settings.UpdatedAt,
-		DeletedAt:       deletedAt,
-		UserID:          settings.UserID,
-		DefaultPlatform: settings.DefaultPlatform,
-		DefaultQuality:  settings.DefaultQuality,
-		AutoDeleteList:  settings.AutoDeleteList,
-		AutoLinkDetect:  settings.AutoLinkDetect,
+		ID:                 settings.ID,
+		CreatedAt:          settings.CreatedAt,
+		UpdatedAt:          settings.UpdatedAt,
+		DeletedAt:          deletedAt,
+		UserID:             settings.UserID,
+		DefaultPlatform:    settings.DefaultPlatform,
+		DefaultQuality:     settings.DefaultQuality,
+		AutoDeleteList:     settings.AutoDeleteList,
+		AutoLinkDetect:     settings.AutoLinkDetect,
+		DefaultLyricFormat: settings.DefaultLyricFormat,
 	}
 }
 
@@ -731,15 +767,16 @@ func groupSettingsToInternal(settings GroupSettingsModel) *bot.GroupSettings {
 		deletedAt = &settings.DeletedAt.Time
 	}
 	return &bot.GroupSettings{
-		ID:              settings.ID,
-		CreatedAt:       settings.CreatedAt,
-		UpdatedAt:       settings.UpdatedAt,
-		DeletedAt:       deletedAt,
-		ChatID:          settings.ChatID,
-		DefaultPlatform: settings.DefaultPlatform,
-		DefaultQuality:  settings.DefaultQuality,
-		AutoDeleteList:  settings.AutoDeleteList,
-		AutoLinkDetect:  settings.AutoLinkDetect,
+		ID:                 settings.ID,
+		CreatedAt:          settings.CreatedAt,
+		UpdatedAt:          settings.UpdatedAt,
+		DeletedAt:          deletedAt,
+		ChatID:             settings.ChatID,
+		DefaultPlatform:    settings.DefaultPlatform,
+		DefaultQuality:     settings.DefaultQuality,
+		AutoDeleteList:     settings.AutoDeleteList,
+		AutoLinkDetect:     settings.AutoLinkDetect,
+		DefaultLyricFormat: settings.DefaultLyricFormat,
 	}
 }
 
@@ -749,10 +786,11 @@ func (r *Repository) GetUserSettings(ctx context.Context, userID int64) (*bot.Us
 	err := r.dataDB.WithContext(ctx).
 		Where(UserSettingsModel{UserID: userID}).
 		Attrs(UserSettingsModel{
-			DefaultPlatform: r.defaultPlatform,
-			DefaultQuality:  r.defaultQuality,
-			AutoDeleteList:  false,
-			AutoLinkDetect:  true,
+			DefaultPlatform:    r.defaultPlatform,
+			DefaultQuality:     r.defaultQuality,
+			AutoDeleteList:     false,
+			AutoLinkDetect:     true,
+			DefaultLyricFormat: r.defaultLyricFormat,
 		}).
 		FirstOrCreate(&settings).Error
 	if isSQLiteUniqueConstraint(err) {
@@ -770,10 +808,11 @@ func (r *Repository) GetGroupSettings(ctx context.Context, chatID int64) (*bot.G
 	err := r.dataDB.WithContext(ctx).
 		Where(GroupSettingsModel{ChatID: chatID}).
 		Attrs(GroupSettingsModel{
-			DefaultPlatform: r.defaultPlatform,
-			DefaultQuality:  r.defaultQuality,
-			AutoDeleteList:  true,
-			AutoLinkDetect:  true,
+			DefaultPlatform:    r.defaultPlatform,
+			DefaultQuality:     r.defaultQuality,
+			AutoDeleteList:     true,
+			AutoLinkDetect:     true,
+			DefaultLyricFormat: r.defaultLyricFormat,
 		}).
 		FirstOrCreate(&settings).Error
 	if isSQLiteUniqueConstraint(err) {
@@ -801,11 +840,12 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 			CreatedAt: settings.CreatedAt,
 			UpdatedAt: settings.UpdatedAt,
 		},
-		UserID:          settings.UserID,
-		DefaultPlatform: settings.DefaultPlatform,
-		DefaultQuality:  settings.DefaultQuality,
-		AutoDeleteList:  settings.AutoDeleteList,
-		AutoLinkDetect:  settings.AutoLinkDetect,
+		UserID:             settings.UserID,
+		DefaultPlatform:    settings.DefaultPlatform,
+		DefaultQuality:     settings.DefaultQuality,
+		AutoDeleteList:     settings.AutoDeleteList,
+		AutoLinkDetect:     settings.AutoLinkDetect,
+		DefaultLyricFormat: settings.DefaultLyricFormat,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}
@@ -821,11 +861,12 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 			CreatedAt: settings.CreatedAt,
 			UpdatedAt: settings.UpdatedAt,
 		},
-		ChatID:          settings.ChatID,
-		DefaultPlatform: settings.DefaultPlatform,
-		DefaultQuality:  settings.DefaultQuality,
-		AutoDeleteList:  settings.AutoDeleteList,
-		AutoLinkDetect:  settings.AutoLinkDetect,
+		ChatID:             settings.ChatID,
+		DefaultPlatform:    settings.DefaultPlatform,
+		DefaultQuality:     settings.DefaultQuality,
+		AutoDeleteList:     settings.AutoDeleteList,
+		AutoLinkDetect:     settings.AutoLinkDetect,
+		DefaultLyricFormat: settings.DefaultLyricFormat,
 	}
 	if settings.DeletedAt != nil {
 		model.DeletedAt = gorm.DeletedAt{Time: *settings.DeletedAt, Valid: true}

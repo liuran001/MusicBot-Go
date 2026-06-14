@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	lyricpkg "github.com/liuran001/MusicBot-Go/bot/lyric"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
@@ -17,11 +18,20 @@ import (
 // lyricRenderState captures everything needed to render a lyric document: the
 // target format plus the translation/roma toggle choices. explicitFlags marks
 // whether the toggles came from the user (vs. format defaults).
+//
+// showSettings controls the keyboard layout below the document. When false
+// (the default for a fresh /lyric), only a single "更换歌词格式" entry button is
+// shown. After the user taps it the full format grid + toggles are revealed.
+// defaultFormat is the persisted per-scope default; the "保存为默认" button is
+// offered whenever the chosen format differs from it, and disappears once they
+// match (e.g. right after saving).
 type lyricRenderState struct {
 	format             string
+	defaultFormat      string
 	includeTranslation bool
 	includeRoma        bool
 	explicitFlags      bool
+	showSettings       bool
 }
 
 // lyricFormatRows defines the format buttons shown under a lyric document,
@@ -46,10 +56,15 @@ var lyricFormatButtonLabels = map[string]string{
 // format. It is stored in a TTL store and referenced by a short token, since
 // platform+trackID+format+requester can exceed Telegram's 64-byte callback
 // data limit.
+//
+// defaultFormat snapshots the saved per-scope default at render time, so the
+// callback can decide whether the "保存为默认" button should appear without
+// inflating the callback data.
 type lyricCallbackPayload struct {
-	platformName string
-	trackID      string
-	requesterID  int64
+	platformName  string
+	trackID       string
+	requesterID   int64
+	defaultFormat string
 }
 
 var lyricCallbackPayloads = newTTLStore[lyricCallbackPayload](30 * time.Minute)
@@ -66,20 +81,51 @@ func storeLyricCallbackPayload(payload lyricCallbackPayload) string {
 	return token
 }
 
-// buildLyricFormatKeyboard builds the format-switch keyboard plus translation/
-// roma toggle buttons. The current format is marked with "•". Callback data is
-// "lyric f <fmt> <flags> <token>" where flags is a 2-char on/off pair for
-// translation and roma (e.g. "10"). Switching format preserves the toggles;
-// the toggle buttons flip their own flag and re-render the current format.
+// buildLyricFormatKeyboard builds the keyboard shown under a lyric document. It
+// has three layouts driven by lyricRenderState:
+//
+//   - Collapsed (showSettings == false): a single "🎼 更换歌词格式" entry button
+//     that, when tapped, only swaps the keyboard for the full grid (the document
+//     above is untouched). Callback data: "lyric o <fmt> <flags> <token>".
+//   - Expanded (showSettings == true): the full format grid (current marked "•")
+//     plus translation/roma toggles for side-track formats. Format buttons emit
+//     "lyric f ..."; toggles emit "lyric t ..." so toggling does not by itself
+//     count as a format change.
+//   - Expanded + changed: when the displayed format differs from the saved
+//     default, an extra "💾 保存为默认歌词格式" button is appended, emitting
+//     "lyric d <fmt> <flags> <token>". After saving (default == current) it
+//     disappears.
+//
+// flags is a 2-char on/off pair for translation and roma (e.g. "10"). The token
+// references a stored payload snapshotting platform/track/requester plus the
+// saved default format, so the callback can derive the next state within
+// Telegram's 64-byte callback-data limit.
 func buildLyricFormatKeyboard(platformName, trackID string, state lyricRenderState, requesterID int64) *telego.InlineKeyboardMarkup {
-	token := storeLyricCallbackPayload(lyricCallbackPayload{platformName: platformName, trackID: trackID, requesterID: requesterID})
+	current := lyricpkg.NormalizeFormat(state.format)
+	defaultFormat := lyricpkg.NormalizeFormat(state.defaultFormat)
+	token := storeLyricCallbackPayload(lyricCallbackPayload{
+		platformName:  platformName,
+		trackID:       trackID,
+		requesterID:   requesterID,
+		defaultFormat: defaultFormat,
+	})
 	if token == "" {
 		return nil
 	}
-	current := lyricpkg.NormalizeFormat(state.format)
 	flags := encodeLyricFlags(state.includeTranslation, state.includeRoma)
 
-	rows := make([][]telego.InlineKeyboardButton, 0, len(lyricFormatRows)+1)
+	// Collapsed: a single entry button that expands into the format grid.
+	if !state.showSettings {
+		data := fmt.Sprintf("lyric o %s %s %s", current, flags, token)
+		if len(data) > 64 {
+			return nil
+		}
+		return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
+			{Text: "🎼 更换歌词格式", CallbackData: data},
+		}}}
+	}
+
+	rows := make([][]telego.InlineKeyboardButton, 0, len(lyricFormatRows)+2)
 	for _, row := range lyricFormatRows {
 		buttons := make([]telego.InlineKeyboardButton, 0, len(row))
 		for _, format := range row {
@@ -102,13 +148,15 @@ func buildLyricFormatKeyboard(platformName, trackID string, state lyricRenderSta
 	}
 
 	// Translation/roma toggles, shown only for formats that can carry side tracks.
+	// Toggles use the "t" verb (distinct from format switches) and re-render the
+	// same format, so the save-default button follows the format, not the toggle.
 	if lyricFormatSupportsSideTracks(current) {
 		toggles := make([]telego.InlineKeyboardButton, 0, 2)
 		transLabel := "翻译: 关"
 		if state.includeTranslation {
 			transLabel = "翻译: 开"
 		}
-		transData := fmt.Sprintf("lyric f %s %s %s", current, encodeLyricFlags(!state.includeTranslation, state.includeRoma), token)
+		transData := fmt.Sprintf("lyric t %s %s %s", current, encodeLyricFlags(!state.includeTranslation, state.includeRoma), token)
 		if len(transData) <= 64 {
 			toggles = append(toggles, telego.InlineKeyboardButton{Text: transLabel, CallbackData: transData})
 		}
@@ -116,7 +164,7 @@ func buildLyricFormatKeyboard(platformName, trackID string, state lyricRenderSta
 		if state.includeRoma {
 			romaLabel = "罗马音: 开"
 		}
-		romaData := fmt.Sprintf("lyric f %s %s %s", current, encodeLyricFlags(state.includeTranslation, !state.includeRoma), token)
+		romaData := fmt.Sprintf("lyric t %s %s %s", current, encodeLyricFlags(state.includeTranslation, !state.includeRoma), token)
 		if len(romaData) <= 64 {
 			toggles = append(toggles, telego.InlineKeyboardButton{Text: romaLabel, CallbackData: romaData})
 		}
@@ -125,10 +173,32 @@ func buildLyricFormatKeyboard(platformName, trackID string, state lyricRenderSta
 		}
 	}
 
+	// Save-as-default button: shown only once the displayed format differs from
+	// the saved default. Tapping it persists the default; the next render has
+	// default == current, so the button disappears.
+	if lyricFormatShowSaveDefault(current, defaultFormat) {
+		data := fmt.Sprintf("lyric d %s %s %s", current, flags, token)
+		if len(data) <= 64 {
+			rows = append(rows, []telego.InlineKeyboardButton{
+				{Text: "💾 保存为默认歌词格式", CallbackData: data},
+			})
+		}
+	}
+
 	if len(rows) == 0 {
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// lyricFormatShowSaveDefault reports whether the "保存为默认" button should appear:
+// when the displayed format differs from the saved default. When the default is
+// unknown (empty), assume it differs so the user can still save.
+func lyricFormatShowSaveDefault(current, defaultFormat string) bool {
+	if defaultFormat == "" {
+		return current != ""
+	}
+	return current != defaultFormat
 }
 
 // lyricFormatSupportsSideTracks reports whether a format can merge translation/
@@ -164,8 +234,11 @@ func decodeLyricFlags(s string) (includeTranslation, includeRoma, ok bool) {
 
 // LyricCallbackHandler handles the lyric format-switch buttons.
 type LyricCallbackHandler struct {
-	PlatformManager platform.Manager
-	RateLimiter     *telegram.RateLimiter
+	PlatformManager  platform.Manager
+	RateLimiter      *telegram.RateLimiter
+	Repo             botpkg.SongRepository
+	DefaultPlatform  string
+	FallbackPlatform string
 }
 
 func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -174,8 +247,17 @@ func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 	query := update.CallbackQuery
 	args := strings.Fields(query.Data)
-	// Expected: "lyric f <format> <flags> <token>".
-	if len(args) < 5 || args[0] != "lyric" || args[1] != "f" {
+	// Expected: "lyric <verb> <format> <flags> <token>" where verb is one of
+	// o (open/expand the format grid), f (switch format), t (toggle a side
+	// track), d (save the chosen format as default).
+	if len(args) < 5 || args[0] != "lyric" {
+		h.answer(ctx, b, query.ID, "")
+		return
+	}
+	verb := args[1]
+	switch verb {
+	case "o", "f", "t", "d":
+	default:
 		h.answer(ctx, b, query.ID, "")
 		return
 	}
@@ -195,12 +277,24 @@ func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update
 		return
 	}
 
-	state := lyricRenderState{format: format, includeTranslation: includeTranslation, includeRoma: includeRoma, explicitFlags: flagsOK}
-
 	chatID, messageID, replyToID, ok := lyricCallbackMessageTarget(query)
 	if !ok {
 		h.answer(ctx, b, query.ID, "")
 		return
+	}
+
+	defaultFormat := lyricpkg.NormalizeFormat(payload.defaultFormat)
+	if defaultFormat == "" {
+		defaultFormat = h.resolveDefaultLyricFormat(ctx, query)
+	}
+
+	state := lyricRenderState{
+		format:             format,
+		defaultFormat:      defaultFormat,
+		includeTranslation: includeTranslation,
+		includeRoma:        includeRoma,
+		explicitFlags:      flagsOK,
+		showSettings:       true,
 	}
 
 	// Guard against duplicate concurrent processing of the same message.
@@ -212,6 +306,23 @@ func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 	defer release()
 
+	switch verb {
+	case "o":
+		// Expand the keyboard only — the document above is untouched. Toggles
+		// start from the format's defaults unless the user already set them.
+		if !flagsOK {
+			state.includeTranslation = lyricFormatDefaultTranslation(format)
+			state.includeRoma = false
+		}
+		h.replaceKeyboard(ctx, b, chatID, messageID, payload.platformName, payload.trackID, state, payload.requesterID)
+		h.answer(ctx, b, query.ID, "")
+		return
+	case "d":
+		h.handleSaveDefault(ctx, b, query, chatID, messageID, payload, state)
+		return
+	}
+
+	// "f" / "t": re-render the document in the new format/toggle state.
 	if h.PlatformManager == nil {
 		h.answer(ctx, b, query.ID, getLrcFailed)
 		return
@@ -230,9 +341,107 @@ func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update
 		return
 	}
 
-	lh := &LyricHandler{PlatformManager: h.PlatformManager, RateLimiter: h.RateLimiter}
+	lh := &LyricHandler{PlatformManager: h.PlatformManager, RateLimiter: h.RateLimiter, Repo: h.Repo}
 	baseName := lh.buildLyricBaseName(ctx, plat, payload.trackID)
 	lh.editLyricDocumentState(ctx, b, chatID, messageID, replyToID, lyrics, baseName, payload.platformName, payload.trackID, state, payload.requesterID)
+}
+
+// replaceKeyboard swaps just the inline keyboard under the lyric document for
+// the one implied by state, leaving the document content untouched. Used by the
+// collapsed→expanded transition and after saving a default.
+func (h *LyricCallbackHandler) replaceKeyboard(ctx context.Context, b *telego.Bot, chatID int64, messageID int, platformName, trackID string, state lyricRenderState, requesterID int64) {
+	keyboard := buildLyricFormatKeyboard(platformName, trackID, state, requesterID)
+	params := &telego.EditMessageReplyMarkupParams{
+		ChatID:      telego.ChatID{ID: chatID},
+		MessageID:   messageID,
+		ReplyMarkup: keyboard,
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageReplyMarkupWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageReplyMarkup(ctx, params)
+	}
+}
+
+// handleSaveDefault persists the currently-shown format as the per-scope default
+// (user settings in private chats, group settings in groups, gated by admin),
+// then hides the save button by re-rendering the keyboard without it.
+func (h *LyricCallbackHandler) handleSaveDefault(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, chatID int64, messageID int, payload lyricCallbackPayload, state lyricRenderState) {
+	if h.Repo == nil {
+		h.answer(ctx, b, query.ID, "无法保存默认设置")
+		return
+	}
+	msg := query.Message.Message()
+	if msg == nil {
+		h.answer(ctx, b, query.ID, "")
+		return
+	}
+	format := lyricpkg.NormalizeFormat(state.format)
+
+	if msg.Chat.Type != "private" {
+		if !isRequesterOrAdmin(ctx, b, chatID, query.From.ID, 0) {
+			h.answerAlert(ctx, b, query.ID, "❌ 仅管理员可保存群组默认歌词格式")
+			return
+		}
+		settings, err := h.Repo.GetGroupSettings(ctx, chatID)
+		if err != nil || settings == nil {
+			h.answerAlert(ctx, b, query.ID, "❌ 保存默认设置失败")
+			return
+		}
+		if settings.DefaultLyricFormat != format {
+			settings.DefaultLyricFormat = format
+			if err := h.Repo.UpdateGroupSettings(ctx, settings); err != nil {
+				h.answerAlert(ctx, b, query.ID, "❌ 保存默认设置失败")
+				return
+			}
+		}
+	} else {
+		settings, err := h.Repo.GetUserSettings(ctx, query.From.ID)
+		if err != nil || settings == nil {
+			h.answerAlert(ctx, b, query.ID, "❌ 保存默认设置失败")
+			return
+		}
+		if settings.DefaultLyricFormat != format {
+			settings.DefaultLyricFormat = format
+			if err := h.Repo.UpdateUserSettings(ctx, settings); err != nil {
+				h.answerAlert(ctx, b, query.ID, "❌ 保存默认设置失败")
+				return
+			}
+		}
+	}
+
+	// The chosen format is now the default, so the save button disappears.
+	state.defaultFormat = format
+	h.replaceKeyboard(ctx, b, chatID, messageID, payload.platformName, payload.trackID, state, payload.requesterID)
+	h.answer(ctx, b, query.ID, "✅ 已保存为默认歌词格式: "+lyricFormatDisplayName(format))
+}
+
+// resolveDefaultLyricFormat resolves the per-scope default lyric format for a
+// callback query: group settings in groups, user settings in private chats,
+// falling back to the configured default and finally "lrc".
+func (h *LyricCallbackHandler) resolveDefaultLyricFormat(ctx context.Context, query *telego.CallbackQuery) string {
+	format := "lrc"
+	if h.Repo == nil || query == nil || query.Message == nil {
+		return format
+	}
+	msg := query.Message.Message()
+	if msg == nil {
+		return format
+	}
+	if msg.Chat.Type != "private" {
+		if settings, err := h.Repo.GetGroupSettings(ctx, msg.Chat.ID); err == nil && settings != nil {
+			if f := strings.TrimSpace(settings.DefaultLyricFormat); f != "" {
+				format = f
+			}
+		}
+		return lyricpkg.NormalizeFormat(format)
+	}
+	if settings, err := h.Repo.GetUserSettings(ctx, query.From.ID); err == nil && settings != nil {
+		if f := strings.TrimSpace(settings.DefaultLyricFormat); f != "" {
+			format = f
+		}
+	}
+	return lyricpkg.NormalizeFormat(format)
 }
 
 // lyricCallbackMessageTarget resolves where to update the lyric document. It
@@ -260,6 +469,14 @@ func (h *LyricCallbackHandler) answer(ctx context.Context, b *telego.Bot, callba
 		params.Text = text
 	}
 	_ = b.AnswerCallbackQuery(ctx, params)
+}
+
+func (h *LyricCallbackHandler) answerAlert(ctx context.Context, b *telego.Bot, callbackQueryID, text string) {
+	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
+		CallbackQueryID: callbackQueryID,
+		Text:            text,
+		ShowAlert:       true,
+	})
 }
 
 func (h *LyricCallbackHandler) sendError(ctx context.Context, b *telego.Bot, chatID int64, replyToID int, text string) {

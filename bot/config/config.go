@@ -424,6 +424,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("DefaultPlatform", "netease")
 	v.SetDefault("SearchFallbackPlatform", "netease")
 	v.SetDefault("DefaultQuality", "hires")
+	v.SetDefault("DefaultLyricFormat", "lrc")
 	v.SetDefault("EnableMultipartDownload", true)
 	v.SetDefault("MultipartConcurrency", 4)
 	v.SetDefault("MultipartMinSizeMB", 5)

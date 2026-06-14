@@ -142,11 +142,12 @@ func deletedAtPtr(value gorm.DeletedAt) *time.Time {
 // UserSettingsModel stores user preferences for the bot.
 type UserSettingsModel struct {
 	gorm.Model
-	UserID          int64  `gorm:"uniqueIndex;not null"`
-	DefaultPlatform string `gorm:"not null;default:'netease'"`
-	DefaultQuality  string `gorm:"not null;default:'hires'"`
-	AutoDeleteList  bool   `gorm:"not null;default:false"`
-	AutoLinkDetect  bool   `gorm:"not null;default:true"`
+	UserID             int64  `gorm:"uniqueIndex;not null"`
+	DefaultPlatform    string `gorm:"not null;default:'netease'"`
+	DefaultQuality     string `gorm:"not null;default:'hires'"`
+	AutoDeleteList     bool   `gorm:"not null;default:false"`
+	AutoLinkDetect     bool   `gorm:"not null;default:true"`
+	DefaultLyricFormat string `gorm:"not null;default:'lrc'"`
 }
 
 func (UserSettingsModel) TableName() string {
@@ -156,11 +157,12 @@ func (UserSettingsModel) TableName() string {
 // GroupSettingsModel stores group preferences for the bot.
 type GroupSettingsModel struct {
 	gorm.Model
-	ChatID          int64  `gorm:"uniqueIndex;not null"`
-	DefaultPlatform string `gorm:"not null;default:'netease'"`
-	DefaultQuality  string `gorm:"not null;default:'hires'"`
-	AutoDeleteList  bool   `gorm:"not null;default:true"`
-	AutoLinkDetect  bool   `gorm:"not null;default:true"`
+	ChatID             int64  `gorm:"uniqueIndex;not null"`
+	DefaultPlatform    string `gorm:"not null;default:'netease'"`
+	DefaultQuality     string `gorm:"not null;default:'hires'"`
+	AutoDeleteList     bool   `gorm:"not null;default:true"`
+	AutoLinkDetect     bool   `gorm:"not null;default:true"`
+	DefaultLyricFormat string `gorm:"not null;default:'lrc'"`
 }
 
 func (GroupSettingsModel) TableName() string {
