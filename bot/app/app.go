@@ -485,18 +485,18 @@ func (a *App) Start(ctx context.Context) error {
 	router.Register(botHandler, botName)
 
 	commands := []telego.BotCommand{
-		{Command: "help", Description: "查看使用说明"},
-		{Command: "music", Description: "下载音乐"},
-		{Command: "search", Description: "搜索音乐"},
-		{Command: "settings", Description: "设置默认平台和音质"},
+		{Command: "help", Description: "使用说明"},
+		{Command: "music", Description: "下载歌曲"},
+		{Command: "search", Description: "搜索歌曲"},
 		{Command: "lyric", Description: "获取歌词"},
+		{Command: "settings", Description: "默认平台、音质与歌词格式"},
 	}
 	if enableRecognize {
-		commands = append(commands, telego.BotCommand{Command: "recognize", Description: "识别语音中的歌曲"})
+		commands = append(commands, telego.BotCommand{Command: "recognize", Description: "听歌识曲"})
 	}
 	commands = append(commands,
-		telego.BotCommand{Command: "status", Description: "查看统计信息"},
-		telego.BotCommand{Command: "about", Description: "关于本 Bot"},
+		telego.BotCommand{Command: "status", Description: "缓存与账号状态"},
+		telego.BotCommand{Command: "about", Description: "版本与插件信息"},
 	)
 	if err := a.Telegram.Client().SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: commands,

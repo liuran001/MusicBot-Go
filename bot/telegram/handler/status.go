@@ -80,7 +80,7 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 			}
 			lines = append(lines, fmt.Sprintf("%s: %d", display, platformCounts[name]))
 		}
-		msgText += "\n缓存平台统计:\n" + strings.Join(lines, "\n")
+		msgText += "\n📦 平台缓存\n" + strings.Join(lines, "\n")
 	}
 
 	if h.PlatformManager != nil {
@@ -90,15 +90,15 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 			for _, name := range platforms {
 				displayNames = append(displayNames, platformDisplayName(h.PlatformManager, name))
 			}
-			platformsEscaped := mdV2Replacer.Replace(strings.Join(displayNames, ", "))
+			platformsEscaped := mdV2Replacer.Replace(strings.Join(displayNames, " / "))
 			if useHTML {
 				escaped := make([]string, 0, len(displayNames))
 				for _, name := range displayNames {
 					escaped = append(escaped, html.EscapeString(name))
 				}
-				platformsEscaped = strings.Join(escaped, ", ")
+				platformsEscaped = strings.Join(escaped, " / ")
 			}
-			msgText += fmt.Sprintf("\n\n📱 可用平台: %s", platformsEscaped)
+			msgText += fmt.Sprintf("\n\n📱 可用平台\n%s", platformsEscaped)
 		}
 	}
 
@@ -153,113 +153,30 @@ func (h *StatusHandler) buildAccountStatusSection(ctx context.Context, detailed 
 		return ""
 	}
 	if detailed {
-		return "\n\n🔐 账号状态:\n" + renderDetailedAccountStatusesHTML(statuses)
+		return "\n\n🔐 账号\n" + renderDetailedAccountStatusesHTML(statuses)
 	}
-	return "\n\n🔐 账号状态:\n" + mdV2Replacer.Replace(renderSafeAccountStatuses(statuses))
+	return "\n\n🔐 账号\n" + mdV2Replacer.Replace(renderSafeAccountStatuses(statuses))
 }
 
 func renderSafeAccountStatuses(statuses []platform.AccountStatus) string {
 	if len(statuses) == 0 {
-		return "未发现可查询的平台账号状态"
+		return "未发现可查询的平台账号"
 	}
 	available := 0
 	lines := make([]string, 0, len(statuses)+1)
 	for _, status := range statuses {
 		state := "未登录"
+		icon := "❌"
 		if status.LoggedIn {
 			state = "可用"
+			icon = "✅"
 			available++
 		} else if strings.TrimSpace(status.Summary) != "" {
 			state = classifySafeStatus(status)
 		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", status.DisplayName, state))
+		lines = append(lines, fmt.Sprintf("%s %s：%s", icon, status.DisplayName, state))
 	}
-	return fmt.Sprintf("已登录平台: %d/%d\n%s", available, len(statuses), strings.Join(lines, "\n"))
-}
-
-func renderDetailedAccountStatuses(statuses []platform.AccountStatus) string {
-	blocks := make([]string, 0, len(statuses))
-	for _, status := range statuses {
-		lines := []string{status.DisplayName}
-		if status.LoggedIn {
-			lines = append(lines, "- 状态: 已登录")
-		} else {
-			lines = append(lines, "- 状态: 未登录")
-		}
-		if strings.TrimSpace(status.Nickname) != "" {
-			lines = append(lines, "- 昵称: "+strings.TrimSpace(status.Nickname))
-		}
-		if strings.TrimSpace(status.UserID) != "" {
-			lines = append(lines, "- 用户ID: "+maskStatusUserID(status.UserID))
-		}
-		if strings.TrimSpace(status.AuthMode) != "" {
-			lines = append(lines, "- 登录方式: "+strings.TrimSpace(status.AuthMode))
-		}
-		if len(status.SupportedLogins) > 0 {
-			lines = append(lines, "- 支持: "+strings.Join(status.SupportedLogins, ", "))
-		}
-		if strings.TrimSpace(status.SessionSource) != "" {
-			lines = append(lines, "- 来源: "+strings.TrimSpace(status.SessionSource))
-		}
-		if strings.TrimSpace(status.Summary) != "" {
-			for _, line := range strings.Split(strings.TrimSpace(status.Summary), "\n") {
-				trimmed := strings.TrimSpace(line)
-				if trimmed == "" || isRedundantStatusLine(lines, trimmed) {
-					continue
-				}
-				lines = append(lines, trimmed)
-			}
-		}
-		blocks = append(blocks, strings.Join(lines, "\n"))
-	}
-	return strings.Join(blocks, "\n\n")
-}
-
-func renderDetailedAccountStatusesMarkdown(statuses []platform.AccountStatus) string {
-	blocks := make([]string, 0, len(statuses))
-	for _, status := range statuses {
-		emoji := "❌"
-		if status.LoggedIn {
-			emoji = "✅"
-		}
-		header := emoji + " " + mdV2Replacer.Replace(strings.TrimSpace(status.DisplayName))
-		detailLines := make([]string, 0, 8)
-		if status.LoggedIn {
-			detailLines = append(detailLines, "状态: 已登录")
-		} else {
-			detailLines = append(detailLines, "状态: 未登录")
-		}
-		if strings.TrimSpace(status.Nickname) != "" {
-			detailLines = append(detailLines, "昵称: "+strings.TrimSpace(status.Nickname))
-		}
-		if strings.TrimSpace(status.UserID) != "" {
-			detailLines = append(detailLines, "用户ID: "+maskStatusUserID(status.UserID))
-		}
-		if strings.TrimSpace(status.AuthMode) != "" {
-			detailLines = append(detailLines, "登录方式: "+strings.TrimSpace(status.AuthMode))
-		}
-		if len(status.SupportedLogins) > 0 {
-			detailLines = append(detailLines, "支持: "+strings.Join(status.SupportedLogins, ", "))
-		}
-		if strings.TrimSpace(status.SessionSource) != "" {
-			detailLines = append(detailLines, "来源: "+strings.TrimSpace(status.SessionSource))
-		}
-		if strings.TrimSpace(status.Summary) != "" {
-			for _, line := range strings.Split(strings.TrimSpace(status.Summary), "\n") {
-				trimmed := strings.TrimSpace(strings.TrimPrefix(line, "- "))
-				if trimmed == "" || isRedundantStatusLine(detailLines, trimmed) {
-					continue
-				}
-				detailLines = append(detailLines, trimmed)
-			}
-		}
-		quoted := make([]string, 0, len(detailLines))
-		for _, line := range detailLines {
-			quoted = append(quoted, "> "+mdV2Replacer.Replace(strings.TrimSpace(line)))
-		}
-		blocks = append(blocks, header+"\n"+strings.Join(quoted, "\n"))
-	}
-	return strings.Join(blocks, "\n")
+	return fmt.Sprintf("已登录：%d/%d\n%s", available, len(statuses), strings.Join(lines, "\n"))
 }
 
 func renderDetailedAccountStatusesHTML(statuses []platform.AccountStatus) string {
@@ -308,7 +225,7 @@ func renderDetailedAccountStatusesHTML(statuses []platform.AccountStatus) string
 }
 
 func buildStatusInfoHTML(fromCount int64, chatInfo string, chatCount int64, userID int64, userCount int64, sendCount int64) string {
-	return fmt.Sprintf("<b>[统计信息]</b>\n数据库中总缓存歌曲数量: %d\n当前对话 %s 缓存歌曲数量: %d\n当前用户 <a href=\"tg://user?id=%d\">%d</a> 缓存歌曲数量: %d\n成功发送音乐次数: %d\n",
+	return fmt.Sprintf("<b>📊 状态</b>\n\n🎧 缓存\n全部：%d 首\n本聊天 [%s]：%d 首\n你缓存 [<a href=\"tg://user?id=%d\">%d</a>]：%d 首\n已发送：%d 次\n",
 		fromCount, chatInfo, chatCount, userID, userID, userCount, sendCount)
 }
 

@@ -16,41 +16,47 @@ var mdV2Replacer = strings.NewReplacer(
 )
 
 var (
-	aboutText = `*MusicBot\-Go*
-版本: %s
-源码: https://github\.com/liuran001/MusicBot\-Go
+	aboutText = `*ℹ️ MusicBot\-Go*
+版本：%s
+源码：https://github\.com/liuran001/MusicBot\-Go
 
-\[编译环境\] %s
-\[编译日期\] %s
-\[运行环境\] %s
-%s`
-	uploadFailed     = "下载/发送失败\n%v"
-	hitCache         = "命中缓存, 正在发送中..."
-	inputIDorKeyword = "请输入歌曲ID或歌曲关键词，或使用 /rmcache all 清空所有缓存"
-	tapToDownload    = "点我缓存歌曲"
-	inlineCacheHint  = "如果搜索结果不符可以点击上方缓存"
-	inlineTapToSend  = "如果没反应点此刷新"
-	sendMeTo         = "发送到聊天..."
-	waitForDown      = "等待下载中..."
-	fetchInfo        = "正在获取歌曲信息..."
-	fetchInfoFailed  = "获取歌曲信息失败"
-	downloading      = "下载中..."
-	uploading        = "下载完成, 发送中..."
-	md5VerFailed     = "MD5校验失败"
-	downloadTimeout  = "下载超时"
-	inputKeyword     = "请输入搜索关键词"
-	inputContent     = "请输入歌曲关键词/歌曲或专辑分享链接/歌曲ID"
-	searching        = "搜索中..."
-	fetchingPlaylist = "正在获取歌单..."
-	fetchingLyric    = "正在获取歌词中"
-	noResults        = "未找到结果"
-	playlistEmpty    = "歌单为空"
-	getLrcFailed     = "获取歌词失败, 歌曲可能不存在或为纯音乐"
-	statusInfo       = `*\[统计信息\]*
-数据库中总缓存歌曲数量: %d
-当前对话 \[%s\] 缓存歌曲数量: %d
-当前用户 \[[%d](tg://user?id=%d)\] 缓存歌曲数量: %d
-成功发送音乐次数: %d
+🧩 插件
+%s
+
+🛠 构建
+编译环境：%s
+编译日期：%s
+运行环境：%s`
+	uploadFailed      = "下载或发送失败\n%v"
+	hitCache          = "已命中缓存，正在发送…"
+	inputIDorKeyword  = "请发送歌曲 ID 或关键词，或使用 /rmcache all 清空全部缓存"
+	tapToDownload     = "点我缓存歌曲"
+	inlineCacheHint   = "结果不对？点上方缓存试试"
+	inlineTapToSend   = "没反应？点此刷新"
+	sendMeTo          = "发送到聊天…"
+	waitForDown       = "等待下载…"
+	fetchInfo         = "正在获取歌曲信息…"
+	fetchInfoFailed   = "获取歌曲信息失败"
+	downloading       = "正在下载…"
+	uploading         = "下载完成，正在发送…"
+	md5VerFailed      = "MD5 校验失败"
+	downloadTimeout   = "下载超时"
+	inputKeyword      = "请发送搜索关键词\n\n示例：\n/search 周杰伦\n/search 起风了 qq"
+	inputContent      = "请发送歌曲名、链接或 ID\n\n示例：\n/music 周杰伦\n/music https://music.163.com/song/1859603835"
+	inputLyricContent = "请发送歌曲名、链接或 ID，或回复一条歌曲消息\n\n示例：\n/lyric 稻香\n/lyric 稻香 qrc"
+	searching         = "正在搜索…"
+	fetchingPlaylist  = "正在获取歌单…"
+	fetchingLyric     = "正在获取歌词…"
+	noResults         = "没有找到结果，换个关键词试试"
+	playlistEmpty     = "歌单里没有歌曲"
+	getLrcFailed      = "未找到歌词，可能是纯音乐或平台暂不支持"
+	statusInfo        = `*📊 状态*
+
+🎧 缓存
+全部：%d 首
+本聊天 \[%s\]：%d 首
+你缓存 \[[%d](tg://user?id=%d)\]：%d 首
+已发送：%d 次
 `
 	callbackText   = "Success"
 	callbackDenied = "仅发起人或管理员可操作"
@@ -65,29 +71,32 @@ func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admin
 	if platformText == "" {
 		platformText = "网易云音乐, QQ音乐"
 	}
-	text := "欢迎使用 MusicBot\\-Go \\!\n" +
-		"这是一个强大的音乐下载机器人，支持多平台歌曲的搜索与下载\n"
+	text := "*🎵 MusicBot\\-Go*\n\n" +
+		"发送歌曲名、链接或 ID，即可搜索和下载音乐。\n"
 	if isPrivateChat {
-		text += "直接发送 链接/歌曲名/ID 即可下载对应歌曲\n"
+		text += "私聊中可直接发送内容，无需输入命令。\n"
 	}
-	text += "\n使用方法:\n" +
-		"`/music` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\<\\(可选\\)音质\\> \\- 下载歌曲\n" +
-		"`/search` \\<关键词\\> \\<\\(可选\\)搜索平台\\> \\<\\(可选\\)音质\\> \\- 搜索歌曲\n" +
-		"`/lyric` \\<链接\\|ID\\|关键词\\> \\<\\(可选\\)搜索平台\\> \\- 获取歌词\n"
+	text += "\n*🚀 常用命令*\n" +
+		"`/music` 歌名\\|链接\\|ID \\[平台\\] \\[音质\\] \\- 下载歌曲\n" +
+		"`/search` 关键词 \\[平台\\] \\[音质\\] \\- 搜索歌曲\n" +
+		"`/lyric` 歌名\\|链接\\|ID \\[平台\\] \\- 获取歌词\n"
 	if recognizeEnabled {
-		text += "`/recognize` \\- 听歌识曲 \\(回复一条语音消息\\)\n"
+		text += "`/recognize` \\- 听歌识曲（回复一条语音）\n"
 	}
-	text += "`/settings` \\- 默认音质/搜索平台设置\n\n" +
-		"平台参数:\n" + aliasText + "\n" +
-		"音质参数: `low` / `high` / `lossless` / `hires`\n\n" +
-		"支持平台: " + platformText + "\n" +
-		"示例:\n" +
-		"`/music https://music.163.com/song/1859603835`\n" +
+	text += "`/settings` \\- 默认平台、音质与歌词格式\n" +
+		"`/status` \\- 缓存与账号状态\n" +
+		"`/about` \\- 版本与插件信息\n" +
+		"\n*🎚 参数*\n" +
+		"音质：`low` / `high` / `lossless` / `hires`\n" +
+		"平台：\n" + aliasText + "\n" +
+		"\n支持平台：" + platformText + "\n" +
+		"\n*💡 示例*\n" +
 		"`/music 周杰伦`\n" +
-		"`/search 周杰伦 qq`"
+		"`/music https://music.163.com/song/1859603835`\n" +
+		"`/search 起风了 qq`"
 	adminText := buildAdminHelp(adminCommands)
 	if isAdmin && adminText != "" {
-		text += "\n\n管理员命令:\n" + adminText
+		text += "\n\n*🛠 管理员命令*\n" + adminText
 	}
 	return text
 }
