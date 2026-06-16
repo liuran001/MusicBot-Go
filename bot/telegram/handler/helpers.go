@@ -1627,3 +1627,69 @@ func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, pla
 		}
 	}
 }
+
+// verifyCachedNeteaseQuality validates a netease cached track's stored quality
+// against the live platform API before the cached file is reused.
+//
+// It is a no-op for non-netease platforms, already-verified records, or when the
+// platform/repository are not configured. The live GetDownloadInfo call is
+// best-effort: any failure leaves the cache untouched so the caller still sends
+// the existing file. When the reported quality matches the cached label the
+// record is simply flagged verified; when it differs but the file sizes are
+// within 5% (i.e. the same file with a wrong label) the label is corrected and
+// flagged verified. A genuine size mismatch is left alone — it likely needs a
+// real re-download elsewhere.
+func verifyCachedNeteaseQuality(ctx context.Context, manager platform.Manager, repo botpkg.SongRepository, logger botpkg.Logger, cached *botpkg.SongInfo, platformName, trackID, cacheQuality string) {
+	if manager == nil || repo == nil || cached == nil {
+		return
+	}
+	if platformName != "netease" || cached.QualityVerified {
+		return
+	}
+	plat := manager.Get("netease")
+	if plat == nil {
+		return
+	}
+	q, err := platform.ParseQuality(cacheQuality)
+	if err != nil {
+		return
+	}
+	info, err := plat.GetDownloadInfo(ctx, trackID, q)
+	if err != nil || info == nil {
+		// Best-effort: do not block sending the cached file on a probe failure.
+		return
+	}
+	actualQuality := info.Quality.String()
+	if actualQuality == "" || actualQuality == "unknown" {
+		return
+	}
+	if actualQuality == cached.Quality {
+		if vErr := repo.VerifyAndUpdateQuality(ctx, platformName, trackID, cached.Quality, cached.Quality); vErr != nil && logger != nil {
+			logger.Warn("failed to mark cached quality verified", "platform", platformName, "trackID", trackID, "quality", cached.Quality, "error", vErr)
+		}
+		cached.QualityVerified = true
+		return
+	}
+	// Quality label differs: when the file sizes are close (<5%) it is the same
+	// audio file with a mislabeled quality, so just relabel it. Otherwise the
+	// cached file genuinely differs and we leave it for a real re-download.
+	cachedSize := int64(cached.MusicSize)
+	if info.Size <= 0 || cachedSize <= 0 {
+		return
+	}
+	diff := info.Size - cachedSize
+	if diff < 0 {
+		diff = -diff
+	}
+	if float64(diff) >= float64(cachedSize)*0.05 {
+		return
+	}
+	if vErr := repo.VerifyAndUpdateQuality(ctx, platformName, trackID, cached.Quality, actualQuality); vErr != nil {
+		if logger != nil {
+			logger.Warn("failed to update cached quality", "platform", platformName, "trackID", trackID, "old", cached.Quality, "new", actualQuality, "error", vErr)
+		}
+		return
+	}
+	cached.Quality = actualQuality
+	cached.QualityVerified = true
+}

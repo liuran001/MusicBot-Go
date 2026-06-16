@@ -154,6 +154,31 @@ func (r *stubSongRepository) Update(ctx context.Context, song *botpkg.SongInfo) 
 	return r.Create(ctx, song)
 }
 
+func (r *stubSongRepository) VerifyAndUpdateQuality(ctx context.Context, platform, trackID, oldQuality, newQuality string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	oldKey := platform + ":" + trackID + ":" + oldQuality
+	song, ok := r.platformSongs[oldKey]
+	if !ok || song == nil {
+		return nil
+	}
+	if oldQuality == newQuality {
+		song.QualityVerified = true
+		return nil
+	}
+	newKey := platform + ":" + trackID + ":" + newQuality
+	if existing, ok := r.platformSongs[newKey]; ok && existing != nil {
+		existing.QualityVerified = true
+		delete(r.platformSongs, oldKey)
+		return nil
+	}
+	song.Quality = newQuality
+	song.QualityVerified = true
+	delete(r.platformSongs, oldKey)
+	r.platformSongs[newKey] = song
+	return nil
+}
+
 func (r *stubSongRepository) Delete(ctx context.Context, musicID int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

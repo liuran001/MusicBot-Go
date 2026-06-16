@@ -589,6 +589,48 @@ func (r *Repository) Update(ctx context.Context, song *bot.SongInfo) error {
 	})
 }
 
+// VerifyAndUpdateQuality reconciles a cached track's stored quality label with
+// the platform-reported quality, then flags the record as verified.
+//
+//   - oldQuality == newQuality: the label was already correct, just set
+//     quality_verified = true.
+//   - oldQuality != newQuality: the cached label was wrong. The unique index on
+//     (platform, track_id, quality) forbids two colliding rows, so if a record
+//     already exists under newQuality we flag it verified and drop the stale
+//     oldQuality row; otherwise we relabel the existing row to newQuality.
+func (r *Repository) VerifyAndUpdateQuality(ctx context.Context, platform, trackID, oldQuality, newQuality string) error {
+	if r == nil || r.cacheDB == nil {
+		return errors.New("repository not configured")
+	}
+	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if oldQuality == newQuality {
+			return tx.Model(&SongInfoModel{}).
+				Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, oldQuality).
+				Update("quality_verified", true).Error
+		}
+
+		var existing SongInfoModel
+		err := tx.Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, newQuality).First(&existing).Error
+		if err == nil {
+			// A record already exists under the correct quality: keep it, mark it
+			// verified, and drop the stale oldQuality row.
+			if updErr := tx.Model(&SongInfoModel{}).
+				Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, newQuality).
+				Update("quality_verified", true).Error; updErr != nil {
+				return updErr
+			}
+			return tx.Delete(&SongInfoModel{}, "platform = ? AND track_id = ? AND quality = ?", platform, trackID, oldQuality).Error
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		// No record under newQuality: relabel the existing oldQuality row.
+		return tx.Model(&SongInfoModel{}).
+			Where("platform = ? AND track_id = ? AND quality = ?", platform, trackID, oldQuality).
+			Updates(map[string]any{"quality": newQuality, "quality_verified": true}).Error
+	})
+}
+
 // Delete removes a song by MusicID (legacy NetEase support).
 func (r *Repository) Delete(ctx context.Context, musicID int) error {
 	return r.cacheDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

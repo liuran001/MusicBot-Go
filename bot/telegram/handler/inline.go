@@ -1057,6 +1057,7 @@ func (h *InlineSearchHandler) findCachedSong(ctx context.Context, platformName, 
 	for _, q := range qualityFallbacks(quality) {
 		info, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, q)
 		if err == nil && info != nil && info.FileID != "" && info.SongName != "" {
+			verifyCachedNeteaseQuality(ctx, h.PlatformManager, h.Repo, nil, info, platformName, trackID, info.Quality)
 			return info
 		}
 	}
@@ -1064,6 +1065,7 @@ func (h *InlineSearchHandler) findCachedSong(ctx context.Context, platformName, 
 		if id, err := strconv.Atoi(trackID); err == nil {
 			info, err := h.Repo.FindByMusicID(ctx, id)
 			if err == nil && info != nil && info.FileID != "" && info.SongName != "" {
+				verifyCachedNeteaseQuality(ctx, h.PlatformManager, h.Repo, nil, info, platformName, trackID, info.Quality)
 				return info
 			}
 		}
