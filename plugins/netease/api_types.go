@@ -92,6 +92,7 @@ type SongURLData struct {
 	Code      int    `json:"code"`
 	Expi      int    `json:"expi"`
 	Type      string `json:"type"`
+	Level     string `json:"level"`
 	UrlSource int    `json:"urlSource"`
 }
 
