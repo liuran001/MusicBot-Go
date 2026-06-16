@@ -26,6 +26,7 @@ type LyricHandler struct {
 	Repo             botpkg.SongRepository
 	DefaultPlatform  string
 	FallbackPlatform string
+	SearchHandler    *SearchHandler
 }
 
 func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -87,8 +88,20 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 
 	platformName, trackID, found := extractPlatformTrackFromMessage(ctx, args, h.PlatformManager)
 	if !found {
-		// Not a URL/ID — treat the argument as a song name, search the default
-		// platform, and use the first result's lyrics.
+		// Not a URL/ID — treat the argument as a song name.
+		if h.SearchHandler != nil {
+			// Delegate to SearchHandler with "lyric" action so the user gets
+			// a full result list; the "fetching" message is no longer needed.
+			deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID}
+			if h.RateLimiter != nil {
+				_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, deleteParams)
+			} else {
+				_ = b.DeleteMessage(ctx, deleteParams)
+			}
+			h.SearchHandler.runSearch(ctx, b, message, args, "lyric")
+			return
+		}
+		// Fallback: search the default platform and use the first result's lyrics.
 		platformName, trackID, found = h.searchFirstTrackForLyric(ctx, message, args)
 	}
 	if !found {
