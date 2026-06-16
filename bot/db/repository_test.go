@@ -466,3 +466,109 @@ func TestSQLitePoolDefaultsFromEnv_InvalidValuesFallback(t *testing.T) {
 		t.Fatalf("unexpected fallback maxLifetime: %s", maxLifetime)
 	}
 }
+
+func newTempRepo(t *testing.T) *Repository {
+	t.Helper()
+	file, err := os.CreateTemp("", "music163bot-*.db")
+	if err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+	path := file.Name()
+	_ = file.Close()
+	t.Cleanup(func() { os.Remove(path) })
+
+	file2, err := os.CreateTemp("", "music163bot-data-*.db")
+	if err != nil {
+		t.Fatalf("create temp data db: %v", err)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	t.Cleanup(func() { os.Remove(dataPath) })
+
+	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	repo.SetDefaults("netease", "hires", "lrc")
+	return repo
+}
+
+// TestVerifyAndUpdateQuality covers the three branches of VerifyAndUpdateQuality:
+// same label (only flag verified), relabel an existing row, and merge into a row
+// that already exists under the target quality (drop the stale row).
+func TestVerifyAndUpdateQuality(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("same label marks verified", func(t *testing.T) {
+		repo := newTempRepo(t)
+		song := &bot.SongInfo{Platform: "netease", TrackID: "100", Quality: "lossless", SongName: "S", FileID: "f1", MusicSize: 1000}
+		if err := repo.Create(ctx, song); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if err := repo.VerifyAndUpdateQuality(ctx, "netease", "100", "lossless", "lossless"); err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		loaded, err := repo.FindByPlatformTrackID(ctx, "netease", "100", "lossless")
+		if err != nil || loaded == nil {
+			t.Fatalf("find: %v", err)
+		}
+		if !loaded.QualityVerified {
+			t.Fatalf("expected QualityVerified=true")
+		}
+		if loaded.Quality != "lossless" {
+			t.Fatalf("quality changed unexpectedly: %s", loaded.Quality)
+		}
+	})
+
+	t.Run("relabel when target row absent", func(t *testing.T) {
+		repo := newTempRepo(t)
+		song := &bot.SongInfo{Platform: "netease", TrackID: "200", Quality: "high", SongName: "S", FileID: "f2", MusicSize: 1000}
+		if err := repo.Create(ctx, song); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if err := repo.VerifyAndUpdateQuality(ctx, "netease", "200", "high", "lossless"); err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		// Old label gone, new label present and verified.
+		if old, _ := repo.FindByPlatformTrackID(ctx, "netease", "200", "high"); old != nil {
+			t.Fatalf("expected old-quality row gone, got %+v", old)
+		}
+		loaded, err := repo.FindByPlatformTrackID(ctx, "netease", "200", "lossless")
+		if err != nil || loaded == nil {
+			t.Fatalf("find relabeled: %v", err)
+		}
+		if !loaded.QualityVerified || loaded.FileID != "f2" {
+			t.Fatalf("unexpected relabeled row: %+v", loaded)
+		}
+	})
+
+	t.Run("merge drops stale row when target exists", func(t *testing.T) {
+		repo := newTempRepo(t)
+		// Correct row already cached under lossless.
+		correct := &bot.SongInfo{Platform: "netease", TrackID: "300", Quality: "lossless", SongName: "S", FileID: "correct", MusicSize: 1000}
+		if err := repo.Create(ctx, correct); err != nil {
+			t.Fatalf("create correct: %v", err)
+		}
+		// Stale mislabeled row under high.
+		stale := &bot.SongInfo{Platform: "netease", TrackID: "300", Quality: "high", SongName: "S", FileID: "stale", MusicSize: 1000}
+		if err := repo.Create(ctx, stale); err != nil {
+			t.Fatalf("create stale: %v", err)
+		}
+		if err := repo.VerifyAndUpdateQuality(ctx, "netease", "300", "high", "lossless"); err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+		// Stale high row dropped; correct lossless row kept and verified.
+		if old, _ := repo.FindByPlatformTrackID(ctx, "netease", "300", "high"); old != nil {
+			t.Fatalf("expected stale row dropped, got %+v", old)
+		}
+		loaded, err := repo.FindByPlatformTrackID(ctx, "netease", "300", "lossless")
+		if err != nil || loaded == nil {
+			t.Fatalf("find correct: %v", err)
+		}
+		if loaded.FileID != "correct" || !loaded.QualityVerified {
+			t.Fatalf("unexpected merged row: %+v", loaded)
+		}
+	})
+}
