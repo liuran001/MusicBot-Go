@@ -247,20 +247,86 @@ func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update
 	}
 	query := update.CallbackQuery
 	args := strings.Fields(query.Data)
-	// Expected: "lyric <verb> <format> <flags> <token>" where verb is one of
-	// o (open/expand the format grid), f (switch format), t (toggle a side
-	// track), d (save the chosen format as default).
-	if len(args) < 5 || args[0] != "lyric" {
+	if len(args) < 2 || args[0] != "lyric" {
 		h.answer(ctx, b, query.ID, "")
 		return
 	}
 	verb := args[1]
 	switch verb {
 	case "o", "f", "t", "d":
+		// Format-switch / toggle / save-default callbacks.
+		h.handleFormatCallback(ctx, b, query, args)
 	default:
+		// Search-result lyric callback: "lyric <platform> <trackID> <quality> <requesterID>"
+		h.handleSearchResultCallback(ctx, b, query, args)
+	}
+}
+
+// handleSearchResultCallback handles a search-result lyric button click.
+// Format: "lyric <platform> <trackID> <quality> <requesterID>"
+func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {
+	// args[0]="lyric", args[1]=platform, args[2]=trackID, args[3]=quality, args[4]=requesterID
+	if len(args) < 4 {
 		h.answer(ctx, b, query.ID, "")
 		return
 	}
+	platformName := strings.TrimSpace(args[1])
+	trackID := strings.TrimSpace(args[2])
+	requesterID := int64(0)
+	if len(args) >= 5 {
+		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[4]), 10, 64)
+	}
+	if requesterID != 0 && query.From.ID != requesterID {
+		h.answer(ctx, b, query.ID, "只有发起者可以获取歌词")
+		return
+	}
+	if h.PlatformManager == nil {
+		h.answer(ctx, b, query.ID, "")
+		return
+	}
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil || !plat.SupportsLyrics() {
+		h.answer(ctx, b, query.ID, "此平台不支持获取歌词")
+		return
+	}
+
+	chatID, messageID, replyToID, ok := lyricCallbackMessageTarget(query)
+	if !ok {
+		h.answer(ctx, b, query.ID, "")
+		return
+	}
+
+	h.answer(ctx, b, query.ID, "正在获取歌词...")
+
+	lyrics, err := plat.GetLyrics(ctx, trackID)
+	if err != nil || lyrics == nil {
+		h.sendError(ctx, b, chatID, replyToID, getLrcFailed)
+		return
+	}
+
+	lh := &LyricHandler{PlatformManager: h.PlatformManager, RateLimiter: h.RateLimiter, Repo: h.Repo}
+	baseName := lh.buildLyricBaseName(ctx, plat, trackID)
+	defaultFormat := lh.resolveDefaultLyricFormat(ctx, &telego.Message{Chat: telego.Chat{ID: chatID}, From: &telego.User{ID: requesterID}})
+	format := defaultFormat
+	state := lyricRenderState{
+		format:             format,
+		defaultFormat:      defaultFormat,
+		includeTranslation: lyricFormatDefaultTranslation(format),
+		includeRoma:        false,
+		showSettings:       false,
+	}
+
+	lh.sendLyricDocumentState(ctx, b, chatID, messageID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
+// handleFormatCallback handles the format-switch/toggle/save-default callbacks.
+// Expected: "lyric <verb> <format> <flags> <token>"
+func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {
+	if len(args) < 5 {
+		h.answer(ctx, b, query.ID, "")
+		return
+	}
+	verb := args[1]
 	format := lyricpkg.NormalizeFormat(args[2])
 	includeTranslation, includeRoma, flagsOK := decodeLyricFlags(args[3])
 	token := args[4]
