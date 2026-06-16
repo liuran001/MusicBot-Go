@@ -46,6 +46,18 @@ type searchState struct {
 	unavailable      map[string]bool
 	biliFilter       bool
 	searchFilterText string
+	// action selects what tapping a result does: "music" (default) sends the
+	// song, "lyric" fetches its lyrics. It drives the per-result button prefix
+	// in buildSearchPage and is preserved across pagination.
+	action string
+}
+
+// resultAction returns the result-button action, defaulting to "music".
+func (s *searchState) resultAction() string {
+	if s == nil || strings.TrimSpace(s.action) == "" {
+		return "music"
+	}
+	return s.action
 }
 
 func (s *searchState) setTracks(platformName string, tracks []platform.Track) {
@@ -124,8 +136,6 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 
 	message := update.Message
-	threadID := message.MessageThreadID
-	replyParams := buildReplyParams(message)
 	keyword := commandArguments(message.Text)
 	if keyword == "" && message.Chat.Type == "private" {
 		if !strings.HasPrefix(strings.TrimSpace(message.Text), "/") {
@@ -145,6 +155,22 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		}
 		return
 	}
+	h.runSearch(ctx, b, message, keyword, "music")
+}
+
+// runSearch performs a keyword search and renders the result list. action
+// selects what tapping a result does ("music" sends the song, "lyric" fetches
+// its lyrics); it is stored on the searchState so pagination preserves it. The
+// keyword may carry trailing platform/quality options.
+func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *telego.Message, keyword, action string) {
+	if message == nil {
+		return
+	}
+	if strings.TrimSpace(action) == "" {
+		action = "music"
+	}
+	threadID := message.MessageThreadID
+	replyParams := buildReplyParams(message)
 
 	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
@@ -269,6 +295,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 			unavailable:      unavailable,
 			biliFilter:       biliFilter,
 			searchFilterText: filterLabel,
+			action:           action,
 		}
 		if hasPlatformSuffix {
 			state.setUnavailable(platformName, true)
@@ -315,7 +342,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 	initialLimit := h.initialSearchLimit(platformName)
 	hasMore := len(tracks) >= initialLimit && initialLimit < searchLimit
-	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit, biliFilter, filterLabel)
+	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit, biliFilter, filterLabel, action)
 	textMessage.WriteString(pageText)
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -342,6 +369,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		unavailable:      unavailable,
 		biliFilter:       biliFilter,
 		searchFilterText: filterLabel,
+		action:           action,
 	}
 	state.setTracks(platformName, tracks)
 	state.setHasMore(platformName, hasMore)
@@ -524,7 +552,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	}
 	manager := h.Search.PlatformManager
 	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
-	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText)
+	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText, state.resultAction())
 	text := textHeader + pageText
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -666,7 +694,10 @@ func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *tele
 	return qualityValue
 }
 
-func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int, biliFilter bool, filterLabel string) (string, *telego.InlineKeyboardMarkup) {
+func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int, biliFilter bool, filterLabel string, action string) (string, *telego.InlineKeyboardMarkup) {
+	if strings.TrimSpace(action) == "" {
+		action = "music"
+	}
 	pageSize := h.pageSize()
 	if page < 1 {
 		page = 1
@@ -726,7 +757,7 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 		}
 		songArtists := strings.Join(artistParts, " / ")
 		textMessage.WriteString(fmt.Sprintf("%d\\. 「%s」 \\- %s\n", i-start+1, trackLink, songArtists))
-		callbackData := fmt.Sprintf("music %s %s %s %d", platformName, track.ID, qualityValue, requesterID)
+		callbackData := fmt.Sprintf("%s %s %s %s %d", action, platformName, track.ID, qualityValue, requesterID)
 		buttons = append(buttons, telego.InlineKeyboardButton{
 			Text:         fmt.Sprintf("%d", i-start+1),
 			CallbackData: callbackData,

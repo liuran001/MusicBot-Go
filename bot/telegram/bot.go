@@ -17,6 +17,7 @@ var allowedUpdates = []string{
 	"callback_query",
 	"inline_query",
 	"chosen_inline_result",
+	"guest_message",
 }
 
 const longPollingTimeoutSeconds = 60
