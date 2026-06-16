@@ -25,6 +25,7 @@ type Router struct {
 	Reload                   MessageHandler
 	Admin                    MessageHandler
 	GuestMode                MessageHandler
+	MentionRouter            *MentionRouter
 	GuestSearchCallback      CallbackHandler
 	Callback                 CallbackHandler
 	SettingsCallback         CallbackHandler
@@ -73,6 +74,23 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		}
 		return strings.HasPrefix(strings.TrimSpace(update.CallbackQuery.Data), "admin ")
 	})
+
+	// "<keyword> @bot" in a chat the bot has joined: route by guest-mode keyword
+	// classification (lyric / recognize / song-or-search). Registered before the
+	// URL/keyword content routes so a mention is handled uniformly; non-slash
+	// commands and plain keywords would otherwise fall through unmatched.
+	if r.MentionRouter != nil {
+		bh.Handle(r.wrapMessage(r.MentionRouter), func(ctx context.Context, update telego.Update) bool {
+			if update.Message == nil || update.Message.Text == "" {
+				return false
+			}
+			if isCommandMessage(update.Message) {
+				return false
+			}
+			_, ok := r.MentionRouter.mentionsBot(update.Message)
+			return ok
+		})
+	}
 
 	bh.Handle(r.wrapMessage(r.Music), func(ctx context.Context, update telego.Update) bool {
 		if update.Message == nil || update.Message.Text == "" {

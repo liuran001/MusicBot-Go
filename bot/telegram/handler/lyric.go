@@ -27,6 +27,12 @@ type LyricHandler struct {
 	DefaultPlatform  string
 	FallbackPlatform string
 	SearchHandler    *SearchHandler
+	// InlineUploadChatID and UploadBot let the lyric document be rendered into an
+	// inline message (guest mode / inline format switch). Telegram forbids
+	// uploading a new file when editing an inline message, so the document is
+	// first uploaded to InlineUploadChatID to obtain a reusable file_id.
+	InlineUploadChatID int64
+	UploadBot          *telego.Bot
 }
 
 func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -51,7 +57,10 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	}
 
 	if args == "" && message.ReplyToMessage != nil {
-		args = message.ReplyToMessage.Text
+		// Reply with bare "/lyric": use the replied message's embedded link
+		// (e.g. a bot-sent song message links the title to its track URL) or its
+		// text/caption as the lyric query.
+		args = repliedMessageQuery(message.ReplyToMessage)
 		if args == "" {
 			return
 		}
@@ -549,6 +558,136 @@ func (h *LyricHandler) editLyricDocumentState(ctx context.Context, b *telego.Bot
 		_ = b.DeleteMessage(ctx, deleteParams)
 	}
 	h.sendLyricDocumentState(ctx, b, chatID, fallbackReplyToID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
+// uploadLyricDocumentForInline renders the lyric document and uploads it to the
+// configured InlineUploadChatID to obtain a reusable file_id. Telegram forbids
+// uploading a new file when editing an inline message, so an inline lyric edit
+// must reference a previously-uploaded file by its file_id. Returns the file_id
+// plus the caption/keyboard to attach, or ok=false on any failure. The temp file
+// is removed before returning.
+func (h *LyricHandler) uploadLyricDocumentForInline(ctx context.Context, b *telego.Bot, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) (fileID, caption string, keyboard *telego.InlineKeyboardMarkup, ok bool) {
+	if h.InlineUploadChatID == 0 {
+		return "", "", nil, false
+	}
+	doc, rendered := h.renderLyricDocument(lyrics, baseName, platformName, trackID, state, requesterID)
+	if !rendered {
+		return "", "", nil, false
+	}
+	defer os.Remove(doc.filePath)
+
+	file, err := os.Open(doc.filePath)
+	if err != nil {
+		return "", "", nil, false
+	}
+	defer file.Close()
+
+	uploadBot := b
+	if h.UploadBot != nil {
+		uploadBot = h.UploadBot
+	}
+	params := &telego.SendDocumentParams{
+		ChatID:              telego.ChatID{ID: h.InlineUploadChatID},
+		Document:            telego.InputFile{File: telegoutil.NameReader(file, doc.fileName)},
+		DisableNotification: true,
+	}
+	if doc.caption != "" {
+		params.Caption = doc.caption
+		params.ParseMode = telego.ModeHTML
+	}
+	var uploaded *telego.Message
+	if h.RateLimiter != nil {
+		uploaded, err = telegram.SendDocumentWithRetry(ctx, h.RateLimiter, uploadBot, params)
+	} else {
+		uploaded, err = uploadBot.SendDocument(ctx, params)
+	}
+	if err != nil || uploaded == nil || uploaded.Document == nil || strings.TrimSpace(uploaded.Document.FileID) == "" {
+		return "", "", nil, false
+	}
+	return uploaded.Document.FileID, doc.caption, doc.keyboard, true
+}
+
+// editLyricDocumentInlineState renders the lyric document for the given state and
+// edits the inline message (identified by inlineMessageID) into a document with
+// caption + format-switch keyboard. Because inline messages can't carry a freshly
+// uploaded file, the document is first uploaded to InlineUploadChatID to get a
+// file_id, which is then referenced via EditMessageMedia. On failure it falls
+// back to a plain-text error edit, since inline messages have no reply target to
+// delete-and-resend against.
+func (h *LyricHandler) editLyricDocumentInlineState(ctx context.Context, b *telego.Bot, inlineMessageID string, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
+	inlineMessageID = strings.TrimSpace(inlineMessageID)
+	if inlineMessageID == "" || b == nil {
+		return
+	}
+	fileID, caption, keyboard, ok := h.uploadLyricDocumentForInline(ctx, b, lyrics, baseName, platformName, trackID, state, requesterID)
+	if !ok {
+		// Can't produce a file_id (upload chat unconfigured or upload failed).
+		// The lyrics were fetched successfully, so degrade to plain text rather
+		// than a misleading "failed" error — this preserves the pre-document
+		// behavior when InlineUploadChatID is not set.
+		h.editInlineLyricPlainText(ctx, b, inlineMessageID, lyrics)
+		return
+	}
+
+	media := &telego.InputMediaDocument{
+		Type:  telego.MediaTypeDocument,
+		Media: telego.InputFile{FileID: fileID},
+	}
+	if caption != "" {
+		media.Caption = caption
+		media.ParseMode = telego.ModeHTML
+	}
+	editParams := &telego.EditMessageMediaParams{
+		InlineMessageID: inlineMessageID,
+		Media:           media,
+		ReplyMarkup:     keyboard,
+	}
+	var editErr error
+	if h.RateLimiter != nil {
+		_, editErr = telegram.EditMessageMediaWithRetry(ctx, h.RateLimiter, b, editParams)
+	} else {
+		_, editErr = b.EditMessageMedia(ctx, editParams)
+	}
+	if editErr == nil || telegram.IsMessageNotModified(editErr) {
+		return
+	}
+	h.editInlineLyricPlainText(ctx, b, inlineMessageID, lyrics)
+}
+
+// editInlineLyricPlainText edits an inline message into the lyrics as plain text,
+// truncated to a safe length. It is the fallback when the document path is
+// unavailable (no upload chat) or fails, so the user still sees the lyrics.
+func (h *LyricHandler) editInlineLyricPlainText(ctx context.Context, b *telego.Bot, inlineMessageID string, lyrics *platform.Lyrics) {
+	content := ""
+	if lyrics != nil {
+		content = strings.TrimSpace(lyrics.Plain)
+	}
+	if content == "" {
+		content = "暂无歌词信息"
+	}
+	if len([]rune(content)) > 3800 {
+		r := []rune(content)
+		content = string(r[:3800]) + "\n...(歌词过长已截断)"
+	}
+	h.editInlineLyricError(ctx, b, inlineMessageID, content)
+}
+
+// editInlineLyricError replaces an inline message with a plain-text error. Inline
+// messages have no reply target, so this is the only available fallback.
+func (h *LyricHandler) editInlineLyricError(ctx context.Context, b *telego.Bot, inlineMessageID, text string) {
+	if strings.TrimSpace(inlineMessageID) == "" || b == nil {
+		return
+	}
+	params := &telego.EditMessageTextParams{
+		InlineMessageID:    inlineMessageID,
+		Text:               text,
+		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		return
+	}
+	_, _ = b.EditMessageText(ctx, params)
 }
 
 // lyricFormatDefaultTranslation reports the default translation-merge state for

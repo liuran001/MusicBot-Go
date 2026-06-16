@@ -59,9 +59,10 @@ func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	content := strings.TrimSpace(stripBotMention(message.Text, message.Entities, h.BotName))
 
 	// When the mention carries no payload, fall back to the replied message's
-	// text/caption: "回复一条消息 + @bot" should act on that message.
+	// embedded link / text / caption: "回复一条消息 + @bot" should act on that
+	// message (e.g. replying to a bot-sent song message links to its track URL).
 	if content == "" {
-		content = strings.TrimSpace(repliedMessageText(message.ReplyToMessage))
+		content = strings.TrimSpace(repliedMessageQuery(message.ReplyToMessage))
 	}
 
 	// Replying to a voice message with @bot (no text) triggers recognition
@@ -173,6 +174,29 @@ func repliedMessageText(reply *telego.Message) string {
 		return t
 	}
 	return strings.TrimSpace(reply.Caption)
+}
+
+// repliedMessageQuery resolves a music/lyric query from a replied-to message. It
+// prefers an embedded link from the message's entities (a bot-sent song message
+// hyperlinks the title to the track URL, which is far more precise than its
+// plain-text caption "「title」- artist"), falling back to the visible text or
+// caption otherwise.
+func repliedMessageQuery(reply *telego.Message) string {
+	if reply == nil {
+		return ""
+	}
+	entities := reply.Entities
+	if len(entities) == 0 {
+		entities = reply.CaptionEntities
+	}
+	for _, entity := range entities {
+		if entity.Type == telego.EntityTypeTextLink {
+			if u := strings.TrimSpace(entity.URL); u != "" {
+				return u
+			}
+		}
+	}
+	return repliedMessageText(reply)
 }
 
 // answerGuest sends a single plain-text article in response to a guest query.

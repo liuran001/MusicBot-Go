@@ -239,6 +239,11 @@ type LyricCallbackHandler struct {
 	Repo             botpkg.SongRepository
 	DefaultPlatform  string
 	FallbackPlatform string
+	// InlineUploadChatID and UploadBot are needed to re-render the lyric document
+	// for format switches on inline messages (guest mode), where the new file
+	// must be uploaded first to obtain a file_id before EditMessageMedia.
+	InlineUploadChatID int64
+	UploadBot          *telego.Bot
 }
 
 func (h *LyricCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -290,7 +295,7 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 		return
 	}
 
-	chatID, messageID, replyToID, ok := lyricCallbackMessageTarget(query)
+	chatID, messageID, replyToID, inlineMessageID, ok := lyricCallbackMessageTarget(query)
 	if !ok {
 		h.answer(ctx, b, query.ID, "")
 		return
@@ -300,11 +305,15 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 
 	lyrics, err := plat.GetLyrics(ctx, trackID)
 	if err != nil || lyrics == nil {
-		h.sendError(ctx, b, chatID, replyToID, getLrcFailed)
+		if inlineMessageID != "" {
+			h.editInlineError(ctx, b, inlineMessageID, getLrcFailed)
+		} else {
+			h.sendError(ctx, b, chatID, replyToID, getLrcFailed)
+		}
 		return
 	}
 
-	lh := &LyricHandler{PlatformManager: h.PlatformManager, RateLimiter: h.RateLimiter, Repo: h.Repo}
+	lh := h.newLyricHandler()
 	baseName := lh.buildLyricBaseName(ctx, plat, trackID)
 	defaultFormat := lh.resolveDefaultLyricFormat(ctx, &telego.Message{Chat: telego.Chat{ID: chatID}, From: &telego.User{ID: requesterID}})
 	format := defaultFormat
@@ -316,6 +325,10 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 		showSettings:       false,
 	}
 
+	if inlineMessageID != "" {
+		lh.editLyricDocumentInlineState(ctx, b, inlineMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
+		return
+	}
 	lh.sendLyricDocumentState(ctx, b, chatID, messageID, lyrics, baseName, platformName, trackID, state, requesterID)
 }
 
@@ -343,7 +356,7 @@ func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *tele
 		return
 	}
 
-	chatID, messageID, replyToID, ok := lyricCallbackMessageTarget(query)
+	chatID, messageID, replyToID, inlineMessageID, ok := lyricCallbackMessageTarget(query)
 	if !ok {
 		h.answer(ctx, b, query.ID, "")
 		return
@@ -363,8 +376,12 @@ func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *tele
 		showSettings:       true,
 	}
 
-	// Guard against duplicate concurrent processing of the same message.
+	// Guard against duplicate concurrent processing of the same message. Inline
+	// messages key off inline_message_id; normal messages off chat+message.
 	guardKey := fmt.Sprintf("lyricfmt:%d:%d", chatID, messageID)
+	if inlineMessageID != "" {
+		guardKey = "lyricfmt:inline:" + inlineMessageID
+	}
 	release, acquired := tryAcquireCallbackInFlight(guardKey, 10*time.Second)
 	if !acquired {
 		h.answer(ctx, b, query.ID, "处理中，请稍候")
@@ -380,10 +397,20 @@ func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *tele
 			state.includeTranslation = lyricFormatDefaultTranslation(format)
 			state.includeRoma = false
 		}
-		h.replaceKeyboard(ctx, b, chatID, messageID, payload.platformName, payload.trackID, state, payload.requesterID)
+		if inlineMessageID != "" {
+			h.replaceInlineKeyboard(ctx, b, inlineMessageID, payload.platformName, payload.trackID, state, payload.requesterID)
+		} else {
+			h.replaceKeyboard(ctx, b, chatID, messageID, payload.platformName, payload.trackID, state, payload.requesterID)
+		}
 		h.answer(ctx, b, query.ID, "")
 		return
 	case "d":
+		if inlineMessageID != "" {
+			// Saving a per-scope default needs the chat context, which an inline
+			// message doesn't carry; just acknowledge without persisting.
+			h.answer(ctx, b, query.ID, "")
+			return
+		}
 		h.handleSaveDefault(ctx, b, query, chatID, messageID, payload, state)
 		return
 	}
@@ -403,12 +430,20 @@ func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *tele
 
 	lyrics, err := plat.GetLyrics(ctx, payload.trackID)
 	if err != nil || lyrics == nil {
-		h.sendError(ctx, b, chatID, replyToID, getLrcFailed)
+		if inlineMessageID != "" {
+			h.editInlineError(ctx, b, inlineMessageID, getLrcFailed)
+		} else {
+			h.sendError(ctx, b, chatID, replyToID, getLrcFailed)
+		}
 		return
 	}
 
-	lh := &LyricHandler{PlatformManager: h.PlatformManager, RateLimiter: h.RateLimiter, Repo: h.Repo}
+	lh := h.newLyricHandler()
 	baseName := lh.buildLyricBaseName(ctx, plat, payload.trackID)
+	if inlineMessageID != "" {
+		lh.editLyricDocumentInlineState(ctx, b, inlineMessageID, lyrics, baseName, payload.platformName, payload.trackID, state, payload.requesterID)
+		return
+	}
 	lh.editLyricDocumentState(ctx, b, chatID, messageID, replyToID, lyrics, baseName, payload.platformName, payload.trackID, state, payload.requesterID)
 }
 
@@ -427,6 +462,41 @@ func (h *LyricCallbackHandler) replaceKeyboard(ctx context.Context, b *telego.Bo
 	} else {
 		_, _ = b.EditMessageReplyMarkup(ctx, params)
 	}
+}
+
+// newLyricHandler builds a LyricHandler carrying the same platform/rate-limit/
+// repo plus the inline-upload context, so document edits work for both normal
+// and inline (guest) messages.
+func (h *LyricCallbackHandler) newLyricHandler() *LyricHandler {
+	return &LyricHandler{
+		PlatformManager:    h.PlatformManager,
+		RateLimiter:        h.RateLimiter,
+		Repo:               h.Repo,
+		InlineUploadChatID: h.InlineUploadChatID,
+		UploadBot:          h.UploadBot,
+	}
+}
+
+// replaceInlineKeyboard swaps just the inline keyboard under an inline lyric
+// document (guest mode), leaving the document content untouched.
+func (h *LyricCallbackHandler) replaceInlineKeyboard(ctx context.Context, b *telego.Bot, inlineMessageID, platformName, trackID string, state lyricRenderState, requesterID int64) {
+	keyboard := buildLyricFormatKeyboard(platformName, trackID, state, requesterID)
+	params := &telego.EditMessageReplyMarkupParams{
+		InlineMessageID: inlineMessageID,
+		ReplyMarkup:     keyboard,
+	}
+	if h.RateLimiter != nil {
+		_, _ = telegram.EditMessageReplyMarkupWithRetry(ctx, h.RateLimiter, b, params)
+	} else {
+		_, _ = b.EditMessageReplyMarkup(ctx, params)
+	}
+}
+
+// editInlineError replaces an inline message with a plain-text error. Inline
+// messages have no reply target, so there is nothing to delete-and-resend.
+func (h *LyricCallbackHandler) editInlineError(ctx context.Context, b *telego.Bot, inlineMessageID, text string) {
+	lh := h.newLyricHandler()
+	lh.editInlineLyricError(ctx, b, inlineMessageID, text)
 }
 
 // handleSaveDefault persists the currently-shown format as the per-scope default
@@ -510,23 +580,32 @@ func (h *LyricCallbackHandler) resolveDefaultLyricFormat(ctx context.Context, qu
 	return lyricpkg.NormalizeFormat(format)
 }
 
-// lyricCallbackMessageTarget resolves where to update the lyric document. It
-// returns the document message itself (chatID + messageID) to edit in place,
-// plus replyToID — the document's own reply target (the original command) used
-// only when an in-place edit fails and the document must be deleted and resent.
-func lyricCallbackMessageTarget(query *telego.CallbackQuery) (chatID int64, messageID, replyToID int, ok bool) {
-	if query == nil || query.Message == nil {
-		return 0, 0, 0, false
+// lyricCallbackMessageTarget resolves where to update the lyric document. For a
+// normal message it returns the document message itself (chatID + messageID) to
+// edit in place, plus replyToID — the document's own reply target (the original
+// command) used only when an in-place edit fails and the document must be deleted
+// and resent. For an inline message (guest mode) only inlineMessageID is set;
+// chatID/messageID/replyToID are zero and edits go through EditMessageMedia by
+// inline_message_id instead.
+func lyricCallbackMessageTarget(query *telego.CallbackQuery) (chatID int64, messageID, replyToID int, inlineMessageID string, ok bool) {
+	if query == nil {
+		return 0, 0, 0, "", false
+	}
+	if id := strings.TrimSpace(query.InlineMessageID); id != "" {
+		return 0, 0, 0, id, true
+	}
+	if query.Message == nil {
+		return 0, 0, 0, "", false
 	}
 	msg := query.Message.Message()
 	if msg == nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, "", false
 	}
 	replyToID = 0
 	if msg.ReplyToMessage != nil {
 		replyToID = msg.ReplyToMessage.MessageID
 	}
-	return msg.Chat.ID, msg.MessageID, replyToID, true
+	return msg.Chat.ID, msg.MessageID, replyToID, "", true
 }
 
 func (h *LyricCallbackHandler) answer(ctx context.Context, b *telego.Bot, callbackQueryID, text string) {
