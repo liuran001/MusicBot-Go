@@ -1,7 +1,7 @@
 name: Build Apple Music Wrapper Image
 
 # 手动触发，从 WorldObservationLog/wrapper 的上游 Release 取预编译二进制，
-# 用其官方 Dockerfile 打包成镜像并推送到本仓库的 GHCR
+# 用统一的 Dockerfile 打包成镜像并推送到本仓库的 GHCR
 # (ghcr.io/<owner>/musicbot-wrapper)。
 #
 # 支持 x86_64 和 arm64 双架构。每个架构单独构建后通过 imagetools 合并为
@@ -10,8 +10,8 @@ name: Build Apple Music Wrapper Image
 # 上游不发布 Docker 镜像（只发 Release zip），docker-compose.yml 里的 wrapper
 # 服务需要一个可 pull 的镜像，本工作流就是为此准备的。
 #
-# 上游 Dockerfile 会自动检测 build context 中预编译的 `wrapper` 二进制并跳过
-# Android NDK 编译，因此本工作流很快（无需下载 NDK / 从源码编译）。
+# 上游 arm64 release 的 Dockerfile 缺少预编译检测逻辑（会尝试 cmake 源码编译），
+# 因此本工作流统一使用带预编译检测的 Dockerfile 覆盖之。
 
 on:
   workflow_dispatch:
@@ -32,10 +32,14 @@ jobs:
         include:
           - platform: linux/amd64
             arch_suffix: amd64
+            runtime_platform: linux/amd64
+            target_arch: amd64
             release_tag: wrapper.x86_64.latest
             asset_name: Wrapper.x86_64.latest.zip
           - platform: linux/arm64
             arch_suffix: arm64
+            runtime_platform: linux/arm64
+            target_arch: aarch64
             release_tag: wrapper.arm64.latest
             asset_name: Wrapper.arm64.latest.zip
     runs-on: ubuntu-latest
@@ -68,16 +72,89 @@ jobs:
           echo "--- extracted contents ---"
           ls -la wrapper-src
 
-      - name: Verify build context (prebuilt binary + Dockerfile present)
+      - name: Verify and patch build context
         run: |
           set -euo pipefail
           cd wrapper-src
-          test -f wrapper      || { echo "ERROR: prebuilt 'wrapper' binary missing from release zip" >&2; exit 1; }
-          test -f Dockerfile   || { echo "ERROR: Dockerfile missing from release zip" >&2; exit 1; }
-          test -d rootfs       || { echo "ERROR: rootfs/ missing from release zip" >&2; exit 1; }
-          test -f entrypoint.sh|| { echo "ERROR: entrypoint.sh missing from release zip" >&2; exit 1; }
+          test -f wrapper      || { echo "ERROR: prebuilt 'wrapper' binary missing" >&2; exit 1; }
+          test -d rootfs       || { echo "ERROR: rootfs/ missing" >&2; exit 1; }
+          test -f entrypoint.sh|| { echo "ERROR: entrypoint.sh missing" >&2; exit 1; }
           chmod +x wrapper
-          echo "Build context OK (upstream Dockerfile will skip NDK build via /use_prebuild)."
+
+          # 上游 arm64 release 的 Dockerfile 缺少预编译检测逻辑，
+          # 统一覆盖为带检测的版本（复用 x86_64 release 的逻辑）。
+          cat > Dockerfile << 'DOCKERFILE'
+          ARG BUILD_PLATFORM=linux/amd64
+          ARG RUNTIME_PLATFORM=linux/amd64
+
+          FROM --platform=${BUILD_PLATFORM} debian:13.2 AS build
+          ARG TARGET_ARCH=amd64
+          ARG NDK_VERSION=23
+
+          SHELL ["/bin/bash", "-c"]
+
+          WORKDIR /app
+
+          # Skip SDK download if a prebuilt wrapper binary is provided
+          COPY ./*wrapper ./
+          RUN if [[ -f ./wrapper ]]; then \
+                  touch /use_prebuild; \
+              fi
+
+          RUN --mount=type=cache,target=/var/lib/apt,sharing=locked \
+              --mount=type=cache,target=/var/cache/apt,sharing=locked \
+              if [[ ! -f /use_prebuild ]]; then \
+                  apt-get update; \
+                  apt-get install -y \
+                      build-essential \
+                      cmake \
+                      unzip \
+                      git \
+                      lsb-release \
+                      gnupg \
+                      aria2; \
+              fi
+
+          RUN if [[ ! -f /use_prebuild ]]; then \
+                bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"; \
+              fi
+
+          RUN if [[ ! -f /use_prebuild ]]; then \
+                  aria2c -o android-ndk-r${NDK_VERSION}b-linux.zip https://dl.google.com/android/repository/android-ndk-r${NDK_VERSION}b-linux.zip; \
+                  unzip -q -d /app android-ndk-r${NDK_VERSION}b-linux.zip; \
+                  rm android-ndk-r${NDK_VERSION}b-linux.zip; \
+              fi
+
+          WORKDIR /app
+          COPY ./ ./
+          RUN if [[ ! -f /use_prebuild ]]; then \
+                  mkdir -p build; \
+                  cmake -S /app -B /app/build -DTARGET_ARCH=${TARGET_ARCH}; \
+                  cmake --build /app/build -j$(nproc); \
+              elif [[ -f wrapper ]]; then \
+                  chmod +x /app/wrapper; \
+              else \
+                  echo "ERROR: Neither CMakeLists.txt nor prebuilt /app/wrapper found in build context." >&2 && \
+                  ls -la /app >&2 && \
+                  exit 1; \
+              fi
+
+          FROM --platform=${RUNTIME_PLATFORM} debian:13.2
+
+          WORKDIR /app
+          COPY --from=build /app/wrapper /app/wrapper
+          COPY --from=build /app/rootfs /app/rootfs
+          COPY entrypoint.sh /app/entrypoint.sh
+          RUN chmod +x /app/entrypoint.sh
+
+          CMD ["/app/entrypoint.sh"]
+
+          EXPOSE 10020 20020 30020
+          DOCKERFILE
+          # Strip leading whitespace from heredoc
+          sed -i 's/^          //' Dockerfile
+          echo "--- patched Dockerfile ---"
+          cat Dockerfile
 
       - name: Image metadata
         id: meta
@@ -93,6 +170,9 @@ jobs:
           context: ./wrapper-src
           file: ./wrapper-src/Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: |
+            RUNTIME_PLATFORM=${{ matrix.runtime_platform }}
+            TARGET_ARCH=${{ matrix.target_arch }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
