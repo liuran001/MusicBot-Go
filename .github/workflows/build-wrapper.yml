@@ -4,6 +4,9 @@ name: Build Apple Music Wrapper Image
 # 用其官方 Dockerfile 打包成镜像并推送到本仓库的 GHCR
 # (ghcr.io/<owner>/musicbot-wrapper)。
 #
+# 支持 x86_64 和 arm64 双架构。每个架构单独构建后通过 imagetools 合并为
+# 多架构 manifest list，一个 tag 拉取时自动匹配宿主架构。
+#
 # 上游不发布 Docker 镜像（只发 Release zip），docker-compose.yml 里的 wrapper
 # 服务需要一个可 pull 的镜像，本工作流就是为此准备的。
 #
@@ -13,10 +16,6 @@ name: Build Apple Music Wrapper Image
 on:
   workflow_dispatch:
     inputs:
-      wrapper_ref:
-        description: "上游 wrapper release tag（默认 x86_64 latest）"
-        required: false
-        default: "wrapper.x86_64.latest"
       image_tag:
         description: "推送的镜像 tag"
         required: false
@@ -28,8 +27,22 @@ permissions:
 
 jobs:
   build-wrapper:
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch_suffix: amd64
+            release_tag: wrapper.x86_64.latest
+            asset_name: Wrapper.x86_64.latest.zip
+          - platform: linux/arm64
+            arch_suffix: arm64
+            release_tag: wrapper.arm64.latest
+            asset_name: Wrapper.arm64.latest.zip
     runs-on: ubuntu-latest
     steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -43,13 +56,14 @@ jobs:
       - name: Download upstream wrapper release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WRAPPER_REF: ${{ github.event.inputs.wrapper_ref }}
+          RELEASE_TAG: ${{ matrix.release_tag }}
+          ASSET_NAME: ${{ matrix.asset_name }}
         run: |
           set -euo pipefail
-          mkdir -p wrapper-src
-          url="https://github.com/WorldObservationLog/wrapper/releases/download/${WRAPPER_REF}/Wrapper.x86_64.latest.zip"
+          url="https://github.com/WorldObservationLog/wrapper/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
           echo "Downloading $url"
           curl -fsSL -o wrapper.zip "$url"
+          mkdir -p wrapper-src
           unzip -q wrapper.zip -d wrapper-src
           echo "--- extracted contents ---"
           ls -la wrapper-src
@@ -71,28 +85,60 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/musicbot-wrapper
           tags: |
-            type=raw,value=${{ github.event.inputs.image_tag }}
+            type=raw,value=${{ github.event.inputs.image_tag }}-${{ matrix.arch_suffix }}
 
-      - name: Build and push wrapper image
+      - name: Build and push wrapper image (${{ matrix.arch_suffix }})
         uses: docker/build-push-action@v6
         with:
           context: ./wrapper-src
           file: ./wrapper-src/Dockerfile
-          # 上游 wrapper 仅支持 x86_64（release 名即 x86_64）；不做多架构。
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
 
+  merge-manifests:
+    runs-on: ubuntu-latest
+    needs: build-wrapper
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest list and push
+        env:
+          TAG: ${{ github.event.inputs.image_tag }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/musicbot-wrapper
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${TAG}" \
+            "${IMAGE}:${TAG}-amd64" \
+            "${IMAGE}:${TAG}-arm64"
+
+      - name: Inspect manifest
+        env:
+          TAG: ${{ github.event.inputs.image_tag }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/musicbot-wrapper
+        run: docker buildx imagetools inspect "${IMAGE}:${TAG}"
+
       - name: Summary
+        env:
+          TAG: ${{ github.event.inputs.image_tag }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/musicbot-wrapper
         run: |
           {
-            echo "### Wrapper 镜像已推送 :rocket:"
+            echo "### Wrapper 多架构镜像已推送 :rocket:"
             echo ""
             echo '```'
-            echo "${{ steps.meta.outputs.tags }}"
+            echo "${IMAGE}:${TAG}"
             echo '```'
+            echo ""
+            echo "**架构**: linux/amd64, linux/arm64"
             echo ""
             echo "在 docker-compose.yml 中引用此镜像即可（见 wrapper 服务）。"
           } >> "$GITHUB_STEP_SUMMARY"
