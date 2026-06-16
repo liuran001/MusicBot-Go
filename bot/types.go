@@ -14,6 +14,7 @@ type SongInfo struct {
 	Platform        string // Platform identifier (e.g., "netease", "spotify")
 	TrackID         string // Platform-specific track identifier
 	Quality         string // Quality level (e.g., "standard", "high", "lossless")
+	QualityVerified bool   // true if Quality has been verified against the platform API
 	MusicID         int    // Deprecated: Legacy NetEase music ID (kept for backward compatibility)
 	SongName        string
 	SongArtists     string

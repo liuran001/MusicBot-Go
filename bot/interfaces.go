@@ -28,6 +28,7 @@ type SongRepository interface {
 	FindByFileID(ctx context.Context, fileID string) (*SongInfo, error)
 	Create(ctx context.Context, song *SongInfo) error
 	Update(ctx context.Context, song *SongInfo) error
+	VerifyAndUpdateQuality(ctx context.Context, platform, trackID, oldQuality, newQuality string) error
 	Delete(ctx context.Context, musicID int) error
 	DeleteAll(ctx context.Context) error
 	DeleteAllByPlatform(ctx context.Context, platform string) error

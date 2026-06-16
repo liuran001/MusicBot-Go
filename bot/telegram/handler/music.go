@@ -618,6 +618,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 	if songInfo.Quality == "" {
 		songInfo.Quality = actualQuality
+		songInfo.QualityVerified = true
 	}
 	songInfo.FileExt = info.Format
 	songInfo.MusicSize = 0
@@ -775,6 +776,7 @@ func (h *MusicHandler) trySendCachedTrack(
 	songInfo := *cached
 	if h != nil {
 		h.refreshCachedSongLinks(ctx, &songInfo)
+		verifyCachedNeteaseQuality(ctx, h.PlatformManager, h.Repo, h.Logger, &songInfo, platformName, trackID, cacheQuality)
 	}
 	if !silent {
 		status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
@@ -988,6 +990,7 @@ func applyPreparedSongInfo(songInfo *botpkg.SongInfo, prepared preparedSongInfo)
 	songInfo.BitRate = prepared.BitRate
 	if strings.TrimSpace(songInfo.Quality) == "" {
 		songInfo.Quality = prepared.Quality
+		songInfo.QualityVerified = true
 	}
 	songInfo.PicSize = prepared.PicSize
 	songInfo.EmbPicSize = prepared.EmbPicSize
@@ -1363,6 +1366,7 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 	songInfo.BitRate = info.Bitrate * 1000
 	if songInfo.Quality == "" {
 		songInfo.Quality = info.Quality.String()
+		songInfo.QualityVerified = true
 	}
 
 	stamp := time.Now().UnixMicro()
@@ -2428,6 +2432,7 @@ func (h *MusicHandler) prepareInlineSong(
 		songInfo.FromUserName = strings.TrimSpace(userName)
 	}
 	songInfo.Quality = actualQuality
+	songInfo.QualityVerified = true
 	songInfo.FileExt = info.Format
 	songInfo.MusicSize = 0
 	songInfo.BitRate = info.Bitrate * 1000
