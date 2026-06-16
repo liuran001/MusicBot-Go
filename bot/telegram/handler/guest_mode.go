@@ -64,6 +64,13 @@ func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		content = strings.TrimSpace(repliedMessageText(message.ReplyToMessage))
 	}
 
+	// Replying to a voice message with @bot (no text) triggers recognition
+	// directly, without needing a "识曲" keyword.
+	if content == "" && message.ReplyToMessage != nil && message.ReplyToMessage.Voice != nil {
+		h.handleGuestRecognize(ctx, b, message, guestQueryID)
+		return
+	}
+
 	// Recognition is keyed off the literal keyword and needs the replied voice,
 	// so route it before the empty-content guard.
 	if isShazamKeyword(content) {
