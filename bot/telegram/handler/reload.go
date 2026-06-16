@@ -13,7 +13,7 @@ type ReloadHandler struct {
 	Reload      func(ctx context.Context) error
 	RateLimiter *telegram.RateLimiter
 	Logger      *logpkg.Logger
-	AdminIDs    map[int64]struct{}
+	AdminIDs    *AdminSet
 }
 
 func (h *ReloadHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {

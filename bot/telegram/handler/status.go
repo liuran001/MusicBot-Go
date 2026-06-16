@@ -18,7 +18,7 @@ type StatusHandler struct {
 	Repo            botpkg.SongRepository
 	PlatformManager platform.Manager
 	RateLimiter     *telegram.RateLimiter
-	AdminIDs        map[int64]struct{}
+	AdminIDs        *AdminSet
 }
 
 func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
