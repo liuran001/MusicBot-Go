@@ -164,7 +164,7 @@ func (h *GuestModeHandler) handleGuestLyric(ctx context.Context, b *telego.Bot, 
 	}
 	keyword := strings.TrimSpace(strings.Replace(content, "歌词", "", 1))
 	if keyword == "" {
-		keyword = repliedMessageText(message.ReplyToMessage)
+		keyword = repliedMessageQuery(message.ReplyToMessage)
 	}
 	if keyword == "" {
 		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
@@ -182,12 +182,14 @@ func (h *GuestModeHandler) handleGuestLyric(ctx context.Context, b *telego.Bot, 
 }
 
 func (h *GuestModeHandler) fetchAndEditGuestLyric(ctx context.Context, b *telego.Bot, message *telego.Message, inlineMessageID, keyword string) {
+	requesterID, _ := guestRequester(message)
 	platformName, trackID, ok := h.resolveGuestLyricTrack(ctx, message, keyword)
 	if !ok {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "未找到相关歌曲", nil, "")
 		return
 	}
-	plat := h.LyricHandler.PlatformManager.Get(platformName)
+	lh := h.LyricHandler
+	plat := lh.PlatformManager.Get(platformName)
 	if plat == nil || !plat.SupportsLyrics() {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "此平台不支持获取歌词", nil, "")
 		return
@@ -197,15 +199,19 @@ func (h *GuestModeHandler) fetchAndEditGuestLyric(ctx context.Context, b *telego
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "获取歌词失败", nil, "")
 		return
 	}
-	content := strings.TrimSpace(lyrics.Plain)
-	if content == "" {
-		content = "暂无歌词信息"
+
+	baseName := lh.buildLyricBaseName(ctx, plat, trackID)
+	// Resolve the lyric-format default from the requester's OWN settings: model
+	// the synthetic message as a private chat so resolveDefaultLyricFormat reads
+	// user settings (From.ID) rather than group settings for chat 0.
+	defaultFormat := lh.resolveDefaultLyricFormat(ctx, &telego.Message{Chat: telego.Chat{ID: requesterID, Type: telego.ChatTypePrivate}, From: &telego.User{ID: requesterID}})
+	state := lyricRenderState{
+		format:             defaultFormat,
+		defaultFormat:      defaultFormat,
+		includeTranslation: lyricFormatDefaultTranslation(defaultFormat),
+		includeRoma:        false,
 	}
-	if len([]rune(content)) > 3800 {
-		r := []rune(content)
-		content = string(r[:3800]) + "\n...(歌词过长已截断)"
-	}
-	_ = h.editGuestInlineText(ctx, b, inlineMessageID, content, nil, "")
+	lh.editLyricDocumentInlineState(ctx, b, inlineMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
 }
 
 func (h *GuestModeHandler) resolveGuestLyricTrack(ctx context.Context, message *telego.Message, keyword string) (platformName, trackID string, ok bool) {

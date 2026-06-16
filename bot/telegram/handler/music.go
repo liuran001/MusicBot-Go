@@ -282,6 +282,11 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	}
 	if cmd == "music" {
 		args := commandArguments(message.Text)
+		if strings.TrimSpace(args) == "" && message.ReplyToMessage != nil {
+			// Reply with bare "/music": use the replied message's embedded link
+			// (e.g. a bot-sent song message) or its text/caption as the query.
+			args = repliedMessageQuery(message.ReplyToMessage)
+		}
 		if strings.TrimSpace(args) == "" {
 			params := &telego.SendMessageParams{
 				ChatID:          telego.ChatID{ID: message.Chat.ID},

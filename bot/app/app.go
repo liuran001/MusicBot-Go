@@ -445,7 +445,7 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	chosenInlineHandler := &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter, InlinePageSize: pageSize}
 
-	guestLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler}
+	guestLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
 	guestModeHandler := &handler.GuestModeHandler{
 		PlatformManager:  a.PlatformManager,
 		Music:            musicHandler,
@@ -461,14 +461,25 @@ func (a *App) Start(ctx context.Context) error {
 		DefaultQuality:   defaultQuality,
 	}
 
+	routerLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
+	mentionRouter := &handler.MentionRouter{
+		Music:           musicHandler,
+		Search:          searchHandler,
+		Lyric:           routerLyricHandler,
+		Recognize:       recognizeHandler,
+		PlatformManager: a.PlatformManager,
+		BotName:         botName,
+	}
+
 	router := &handler.Router{
 		Music:                    musicHandler,
 		Playlist:                 playlistHandler,
 		Artist:                   musicHandler.Artist,
 		Search:                   searchHandler,
-		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler},
+		Lyric:                    routerLyricHandler,
 		Recognize:                recognizeHandler,
 		GuestMode:                guestModeHandler,
+		MentionRouter:            mentionRouter,
 		GuestSearchCallback:      &handler.GuestSearchCallbackHandler{Guest: guestModeHandler, RateLimiter: rateLimiter},
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
@@ -479,7 +490,7 @@ func (a *App) Start(ctx context.Context) error {
 		SearchCallback:           searchCallback,
 		PlaylistCallback:         playlistCallback,
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
-		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback},
+		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},
