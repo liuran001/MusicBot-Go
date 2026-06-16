@@ -10,6 +10,7 @@ func TestAllowedUpdates(t *testing.T) {
 		"callback_query",
 		"inline_query",
 		"chosen_inline_result",
+		"guest_message",
 	}
 
 	got := AllowedUpdates()
