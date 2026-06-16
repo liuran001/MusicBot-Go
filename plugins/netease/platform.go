@@ -118,7 +118,7 @@ func (n *NeteasePlatform) GetDownloadInfo(ctx context.Context, trackID string, q
 		Format:    format,
 		Bitrate:   urlData.Br / 1000,
 		MD5:       urlData.Md5,
-		Quality:   n.bitrateToQuality(urlData.Br),
+		Quality:   n.resolveQuality(urlData.Level, format, urlData.Br),
 		ExpiresAt: &expiresAt,
 	}
 
@@ -443,14 +443,79 @@ func (n *NeteasePlatform) qualityToBitrateLevel(quality platform.Quality) string
 	}
 }
 
-// bitrateToQuality maps NetEase bitrate to platform Quality enum.
+// neteaseHiResMinKbps is the bitrate (kbps) at or above which a lossless
+// container is treated as Hi-Res in the fallback path. CD-quality lossless
+// FLAC tops out around 1411kbps; true Hi-Res (24-bit / high sample rate) sits
+// well above this. Only used when the authoritative level field is absent.
+const neteaseHiResMinKbps = 1900
+
+// resolveQuality determines the unified Quality for a NetEase song URL.
+//
+// Priority order:
+//  1. The authoritative "level" field returned by the API (standard / higher /
+//     exhigh / lossless / hires / ...). This is the source of truth.
+//  2. Format-aware fallback: a lossless container (flac/ape/wav/alac) is AT
+//     LEAST Lossless, regardless of bitrate. NetEase reports lossless FLAC as
+//     br≈999kbps, which is below the naive 1000kbps "lossless" cut-off and was
+//     the root cause of lossless tracks being mislabelled "高品质".
+//  3. Pure bitrate as a last resort.
+func (n *NeteasePlatform) resolveQuality(level, format string, bitrate int) platform.Quality {
+	if q, ok := neteaseLevelToQuality(level); ok {
+		return q
+	}
+	if isNeteaseLosslessFormat(format) {
+		if bitrate/1000 >= neteaseHiResMinKbps {
+			return platform.QualityHiRes
+		}
+		return platform.QualityLossless
+	}
+	return n.bitrateToQuality(bitrate)
+}
+
+// neteaseLevelToQuality maps NetEase's authoritative "level" string to the
+// unified Quality enum. The bool is false when the level is empty/unknown so
+// callers can fall back to format/bitrate heuristics.
+func neteaseLevelToQuality(level string) (platform.Quality, bool) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "standard":
+		return platform.QualityStandard, true
+	case "higher", "exhigh":
+		return platform.QualityHigh, true
+	case "lossless":
+		return platform.QualityLossless, true
+	case "hires", "sky", "jyeffect", "jymaster":
+		// hires = Hi-Res; sky = 沉浸环绕声; jyeffect = 高清环绕声;
+		// jymaster = 超清母带 — all sit in the Hi-Res tier.
+		return platform.QualityHiRes, true
+	default:
+		return platform.QualityStandard, false
+	}
+}
+
+// isNeteaseLosslessFormat reports whether a file format is a lossless container.
+func isNeteaseLosslessFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "flac", "ape", "wav", "alac":
+		return true
+	default:
+		return false
+	}
+}
+
+// bitrateToQuality maps a NetEase bitrate to the unified Quality enum. This is
+// the last-resort fallback used only when neither the level field nor a
+// lossless format are available; prefer resolveQuality.
+//
+// NetEase never serves lossy audio above 320kbps (exhigh), so any bitrate
+// comfortably above that must be lossless — hence the 800kbps lossless cut-off
+// (lossless FLAC is reported as br≈999kbps).
 func (n *NeteasePlatform) bitrateToQuality(bitrate int) platform.Quality {
 	// Bitrate is in bps, convert to kbps for comparison
 	kbps := bitrate / 1000
 
-	if kbps >= 1500 {
+	if kbps >= neteaseHiResMinKbps {
 		return platform.QualityHiRes
-	} else if kbps >= 1000 {
+	} else if kbps >= 800 {
 		return platform.QualityLossless
 	} else if kbps >= 320 {
 		return platform.QualityHigh

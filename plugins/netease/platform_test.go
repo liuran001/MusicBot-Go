@@ -61,7 +61,9 @@ func TestQualityToBitrateLevel(t *testing.T) {
 	}
 }
 
-// TestBitrateToQuality tests NetEase bitrate to quality enum conversion.
+// TestBitrateToQuality tests NetEase bitrate to quality enum conversion. This
+// is the last-resort fallback (no level field, non-lossless format), so a
+// lossless-grade bitrate such as 999kbps must resolve to Lossless, not High.
 func TestBitrateToQuality(t *testing.T) {
 	p := &NeteasePlatform{}
 
@@ -72,7 +74,7 @@ func TestBitrateToQuality(t *testing.T) {
 		{128000, platform.QualityStandard},
 		{192000, platform.QualityStandard},
 		{320000, platform.QualityHigh},
-		{999000, platform.QualityHigh},
+		{999000, platform.QualityLossless},
 		{1411000, platform.QualityLossless},
 		{2000000, platform.QualityHiRes},
 	}
@@ -81,6 +83,49 @@ func TestBitrateToQuality(t *testing.T) {
 		t.Run(tt.expected.String(), func(t *testing.T) {
 			if got := p.bitrateToQuality(tt.bitrate); got != tt.expected {
 				t.Errorf("bitrateToQuality(%d) = %v, want %v", tt.bitrate, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestResolveQuality verifies the layered quality resolution: the authoritative
+// level field wins, a lossless container is at least Lossless even at the
+// br≈999kbps that NetEase reports for FLAC, and pure bitrate is the last resort.
+func TestResolveQuality(t *testing.T) {
+	p := &NeteasePlatform{}
+
+	tests := []struct {
+		name     string
+		level    string
+		format   string
+		bitrate  int
+		expected platform.Quality
+	}{
+		// Authoritative level field wins regardless of bitrate/format.
+		{"level standard", "standard", "mp3", 128000, platform.QualityStandard},
+		{"level higher", "higher", "mp3", 320000, platform.QualityHigh},
+		{"level exhigh", "exhigh", "mp3", 320000, platform.QualityHigh},
+		{"level lossless", "lossless", "flac", 999000, platform.QualityLossless},
+		{"level hires", "hires", "flac", 1900000, platform.QualityHiRes},
+		{"level jymaster", "jymaster", "flac", 2800000, platform.QualityHiRes},
+		// level wins even when it disagrees with the (misleading) bitrate.
+		{"level lossless low br", "lossless", "flac", 999000, platform.QualityLossless},
+		// No level: FLAC container is at least Lossless (the core bug).
+		{"flac no level 999k", "", "flac", 999000, platform.QualityLossless},
+		{"flac no level hires br", "", "flac", 1900000, platform.QualityHiRes},
+		{"ape no level", "", "ape", 900000, platform.QualityLossless},
+		// No level, lossy format: fall back to pure bitrate.
+		{"mp3 no level 320k", "", "mp3", 320000, platform.QualityHigh},
+		{"mp3 no level 128k", "", "mp3", 128000, platform.QualityStandard},
+		// Unknown level string falls through to format/bitrate.
+		{"unknown level flac", "mystery", "flac", 999000, platform.QualityLossless},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := p.resolveQuality(tt.level, tt.format, tt.bitrate); got != tt.expected {
+				t.Errorf("resolveQuality(%q, %q, %d) = %v, want %v",
+					tt.level, tt.format, tt.bitrate, got, tt.expected)
 			}
 		})
 	}
