@@ -36,6 +36,7 @@ type App struct {
 	PlatformManager          platform.Manager
 	DynPlugins               *dynplugin.Manager
 	AdminIDs                 map[int64]struct{}
+	adminSet                 *handler.AdminSet
 	AdminCommands            []admincmd.Command
 	Telegram                 *telegram.Bot
 	RecognizeService         recognize.Service
@@ -126,6 +127,7 @@ func New(ctx context.Context, configPath string, build BuildInfo) (*App, error) 
 		PlatformManager:          platformManager,
 		DynPlugins:               dynManager,
 		AdminIDs:                 adminIDs,
+		adminSet:                 handler.NewAdminSet(adminIDs),
 		AdminCommands:            adminCommands,
 		Telegram:                 tele,
 		RecognizeService:         recognizeService,
@@ -397,7 +399,7 @@ func (a *App) Start(ctx context.Context) error {
 		InlineUploadChatID:       int64(a.Config.GetInt("InlineUploadChatID")),
 		DefaultPlatform:          defaultPlatform,
 		FallbackPlatform:         searchFallback,
-		AdminIDs:                 a.AdminIDs,
+		AdminIDs:                 a.adminSet,
 		AdminCommands:            adminCommands,
 		PlatformManager:          a.PlatformManager,
 		DownloadService:          downloadService,
@@ -430,12 +432,12 @@ func (a *App) Start(ctx context.Context) error {
 	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
 	adminHandler := &handler.AdminCommandHandler{
 		BotName:     botName,
-		AdminIDs:    a.AdminIDs,
+		AdminIDs:    a.adminSet,
 		RateLimiter: rateLimiter,
 		Commands:    adminCommands,
 	}
 	searchCallback := &handler.SearchCallbackHandler{Search: searchHandler, RateLimiter: rateLimiter}
-	reloadHandler := &handler.ReloadHandler{Reload: a.ReloadAll, RateLimiter: rateLimiter, Logger: a.Logger, AdminIDs: a.AdminIDs}
+	reloadHandler := &handler.ReloadHandler{Reload: a.ReloadAll, RateLimiter: rateLimiter, Logger: a.Logger, AdminIDs: a.adminSet}
 
 	enableRecognize := a.Config.GetBool("EnableRecognize")
 
@@ -482,9 +484,9 @@ func (a *App) Start(ctx context.Context) error {
 		MentionRouter:            mentionRouter,
 		GuestSearchCallback:      &handler.GuestSearchCallbackHandler{Guest: guestModeHandler, RateLimiter: rateLimiter},
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
-		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
+		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.adminSet},
 		Settings:                 settingsHandler,
-		RmCache:                  &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
+		RmCache:                  &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.adminSet},
 		Callback:                 &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},
 		SettingsCallback:         &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler, RateLimiter: rateLimiter},
 		SearchCallback:           searchCallback,
@@ -613,7 +615,10 @@ func (a *App) ReloadAll(ctx context.Context) error {
 		return err
 	}
 	a.Config = conf
-	refreshAdminIDs(a.AdminIDs, conf.GetString("BotAdmin"))
+	// 重建 admin 集合并原子发布：所有 handler 共享 a.adminSet，Replace 后立即对它们生效，
+	// 且不与并发读冲突（handler 通过 AdminSet 的 atomic 快照读取，不再触碰 a.AdminIDs）。
+	a.AdminIDs = parseIDSet(conf.GetString("BotAdmin"))
+	a.adminSet.Replace(a.AdminIDs)
 
 	if dm, ok := a.PlatformManager.(*platform.DefaultManager); ok {
 		dm.Reset()
@@ -695,18 +700,6 @@ func parseIDSet(raw string) map[int64]struct{} {
 		}
 	}
 	return ids
-}
-
-func refreshAdminIDs(dst map[int64]struct{}, raw string) {
-	if dst == nil {
-		return
-	}
-	for key := range dst {
-		delete(dst, key)
-	}
-	for id := range parseIDSet(raw) {
-		dst[id] = struct{}{}
-	}
 }
 
 func splitAdminIDs(raw string) []string {

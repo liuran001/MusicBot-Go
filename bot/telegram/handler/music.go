@@ -90,7 +90,7 @@ type MusicHandler struct {
 	InlineUploadChatID int64
 	DefaultPlatform    string
 	FallbackPlatform   string
-	AdminIDs           map[int64]struct{}
+	AdminIDs           *AdminSet
 	AdminCommands      []admincmd.Command
 	Playlist           *PlaylistHandler
 	Artist             *ArtistHandler

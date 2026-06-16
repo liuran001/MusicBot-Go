@@ -17,7 +17,7 @@ import (
 
 type AdminCommandHandler struct {
 	BotName     string
-	AdminIDs    map[int64]struct{}
+	AdminIDs    *AdminSet
 	RateLimiter *telegram.RateLimiter
 	Commands    []admincmd.Command
 }
