@@ -452,7 +452,7 @@ func (a *App) Start(ctx context.Context) error {
 		Search:                   searchHandler,
 		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler},
 		Recognize:                recognizeHandler,
-		GuestMode:                &handler.GuestModeHandler{PlatformManager: a.PlatformManager, MusicHandler: musicHandler, LyricHandler: &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler}, SearchHandler: searchHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, BotName: botName},
+		GuestMode:                &handler.GuestModeHandler{PlatformManager: a.PlatformManager, LyricHandler: &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler}, SearchHandler: searchHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, BotName: botName},
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
 		Settings:                 settingsHandler,

@@ -14,7 +14,6 @@ import (
 // GuestModeHandler handles guest messages (bot channel posts).
 type GuestModeHandler struct {
 	PlatformManager  platform.Manager
-	MusicHandler     *MusicHandler
 	LyricHandler     *LyricHandler
 	SearchHandler    *SearchHandler
 	RateLimiter      *telegram.RateLimiter
@@ -185,8 +184,12 @@ func (h *GuestModeHandler) handleGuestSearch(ctx context.Context, b *telego.Bot,
 // handleGuestLyric processes a lyric request from a guest message.
 // The keyword may contain a trailing platform/quality option.
 func (h *GuestModeHandler) handleGuestLyric(ctx context.Context, b *telego.Bot, message *telego.Message, content, guestQueryID string) {
-	// Remove the leading "歌词" keyword.
-	keyword := strings.TrimSpace(strings.TrimPrefix(content, "歌词"))
+	// Remove "歌词" keyword from any position.
+	keyword := strings.TrimSpace(strings.Replace(content, "歌词", "", 1))
+	// If keyword is empty but message is a reply, read the replied message text.
+	if keyword == "" && message.ReplyToMessage != nil {
+		keyword = strings.TrimSpace(message.ReplyToMessage.Text)
+	}
 	if keyword == "" {
 		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
 		return
@@ -327,7 +330,7 @@ func isShazamKeyword(text string) bool {
 }
 
 func isLyricKeyword(text string) bool {
-	return strings.HasPrefix(strings.TrimSpace(text), "歌词")
+	return strings.Contains(strings.TrimSpace(text), "歌词")
 }
 
 // trackArtistsLabel builds a comma-separated artist list from a track's artists.
