@@ -25,6 +25,7 @@ type Router struct {
 	Reload                   MessageHandler
 	Admin                    MessageHandler
 	GuestMode                MessageHandler
+	GuestSearchCallback      CallbackHandler
 	Callback                 CallbackHandler
 	SettingsCallback         CallbackHandler
 	SearchCallback           CallbackHandler
@@ -260,6 +261,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapCallback(r.InlineCollectionCallback), callbackPrefix("ipl"))
 	if r.LyricCallback != nil {
 		bh.Handle(r.wrapCallback(r.LyricCallback), callbackPrefix("lyric "))
+	}
+	if r.GuestSearchCallback != nil {
+		bh.Handle(r.wrapCallback(r.GuestSearchCallback), callbackPrefix("guest "))
 	}
 	bh.Handle(r.wrapInline(r.Inline), func(ctx context.Context, update telego.Update) bool {
 		return update.InlineQuery != nil

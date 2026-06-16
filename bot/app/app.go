@@ -445,6 +445,22 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	chosenInlineHandler := &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter, InlinePageSize: pageSize}
 
+	guestLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler}
+	guestModeHandler := &handler.GuestModeHandler{
+		PlatformManager:  a.PlatformManager,
+		Music:            musicHandler,
+		LyricHandler:     guestLyricHandler,
+		SearchHandler:    searchHandler,
+		RateLimiter:      rateLimiter,
+		RecognizeService: a.RecognizeService,
+		CacheDir:         cacheDir,
+		DownloadBot:      a.Telegram.DownloadClient(),
+		BotName:          botName,
+		DefaultPlatform:  defaultPlatform,
+		FallbackPlatform: searchFallback,
+		DefaultQuality:   defaultQuality,
+	}
+
 	router := &handler.Router{
 		Music:                    musicHandler,
 		Playlist:                 playlistHandler,
@@ -452,7 +468,8 @@ func (a *App) Start(ctx context.Context) error {
 		Search:                   searchHandler,
 		Lyric:                    &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler},
 		Recognize:                recognizeHandler,
-		GuestMode:                &handler.GuestModeHandler{PlatformManager: a.PlatformManager, LyricHandler: &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler}, SearchHandler: searchHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, BotName: botName},
+		GuestMode:                guestModeHandler,
+		GuestSearchCallback:      &handler.GuestSearchCallbackHandler{Guest: guestModeHandler, RateLimiter: rateLimiter},
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.AdminIDs},
 		Settings:                 settingsHandler,
