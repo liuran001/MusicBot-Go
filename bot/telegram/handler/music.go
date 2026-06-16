@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -1680,7 +1681,16 @@ func (h *MusicHandler) runUploadWorker(ctx context.Context) {
 			if !ok {
 				return
 			}
-			h.processUploadTask(task)
+			// 兜底 recover：processUploadTask 内部已有 panic 防护并完成收尾，
+			// 这里再加一层确保任何意外都不会让唯一的上传 worker goroutine 退出。
+			func() {
+				defer func() {
+					if r := recover(); r != nil && h.Logger != nil {
+						h.Logger.Error("upload worker recovered from panic", "error", r, "stack", string(debug.Stack()))
+					}
+				}()
+				h.processUploadTask(task)
+			}()
 		}
 	}
 }
@@ -1722,23 +1732,51 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 	}
 
 	h.dequeueQueuedStatus(task.statusMsg)
+
+	// finalize 统一收尾：调用 onDone（写库/删状态消息/清理临时文件）、从状态队列移除、
+	// 唤醒可能的等待方。无论正常返回还是 panic，都必须恰好执行一次，否则会泄漏临时文件。
+	var finalized bool
+	finalize := func(result uploadResult) {
+		if finalized {
+			return
+		}
+		finalized = true
+		if task.onDone != nil {
+			task.onDone(result)
+		}
+		h.removeQueuedStatus(task.statusMsg)
+		if task.resultCh != nil {
+			task.resultCh <- result
+		}
+	}
+
 	if task.ctx != nil {
 		select {
 		case <-task.ctx.Done():
-			result := uploadResult{err: task.ctx.Err()}
-			if task.onDone != nil {
-				task.onDone(result)
-			}
-			h.removeQueuedStatus(task.statusMsg)
-			if task.resultCh != nil {
-				task.resultCh <- result
-			}
+			finalize(uploadResult{err: task.ctx.Err()})
 			return
 		case h.UploadLimiter <- struct{}{}:
 		}
 	} else {
 		h.UploadLimiter <- struct{}{}
 	}
+
+	// 已持有 UploadLimiter 令牌：用 defer 保证 panic 时也能释放令牌并完成收尾，
+	// 否则唯一的上传 worker 会随 goroutine 一同死亡、令牌永久泄漏。
+	result := uploadResult{}
+	defer func() {
+		<-h.UploadLimiter
+		if r := recover(); r != nil {
+			if h.Logger != nil {
+				h.Logger.Error("upload task panic",
+					"platform", task.songInfo.Platform, "trackID", task.songInfo.TrackID,
+					"error", r, "stack", string(debug.Stack()))
+			}
+			result = uploadResult{err: fmt.Errorf("upload task panic: %v", r)}
+		}
+		finalize(result)
+	}()
+
 	if task.statusMsg != nil && task.statusBot != nil {
 		// 缓存命中场景下，保持“命中缓存, 正在发送中...”文案，不再二次改成 uploading。
 		if !strings.Contains(task.statusMsg.Text, hitCache) {
@@ -1753,16 +1791,7 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 			}
 		}
 	}
-	result := uploadResult{}
 	result.message, result.err = h.sendMusicDirect(task.ctx, task.b, task.message, &task.songInfo, task.musicPath, task.picPath)
-	<-h.UploadLimiter
-	if task.onDone != nil {
-		task.onDone(result)
-	}
-	h.removeQueuedStatus(task.statusMsg)
-	if task.resultCh != nil {
-		task.resultCh <- result
-	}
 }
 
 // registerQueuedStatus appends one status message entry into upload-status queue.
