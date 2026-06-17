@@ -824,6 +824,36 @@ func buildInlineSendCallbackData(platformName, trackID, qualityValue string, req
 	return ""
 }
 
+// buildMusicSendCallbackData 构造非 inline 的 "music <platform> <trackID> <quality> <requesterID>"
+// 回调数据。直接拼接仅在所有字段都是安全 token(无空格/特殊字符,isInlineStartToken)
+// 且总长不超过 Telegram 64 字节上限时使用;否则回退到带 TTL 的 payload store
+// (music mt <token>),避免含空格的 trackID 被 strings.Split 错位解析、或超长 trackID
+// 静默生成失效按钮(与 inline 路径 buildInlineSendCallbackData 对称)。
+func buildMusicSendCallbackData(platformName, trackID, qualityValue string, requesterID int64) string {
+	platformName = strings.TrimSpace(platformName)
+	trackID = strings.TrimSpace(trackID)
+	qualityValue = strings.TrimSpace(qualityValue)
+	if qualityValue == "" {
+		qualityValue = "hires"
+	}
+	if platformName == "" || trackID == "" {
+		return ""
+	}
+	if isInlineStartToken(platformName) && isInlineStartToken(trackID) && isInlineStartToken(qualityValue) {
+		data := fmt.Sprintf("music %s %s %s %d", platformName, trackID, qualityValue, requesterID)
+		if len(data) <= 64 {
+			return data
+		}
+	}
+	if token := storeInlineCallbackPayload(inlineCallbackPayload{platformName: platformName, trackID: trackID, qualityValue: qualityValue, requesterID: requesterID}); token != "" {
+		data := fmt.Sprintf("music mt %s", token)
+		if len(data) <= 64 {
+			return data
+		}
+	}
+	return ""
+}
+
 func parseEpisodeTrackID(manager platform.Manager, platformName, trackID string) (baseTrackID string, page int, hasExplicitPage bool, ok bool) {
 	platformName = strings.TrimSpace(platformName)
 	trackID = strings.TrimSpace(trackID)
@@ -994,7 +1024,6 @@ type inlineResultPayload struct {
 	collectionID string
 	storedAt     time.Time
 }
-
 
 // ttlStore is a generic TTL-based in-memory store that evicts expired entries
 // on each write operation. It replaces multiple ad-hoc map+mutex+cleanup patterns.

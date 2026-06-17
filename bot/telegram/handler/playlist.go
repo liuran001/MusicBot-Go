@@ -368,7 +368,10 @@ func (h *PlaylistHandler) buildPlaylistPage(tracks []platform.Track, totalTracks
 		songArtists := strings.Join(artistParts, " / ")
 		displayIndex := idx + 1
 		textMessage.WriteString(fmt.Sprintf("%d\\. 「%s」 \\- %s\n", displayIndex, trackLink, songArtists))
-		callbackData := fmt.Sprintf("music %s %s %s %d", platformName, track.ID, qualityValue, requesterID)
+		callbackData := buildMusicSendCallbackData(platformName, track.ID, qualityValue, requesterID)
+		if callbackData == "" {
+			continue
+		}
 		buttons = append(buttons, telego.InlineKeyboardButton{
 			Text:         fmt.Sprintf("%d", displayIndex),
 			CallbackData: callbackData,
