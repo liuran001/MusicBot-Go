@@ -146,7 +146,7 @@ func performDataMigration(cacheDB, dataDB *gorm.DB, cacheDSN string) error {
 		ext = ".db"
 	}
 	backupPath := filepath.Join(dir, fmt.Sprintf("%s-%s%s.bak", name, time.Now().Format("20060102150405"), ext))
-	
+
 	input, err := os.ReadFile(cacheDSN)
 	if err == nil {
 		_ = os.WriteFile(backupPath, input, 0644)

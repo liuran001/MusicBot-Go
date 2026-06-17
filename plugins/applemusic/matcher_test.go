@@ -6,10 +6,10 @@ func TestMatchURL(t *testing.T) {
 	m := NewURLMatcher()
 
 	tests := []struct {
-		name    string
-		url     string
-		wantID  string
-		wantOK  bool
+		name   string
+		url    string
+		wantID string
+		wantOK bool
 	}{
 		{"song URL", "https://music.apple.com/us/song/idol/1480785411", "1480785411", true},
 		{"song URL with query", "https://music.apple.com/jp/album/the-book/1559070892?i=1559070896", "1559070896", true},
@@ -38,10 +38,10 @@ func TestMatchPlaylistURL(t *testing.T) {
 	m := NewURLMatcher()
 
 	tests := []struct {
-		name    string
-		url     string
-		wantID  string
-		wantOK  bool
+		name   string
+		url    string
+		wantID string
+		wantOK bool
 	}{
 		{"playlist URL", "https://music.apple.com/us/playlist/hits/pl.f4d106fed2bd41149aaacabb233eb5eb", "pl.f4d106fed2bd41149aaacabb233eb5eb", true},
 		{"album URL as collection", "https://music.apple.com/us/album/1989/1440935467", "album:1440935467", true},
@@ -67,10 +67,10 @@ func TestMatchArtistURL(t *testing.T) {
 	m := NewURLMatcher()
 
 	tests := []struct {
-		name    string
-		url     string
-		wantID  string
-		wantOK  bool
+		name   string
+		url    string
+		wantID string
+		wantOK bool
 	}{
 		{"artist URL", "https://music.apple.com/us/artist/yoasobi/1467327778", "1467327778", true},
 		{"song URL (not artist)", "https://music.apple.com/us/song/idol/1480785411", "", false},
@@ -94,10 +94,10 @@ func TestTextMatcher(t *testing.T) {
 	m := NewTextMatcher()
 
 	tests := []struct {
-		name    string
-		text    string
-		wantID  string
-		wantOK  bool
+		name   string
+		text   string
+		wantID string
+		wantOK bool
 	}{
 		{"am prefix", "am:1480785411", "1480785411", true},
 		{"apple prefix", "apple:1480785411", "1480785411", true},
