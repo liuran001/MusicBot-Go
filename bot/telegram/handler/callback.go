@@ -95,6 +95,10 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		h.handleEpisodeCallback(ctx, b, query, args)
 		return
 	}
+	if len(args) >= 3 && args[1] == "ept" {
+		h.handleEpisodeCallback(ctx, b, query, args)
+		return
+	}
 
 	parsed := parseMusicCallbackDataV2(args)
 	if !parsed.ok {
@@ -542,14 +546,26 @@ func buildEpisodeCallbackData(action, platformName, trackID, qualityValue string
 	if len(data) <= 64 {
 		return data
 	}
-	data = fmt.Sprintf("music ep %s %s %s %d %d", action, platformName, trackID, requesterID, page)
-	if len(data) <= 64 {
-		return data
+	// 长 trackID 时直接拼接会超过 Telegram 64 字节回调上限。复用带 TTL 的 payload
+	// store，避免像旧的精简 fallback 那样丢掉 quality 字段导致音质回落（与 inline
+	// 路径的 buildInlineEpisodeCallbackData 对称）。
+	if token := storeInlineCallbackPayload(inlineCallbackPayload{action: action, platformName: platformName, trackID: trackID, qualityValue: qualityValue, requesterID: requesterID, page: page}); token != "" {
+		data = fmt.Sprintf("music ept %s", token)
+		if len(data) <= 64 {
+			return data
+		}
 	}
 	return ""
 }
 
 func parseEpisodeCallbackArgs(args []string) (action, platformName, trackID, qualityValue string, requesterID int64, page int, ok bool) {
+	if len(args) >= 3 && strings.TrimSpace(args[1]) == "ept" {
+		payload, found := getInlineCallbackPayload(strings.TrimSpace(args[2]))
+		if !found {
+			return "", "", "", "", 0, 0, false
+		}
+		return payload.action, payload.platformName, payload.trackID, payload.qualityValue, payload.requesterID, payload.page, true
+	}
 	if len(args) < 7 || strings.TrimSpace(args[1]) != "ep" {
 		return "", "", "", "", 0, 0, false
 	}
@@ -567,6 +583,9 @@ func parseEpisodeCallbackArgs(args []string) (action, platformName, trackID, qua
 		qualityValue = ""
 		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[5]), 10, 64)
 		page, _ = strconv.Atoi(strings.TrimSpace(args[6]))
+	}
+	if qualityValue == "" {
+		qualityValue = "hires"
 	}
 	if page <= 0 {
 		page = 1

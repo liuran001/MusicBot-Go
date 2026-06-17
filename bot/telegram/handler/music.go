@@ -3023,7 +3023,11 @@ func detectExtractedAudioCodec(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command(ffprobePath,
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
 		"-select_streams", "a:0",
 		"-show_entries", "stream=codec_name",
