@@ -50,7 +50,6 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "start"))
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "help"))
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "music"))
-	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "netease"))
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "program"))
 	bh.Handle(r.wrapMessage(r.Search), matchCommandFunc(botName, "search"))
 	bh.Handle(r.wrapMessage(r.Lyric), matchCommandFunc(botName, "lyric"))
@@ -424,7 +423,7 @@ func matchCommandFunc(botName, cmd string) th.Predicate {
 
 func isReservedCommand(command string) bool {
 	switch command {
-	case "start", "help", "music", "netease", "program", "search", "lyric", "recognize", "about", "status", "settings", "rmcache":
+	case "start", "help", "music", "program", "search", "lyric", "recognize", "about", "status", "settings", "rmcache":
 		return true
 	case "reload":
 		return true
