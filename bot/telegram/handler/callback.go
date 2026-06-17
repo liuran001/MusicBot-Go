@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -38,8 +37,6 @@ const episodePageSize = 8
 // 随会话累积而无界增长（与 inlineCallbackPayloads 的 30 分钟 TTL 对齐）。
 var episodeSearchBackStore = newTTLStore[string](30 * time.Minute)
 
-var searchPagePattern = regexp.MustCompile(`第\s*(\d+)\s*/\s*(\d+)\s*页`)
-
 func episodeBackKey(chatID int64, messageID int) string {
 	return fmt.Sprintf("%d:%d", chatID, messageID)
 }
@@ -56,22 +53,6 @@ func setEpisodeSearchBackCallback(chatID int64, messageID int, callbackData stri
 func getEpisodeSearchBackCallback(chatID int64, messageID int) string {
 	value, _ := episodeSearchBackStore.Load(episodeBackKey(chatID, messageID))
 	return value
-}
-
-func extractSearchCurrentPage(text string) (int, bool) {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || !strings.Contains(trimmed, "搜索结果") {
-		return 0, false
-	}
-	matches := searchPagePattern.FindStringSubmatch(trimmed)
-	if len(matches) < 2 {
-		return 0, false
-	}
-	page, err := strconv.Atoi(strings.TrimSpace(matches[1]))
-	if err != nil || page <= 0 {
-		return 0, false
-	}
-	return page, true
 }
 
 func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
@@ -512,10 +493,6 @@ func buildEpisodeHeaderLines(episodes []platform.Episode) []string {
 		lines = append(lines, "")
 	}
 	return lines
-}
-
-func buildEpisodeShowCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {
-	return buildEpisodeCallbackData("s", platformName, trackID, qualityValue, requesterID, page)
 }
 
 func buildEpisodeSelectCallbackData(platformName, trackID, qualityValue string, requesterID int64, page int) string {

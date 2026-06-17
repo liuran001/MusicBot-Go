@@ -2192,20 +2192,6 @@ func shouldThrottleStatusEdit(text string) bool {
 	return true
 }
 
-func upsertStatusMessage(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, msg **telego.Message, chatID int64, threadID int, replyParams *telego.ReplyParameters, text string) {
-	if msg == nil {
-		return
-	}
-	if *msg != nil {
-		*msg = editMessageTextOrSend(ctx, b, rateLimiter, *msg, chatID, text)
-		return
-	}
-	newMsg, err := sendStatusMessage(ctx, b, rateLimiter, chatID, threadID, replyParams, text)
-	if err == nil {
-		*msg = newMsg
-	}
-}
-
 func editMessageTextOrSend(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, msg *telego.Message, chatID int64, text string) *telego.Message {
 	if msg == nil {
 		return nil

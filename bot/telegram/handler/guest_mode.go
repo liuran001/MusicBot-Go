@@ -264,17 +264,3 @@ func isShazamKeyword(text string) bool {
 func isLyricKeyword(text string) bool {
 	return strings.Contains(strings.TrimSpace(text), "歌词")
 }
-
-// trackArtistsLabel builds a comma-separated artist list from a track's artists.
-func trackArtistsLabel(artists []platform.Artist) string {
-	if len(artists) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(artists))
-	for _, a := range artists {
-		if n := strings.TrimSpace(a.Name); n != "" {
-			names = append(names, n)
-		}
-	}
-	return strings.Join(names, ", ")
-}

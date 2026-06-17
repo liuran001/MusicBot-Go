@@ -440,15 +440,6 @@ func qualityIndex(q platform.Quality) int {
 	return len(profiles) - 1
 }
 
-func selectQualityProfile(profiles []qualityProfile, start int, info *qqFileInfo) *qualityProfile {
-	candidates := fallbackQualityProfiles(profiles, start, info)
-	if len(candidates) == 0 {
-		return nil
-	}
-	selected := candidates[0]
-	return &selected
-}
-
 func fallbackQualityProfiles(profiles []qualityProfile, start int, info *qqFileInfo) []qualityProfile {
 	if len(profiles) == 0 {
 		return nil
@@ -761,14 +752,6 @@ func buildArtistURL(artistMid string) string {
 		return ""
 	}
 	return "https://y.qq.com/n/ryqq_v2/singer/" + artistMid
-}
-
-func buildArtistCoverURL(artistMid string) string {
-	artistMid = strings.TrimSpace(artistMid)
-	if artistMid == "" {
-		return ""
-	}
-	return "https://y.gtimg.cn/music/photo_new/T001R300x300M000" + artistMid + ".jpg"
 }
 
 func buildSongCoverURL(songCoverMid string) string {
