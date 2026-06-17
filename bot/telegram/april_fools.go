@@ -14,8 +14,8 @@ import (
 const aprilFoolsTOSMessage = "<i>This message couldn't be displayed on your device because it violates the Telegram Terms of Service.</i>"
 
 var (
-	aprilFoolsTZ                    = time.FixedZone("UTC+8", 8*60*60)
-	aprilFoolsEnabled               atomic.Bool
+	aprilFoolsTZ                   = time.FixedZone("UTC+8", 8*60*60)
+	aprilFoolsEnabled              atomic.Bool
 	aprilFoolsTextPrankProbability atomic.Uint64
 )
 

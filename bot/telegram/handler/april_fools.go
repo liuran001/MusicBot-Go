@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	aprilFoolsTimezone                = time.FixedZone("UTC+8", 8*60*60)
-	aprilFoolsEnabled                 atomic.Bool
+	aprilFoolsTimezone               = time.FixedZone("UTC+8", 8*60*60)
+	aprilFoolsEnabled                atomic.Bool
 	aprilFoolsTrackHijackProbability atomic.Uint64
 )
 
