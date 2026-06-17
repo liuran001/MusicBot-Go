@@ -3,9 +3,6 @@ package kugou
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,16 +121,6 @@ func (c *Client) Concept() *ConceptSessionManager {
 		return nil
 	}
 	return c.concept
-}
-
-func (c *Client) effectiveCookie() string {
-	if c == nil {
-		return ""
-	}
-	if cookie := c.baseCookie(); cookie != "" {
-		return cookie
-	}
-	return c.conceptCookie()
 }
 
 func (c *Client) baseCookie() string {
@@ -722,28 +709,6 @@ type kugouSearchResponse struct {
 			} `json:"trans_param"`
 		} `json:"lists"`
 	} `json:"data"`
-}
-
-type kugouPlayURLResponse struct {
-	Status int      `json:"status"`
-	URL    []string `json:"url"`
-}
-
-type kugouPlayDataResponse struct {
-	Status       int         `json:"status"`
-	ErrCode      int         `json:"err_code"`
-	URL          string      `json:"play_url"`
-	BackupURL    string      `json:"play_backup_url"`
-	Bitrate      interface{} `json:"bitrate"`
-	Timelength   interface{} `json:"timelength"`
-	FileSize     interface{} `json:"filesize"`
-	ExtName      string      `json:"extname"`
-	AudioName    string      `json:"audio_name"`
-	AuthorName   string      `json:"author_name"`
-	Img          string      `json:"img"`
-	AlbumID      string      `json:"album_id"`
-	AlbumAudioID string      `json:"album_audio_id"`
-	Hash         string      `json:"hash"`
 }
 
 type kugouMobilePlayInfoResponse struct {
@@ -2120,101 +2085,6 @@ func extractPlaylistSpecialID(text string) string {
 	return ""
 }
 
-func (c *Client) fetchSignedPlayURL(ctx context.Context, song *model.Song, plan kugouDownloadPlan) (string, error) {
-	if !c.HasVIPDownloadCookie() {
-		return "", fmt.Errorf("kugou v5 url requires cookie t and KugooID")
-	}
-	extra := ensureSongExtra(song)
-	albumID := firstNonEmpty(extra["album_id"], song.AlbumID)
-	albumAudioID := firstNonEmpty(extra["album_audio_id"])
-	if albumID == "" || albumAudioID == "" || plan.Hash == "" {
-		return "", fmt.Errorf("kugou v5 url missing required metadata")
-	}
-	cookie := c.baseCookie()
-	userID := parseCookieValue(cookie, "KugooID")
-	token := parseCookieValue(cookie, "t")
-	params := map[string]string{
-		"album_id":       albumID,
-		"userid":         userID,
-		"area_code":      "1",
-		"hash":           plan.Hash,
-		"mid":            kugouGatewayMid,
-		"appid":          kugouGatewayAppID,
-		"ssa_flag":       "is_fromtrack",
-		"clientver":      kugouPlayClientVer,
-		"token":          token,
-		"album_audio_id": albumAudioID,
-		"behavior":       "play",
-		"clienttime":     strconv.FormatInt(time.Now().Unix(), 10),
-		"pid":            "2",
-		"key":            buildPlayKey(plan.Hash, userID),
-		"quality":        qualityCode(plan.Quality),
-		"version":        kugouPlayClientVer,
-		"dfid":           "-",
-		"pidversion":     "3001",
-	}
-	requestURL := signKugouRequestURL(kugouGatewayPlayURL, params)
-	var resp kugouPlayURLResponse
-	if err := c.doJSONRequest(ctx, http.MethodGet, requestURL, nil, nil, map[string]string{
-		"User-Agent": "Android12-AndroidCar-20089-46-0-NetMusic-wifi",
-		"KG-THash":   "255d751",
-		"KG-Rec":     "1",
-		"KG-RC":      "1",
-		"x-router":   "tracker.kugou.com",
-	}, &resp); err != nil {
-		return "", err
-	}
-	if resp.Status != 1 || len(resp.URL) == 0 {
-		return "", fmt.Errorf("kugou v5 url unavailable, status=%d", resp.Status)
-	}
-	return strings.TrimSpace(resp.URL[len(resp.URL)-1]), nil
-}
-
-func (c *Client) fetchPlayData(ctx context.Context, song *model.Song, plan kugouDownloadPlan) (*kugouPlayDataResponse, error) {
-	extra := ensureSongExtra(song)
-	params := url.Values{}
-	params.Set("r", "play/getdata")
-	params.Set("hash", plan.Hash)
-	params.Set("album_id", firstNonEmpty(extra["album_id"], song.AlbumID))
-	params.Set("mid", kugouGatewayMid)
-	apiURL := kugouPlayDataURL + "?" + params.Encode()
-	var resp kugouPlayDataResponse
-	if err := c.doJSONRequest(ctx, http.MethodGet, apiURL, nil, nil, map[string]string{
-		"User-Agent": "Mozilla/5.0",
-		"Referer":    "https://www.kugou.com/",
-		"Cookie":     c.baseCookie(),
-	}, &resp); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(resp.URL) == "" && strings.TrimSpace(resp.BackupURL) == "" {
-		return nil, fmt.Errorf("kugou play/getdata unavailable, status=%d err=%d", resp.Status, resp.ErrCode)
-	}
-	return &resp, nil
-}
-
-func (c *Client) fetchMobilePlayInfo(ctx context.Context, song *model.Song, plan kugouDownloadPlan) (*kugouMobilePlayInfoResponse, error) {
-	extra := ensureSongExtra(song)
-	params := url.Values{}
-	params.Set("cmd", "playInfo")
-	params.Set("hash", plan.Hash)
-	if albumID := firstNonEmpty(extra["album_id"], song.AlbumID); albumID != "" {
-		params.Set("album_id", albumID)
-	}
-	apiURL := "https://m.kugou.com/app/i/getSongInfo.php?" + params.Encode()
-	var resp kugouMobilePlayInfoResponse
-	if err := c.doJSONRequest(ctx, http.MethodGet, apiURL, nil, nil, map[string]string{
-		"User-Agent": "Mozilla/5.0",
-		"Referer":    "https://www.kugou.com/",
-		"Cookie":     c.baseCookie(),
-	}, &resp); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(resp.URL) == "" && !mobilePlayInfoRequiresAuth(&resp) {
-		return nil, fmt.Errorf("kugou mobile playInfo unavailable, status=%d err=%d", resp.Status, resp.ErrCode)
-	}
-	return &resp, nil
-}
-
 func (c *Client) doJSONRequest(ctx context.Context, method, rawURL string, query url.Values, body io.Reader, headers map[string]string, out any) error {
 	if len(query) > 0 {
 		if strings.Contains(rawURL, "?") {
@@ -2379,45 +2249,6 @@ func applyPlanMetadata(song *model.Song, plan kugouDownloadPlan) {
 	}
 }
 
-func applyResolvedSongMetadata(song *model.Song, info *kugouPlayDataResponse, plan kugouDownloadPlan) {
-	if song == nil || info == nil {
-		return
-	}
-	song.URL = firstNonEmpty(info.URL, info.BackupURL)
-	if fileSize := parseKugouInt64(info.FileSize); fileSize > 0 {
-		song.Size = fileSize
-	}
-	if bitrate := parseKugouInt(info.Bitrate); bitrate > 0 {
-		song.Bitrate = bitrate
-	}
-	if strings.TrimSpace(info.ExtName) != "" {
-		song.Ext = strings.TrimSpace(info.ExtName)
-	} else {
-		applyPlanMetadata(song, plan)
-	}
-	if strings.TrimSpace(info.AudioName) != "" {
-		song.Name = strings.TrimSpace(info.AudioName)
-	}
-	if strings.TrimSpace(info.AuthorName) != "" {
-		song.Artist = strings.TrimSpace(info.AuthorName)
-	}
-	if strings.TrimSpace(info.AlbumID) != "" {
-		song.AlbumID = strings.TrimSpace(info.AlbumID)
-	}
-	if cover := normalizeSizedCover(info.Img); cover != "" {
-		song.Cover = cover
-	}
-	extra := ensureSongExtra(song)
-	extra["play_url"] = song.URL
-	if strings.TrimSpace(info.BackupURL) != "" {
-		extra["play_backup_url"] = strings.TrimSpace(info.BackupURL)
-	}
-	if strings.TrimSpace(info.AlbumAudioID) != "" {
-		extra["album_audio_id"] = strings.TrimSpace(info.AlbumAudioID)
-	}
-	extra["resolved_quality"] = plan.Quality.String()
-}
-
 func applyMobilePlayInfoMetadata(song *model.Song, info *kugouMobilePlayInfoResponse, plan kugouDownloadPlan) {
 	if song == nil || info == nil {
 		return
@@ -2560,50 +2391,6 @@ func conceptSongURLNewAuthError(resp *conceptSongURLNewResponse) error {
 		return platform.NewAuthRequiredError("kugou")
 	}
 	return nil
-}
-
-func signKugouRequestURL(baseURL string, params map[string]string) string {
-	keys := make([]string, 0, len(params))
-	for key := range params {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	var sigBuilder strings.Builder
-	var queryBuilder strings.Builder
-	for i, key := range keys {
-		value := params[key]
-		sigBuilder.WriteString(key)
-		sigBuilder.WriteByte('=')
-		sigBuilder.WriteString(value)
-		if i > 0 {
-			queryBuilder.WriteByte('&')
-		}
-		queryBuilder.WriteString(url.QueryEscape(key))
-		queryBuilder.WriteByte('=')
-		queryBuilder.WriteString(url.QueryEscape(value))
-	}
-	sum := md5.Sum([]byte(kugouPlaySignKey + sigBuilder.String() + kugouPlaySignKey))
-	queryBuilder.WriteString("&signature=")
-	queryBuilder.WriteString(hex.EncodeToString(sum[:]))
-	return baseURL + "?" + queryBuilder.String()
-}
-
-func buildPlayKey(hash, userID string) string {
-	sum := md5.Sum([]byte(strings.ToLower(strings.TrimSpace(hash)) + kugouPlayPidVerSec + kugouGatewayAppID + kugouGatewayMid + strings.TrimSpace(userID)))
-	return hex.EncodeToString(sum[:])
-}
-
-func qualityCode(q platform.Quality) string {
-	switch q {
-	case platform.QualityHiRes:
-		return "high"
-	case platform.QualityLossless:
-		return "flac"
-	case platform.QualityHigh:
-		return "320"
-	default:
-		return "128"
-	}
 }
 
 func normalizeGatewayDuration(value int) int {
@@ -2757,15 +2544,4 @@ func parseCookieValue(cookie, key string) string {
 		}
 	}
 	return ""
-}
-
-func randomHex(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return strings.Repeat("0", n*2)
-	}
-	return hex.EncodeToString(b)
 }

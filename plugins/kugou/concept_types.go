@@ -89,14 +89,6 @@ type conceptQRCheckData struct {
 	Nickname conceptJSONText `json:"nickname,omitempty"`
 }
 
-type conceptLoginTokenData struct {
-	Token    string `json:"token,omitempty"`
-	UserID   string `json:"userid,omitempty"`
-	T1       string `json:"t1,omitempty"`
-	VIPType  any    `json:"vip_type,omitempty"`
-	VIPToken string `json:"vip_token,omitempty"`
-}
-
 type conceptSongURLResponse struct {
 	Status     int            `json:"status"`
 	ErrCode    int            `json:"errcode,omitempty"`
@@ -124,9 +116,5 @@ type conceptUserDetailData struct {
 }
 
 type conceptVIPDetailData struct {
-	Raw map[string]any `json:"raw,omitempty"`
-}
-
-type conceptUnionVIPData struct {
 	Raw map[string]any `json:"raw,omitempty"`
 }

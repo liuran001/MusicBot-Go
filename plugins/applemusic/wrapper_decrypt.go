@@ -27,12 +27,6 @@ import (
 
 const prefetchKeyURI = "skd://itunes.apple.com/P000000000/s1/e1"
 
-// wrapperConn abstracts the bidirectional wrapper connection so the pipeline
-// can be unit-tested against an in-memory fake.
-type wrapperConn interface {
-	io.ReadWriter
-}
-
 // sendString writes a length-prefixed string: [1 byte len][bytes].
 func sendString(w io.Writer, s string) error {
 	if len(s) > 255 {

@@ -583,14 +583,6 @@ func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
 	return builder.String()
 }
 
-func buildMusicInfoTextf(songName, songAlbum, fileInfo, suffixFmt string, args ...interface{}) string {
-	suffix := suffixFmt
-	if len(args) > 0 {
-		suffix = fmt.Sprintf(suffixFmt, args...)
-	}
-	return buildMusicInfoText(songName, songAlbum, fileInfo, suffix)
-}
-
 func userVisibleDownloadError(err error) string {
 	if err != nil {
 		errText := fmt.Sprintf("%v", err)
@@ -1101,8 +1093,6 @@ var inlineResultPayloads = newTTLStore[inlineResultPayload](30 * time.Minute)
 var inlineCallbackTokenCounter uint64
 var inlineResultTokenCounter uint64
 
-const inlineCallbackPayloadTTL = 30 * time.Minute
-
 func withInlineMessageLock(inlineMessageID string, fn func()) {
 	if fn == nil {
 		return
@@ -1225,23 +1215,6 @@ func getInlineResultPayload(token string) (inlineResultPayload, bool) {
 	return inlineResultPayloads.Load(token)
 }
 
-func buildInlineMusicCommand(platformName, trackID, qualityValue string) string {
-	trackID = strings.TrimSpace(trackID)
-	platformName = strings.TrimSpace(platformName)
-	qualityValue = strings.TrimSpace(qualityValue)
-	parts := []string{"/music"}
-	if trackID != "" {
-		parts = append(parts, trackID)
-	}
-	if platformName != "" {
-		parts = append(parts, platformName)
-	}
-	if qualityValue != "" {
-		parts = append(parts, qualityValue)
-	}
-	return strings.Join(parts, " ")
-}
-
 func isAutoLinkDetectEnabled(ctx context.Context, repo botpkg.SongRepository, message *telego.Message) bool {
 	if message == nil {
 		return true
@@ -1267,40 +1240,6 @@ func isAutoLinkDetectEnabled(ctx context.Context, repo botpkg.SongRepository, me
 		return true
 	}
 	return settings.AutoLinkDetect
-}
-
-func buildInlineStartParameter(platformName, trackID, qualityValue string) string {
-	if !isInlineStartToken(platformName) || !isInlineStartToken(trackID) {
-		return ""
-	}
-	qualityValue = strings.TrimSpace(qualityValue)
-	if qualityValue == "" {
-		qualityValue = "hires"
-	}
-	if !isInlineStartToken(qualityValue) {
-		return ""
-	}
-	param := fmt.Sprintf("cache_%s_%s_%s", platformName, trackID, qualityValue)
-	if len(param) > 64 {
-		return ""
-	}
-	return param
-}
-
-func buildInlineKeywordStartParameter(keyword string) string {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
-		return ""
-	}
-	encoded := base64.RawURLEncoding.EncodeToString([]byte(keyword))
-	if encoded == "" {
-		return ""
-	}
-	param := "search_" + encoded
-	if len(param) > 64 {
-		return ""
-	}
-	return param
 }
 
 func buildInlinePendingResultID(platformName, trackID, qualityValue string) string {

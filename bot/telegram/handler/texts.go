@@ -27,11 +27,8 @@ var (
 编译环境：%s
 编译日期：%s
 运行环境：%s`
-	uploadFailed      = "下载或发送失败\n%v"
 	hitCache          = "已命中缓存，正在发送…"
 	inputIDorKeyword  = "请发送歌曲 ID 或关键词，或使用 /rmcache all 清空全部缓存"
-	tapToDownload     = "点我缓存歌曲"
-	inlineCacheHint   = "结果不对？点上方缓存试试"
 	inlineTapToSend   = "没反应？点此刷新"
 	sendMeTo          = "发送到聊天…"
 	waitForDown       = "等待下载…"

@@ -691,18 +691,6 @@ func (c *Client) FetchDownloadInfo(ctx context.Context, trackID string, quality 
 	}, nil
 }
 
-func forceSodaPlayerInfoLossless(rawURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return rawURL
-	}
-	query := parsed.Query()
-	query.Set("format_type", "8")
-	query.Set("codec_type", "5")
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
-}
-
 func (c *Client) fetchPlayInfosBySignedURL(ctx context.Context, playerInfoURL string) ([]sodaPlayInfo, error) {
 	parsed, err := url.Parse(strings.TrimSpace(playerInfoURL))
 	if err != nil {
@@ -737,14 +725,6 @@ func (c *Client) fetchPlayInfosBySignedURL(ctx context.Context, playerInfoURL st
 		return nil, platform.NewUnavailableError("soda", "track", "")
 	}
 	return list, nil
-}
-
-func (c *Client) bestTrackURL(ctx context.Context, playerInfoURL string) string {
-	playInfos, err := c.fetchPlayInfos(ctx, playerInfoURL)
-	if err != nil || len(playInfos) == 0 {
-		return ""
-	}
-	return firstNonEmptyString(playInfos[0].MainPlayURL, playInfos[0].BackupPlayURL)
 }
 
 func (c *Client) downloadAndDecryptOnce(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, progress func(written, total int64)) (int64, error) {

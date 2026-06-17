@@ -235,12 +235,3 @@ func formatSplTimestamp(ms int, word bool) string {
 	}
 	return fmt.Sprintf("[%02d:%02d.%02d]", min, sec, cs)
 }
-
-// isTruthy reports whether v is a truthy flag string.
-func isTruthy(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
