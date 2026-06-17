@@ -29,6 +29,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     GOSUMDB=${GOSUMDB}
 
 COPY go.mod go.sum ./
+COPY plugins/netease/recognize/embindlib/go.mod plugins/netease/recognize/embindlib/go.sum ./plugins/netease/recognize/embindlib/
 RUN go mod download
 
 COPY . .
