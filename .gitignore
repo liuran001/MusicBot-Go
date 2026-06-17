@@ -58,3 +58,6 @@ widevine/
 # sisyphus sessions
 .sisyphus/
 musicbot-rebuild
+
+# runtime download artifacts
+downloaded_files/
