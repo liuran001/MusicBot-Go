@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -182,5 +183,70 @@ func TestRenderGuestSearchPage_SelectButtonsUseInlineFlow(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected a result button with 'music i' inline-send callback")
+	}
+}
+
+// guestSearchStore() 的懒初始化必须在并发下只建一个 store（#23）。多个 goroutine
+// 同时首次访问时，sync.Once 保证返回同一指针，不会互相覆盖丢状态。在 -race 下
+// 还会检测对 h.search 字段的并发读写。
+func TestGuestSearchStore_ConcurrentLazyInitSingleton(t *testing.T) {
+	h := &GuestModeHandler{}
+	const goroutines = 64
+	var wg sync.WaitGroup
+	stores := make([]*guestSearchStore, goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			stores[idx] = h.guestSearchStore()
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	first := stores[0]
+	if first == nil {
+		t.Fatal("store is nil")
+	}
+	for i, s := range stores {
+		if s != first {
+			t.Fatalf("goroutine %d got a different store pointer %p, want %p", i, s, first)
+		}
+	}
+}
+
+// guest 搜索 token 在并发存入时必须唯一（#25）。纯 UnixNano 会在同一纳秒碰撞、
+// 后者覆盖前者；追加 atomic 计数器后每次调用都得到不同 token，所有 state 都可取回。
+func TestGuestSearchStore_ConcurrentStoreTokensUnique(t *testing.T) {
+	store := newGuestSearchStore()
+	const goroutines = 128
+	var wg sync.WaitGroup
+	tokens := make([]string, goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			tokens[idx] = store.store(&searchState{keyword: "k"})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	seen := make(map[string]struct{}, goroutines)
+	for i, tok := range tokens {
+		if tok == "" {
+			t.Fatalf("goroutine %d got empty token", i)
+		}
+		if _, dup := seen[tok]; dup {
+			t.Fatalf("duplicate token %q from goroutine %d", tok, i)
+		}
+		seen[tok] = struct{}{}
+	}
+	if len(seen) != goroutines {
+		t.Fatalf("got %d unique tokens, want %d", len(seen), goroutines)
 	}
 }
