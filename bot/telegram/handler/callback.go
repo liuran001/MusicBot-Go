@@ -28,6 +28,7 @@ type parsedMusicCallback struct {
 	qualityOverride string
 	requesterID     int64
 	ok              bool
+	tokenExpired    bool
 }
 
 const episodePageSize = 8
@@ -97,6 +98,12 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 
 	parsed := parseMusicCallbackDataV2(args)
 	if !parsed.ok {
+		return
+	}
+	if parsed.tokenExpired {
+		if query.Message != nil {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "操作已过期，请重新搜索", ShowAlert: true})
+		}
 		return
 	}
 
@@ -946,6 +953,20 @@ func isRequesterOrAdmin(ctx context.Context, b *telego.Bot, chatID int64, userID
 func parseMusicCallbackDataV2(args []string) parsedMusicCallback {
 	if len(args) < 2 {
 		return parsedMusicCallback{}
+	}
+	// "music mt <token>"：长/含空格 trackID 走 TTL payload store（与 inline "it" 对称）。
+	if len(args) >= 3 && strings.TrimSpace(args[1]) == "mt" {
+		payload, found := getInlineCallbackPayload(strings.TrimSpace(args[2]))
+		if !found {
+			return parsedMusicCallback{ok: true, tokenExpired: true}
+		}
+		return parsedMusicCallback{
+			platformName:    payload.platformName,
+			trackID:         payload.trackID,
+			qualityOverride: payload.qualityValue,
+			requesterID:     payload.requesterID,
+			ok:              true,
+		}
 	}
 	parsed := parsedMusicCallback{ok: true}
 	switch len(args) {

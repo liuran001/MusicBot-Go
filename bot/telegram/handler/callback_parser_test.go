@@ -137,3 +137,70 @@ func TestParseEpisodeCallbackArgs_LegacyFallbackDefaultsQuality(t *testing.T) {
 		t.Fatalf("qualityValue = %q, want hires (default)", qualityValue)
 	}
 }
+
+// 短且安全的 trackID 走普通 "music ..." 拼接，解析回原值。
+func TestBuildMusicSendCallbackData_ShortPlainRoundTrip(t *testing.T) {
+	data := buildMusicSendCallbackData("netease", "12345", "hires", 6789)
+	if !strings.HasPrefix(data, "music ") || strings.HasPrefix(data, "music mt ") {
+		t.Fatalf("safe short trackID should use plain format, got %q", data)
+	}
+	parsed := parseMusicCallbackDataV2(strings.Fields(data))
+	if !parsed.ok || parsed.tokenExpired {
+		t.Fatalf("parse failed: %+v", parsed)
+	}
+	if parsed.platformName != "netease" || parsed.trackID != "12345" || parsed.qualityOverride != "hires" || parsed.requesterID != 6789 {
+		t.Fatalf("parsed = %+v, want netease/12345/hires/6789", parsed)
+	}
+}
+
+// 含空格的 trackID 不能直接拼接(会被 strings.Split 错位),必须走 token store
+// 完整保留所有字段。这是 #24 的核心:原裸 fmt.Sprintf 会让 requesterID 错位、
+// 鉴权失效并丢 quality。
+func TestBuildMusicSendCallbackData_SpaceInTrackIDUsesToken(t *testing.T) {
+	trackID := "abc 123 def"
+	data := buildMusicSendCallbackData("qqmusic", trackID, "lossless", 4242)
+	if !strings.HasPrefix(data, "music mt ") {
+		t.Fatalf("trackID with spaces should fall back to token form, got %q", data)
+	}
+	parsed := parseMusicCallbackDataV2(strings.Fields(data))
+	if !parsed.ok || parsed.tokenExpired {
+		t.Fatalf("parse failed: %+v", parsed)
+	}
+	if parsed.platformName != "qqmusic" || parsed.trackID != trackID || parsed.qualityOverride != "lossless" || parsed.requesterID != 4242 {
+		t.Fatalf("parsed = %+v, want qqmusic/%q/lossless/4242", parsed, trackID)
+	}
+}
+
+// 超长 trackID 直接拼接会超过 Telegram 64 字节上限,必须走 token store 且不超限。
+func TestBuildMusicSendCallbackData_LongTrackIDUsesToken(t *testing.T) {
+	trackID := strings.Repeat("a", 80)
+	data := buildMusicSendCallbackData("bilibili", trackID, "hires", 7777)
+	if len(data) > 64 {
+		t.Fatalf("callback data %q exceeds 64-byte limit (%d)", data, len(data))
+	}
+	if !strings.HasPrefix(data, "music mt ") {
+		t.Fatalf("long trackID should fall back to token form, got %q", data)
+	}
+	parsed := parseMusicCallbackDataV2(strings.Fields(data))
+	if !parsed.ok || parsed.trackID != trackID || parsed.requesterID != 7777 {
+		t.Fatalf("parsed = %+v, want trackID len 80 / requester 7777", parsed)
+	}
+}
+
+// 过期/未知 token 应被标记 tokenExpired,而不是当成普通参数误解析。
+func TestParseMusicCallbackDataV2_ExpiredToken(t *testing.T) {
+	parsed := parseMusicCallbackDataV2([]string{"music", "mt", "nonexistent-token"})
+	if !parsed.ok || !parsed.tokenExpired {
+		t.Fatalf("expected tokenExpired=true, got %+v", parsed)
+	}
+}
+
+// 缺字段时返回空串,调用方据此跳过该按钮。
+func TestBuildMusicSendCallbackData_MissingFieldsEmpty(t *testing.T) {
+	if data := buildMusicSendCallbackData("", "123", "hires", 1); data != "" {
+		t.Fatalf("empty platform should yield empty data, got %q", data)
+	}
+	if data := buildMusicSendCallbackData("netease", "", "hires", 1); data != "" {
+		t.Fatalf("empty trackID should yield empty data, got %q", data)
+	}
+}
