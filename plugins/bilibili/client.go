@@ -37,7 +37,14 @@ type bilibiliAutoRenewConfig struct {
 	enabled  bool
 	interval time.Duration
 	started  bool
+	// cancel 停止当前运行的自动续期守护协程；nil 表示未运行。
+	// 受 cookieMutex 保护。
+	cancel context.CancelFunc
 }
+
+// autoRenewImmediateTimeout 限定后台「立即检查一次」续期请求的最长耗时，
+// 避免底层 HTTP（retryablehttp 默认无 client 级超时）卡死时 goroutine 永久泄漏。
+const autoRenewImmediateTimeout = 60 * time.Second
 
 // AudioSongInfoRequestParams for requesting Audio song info
 type AudioSongInfoRequestParams struct {

@@ -64,28 +64,44 @@ type CookieRefreshConfirm struct {
 }
 
 // StartAutoRefreshDaemon runs a background loop to automatically refresh the bilibili cookie.
+//
+// 守护协程使用从传入 ctx 派生的可取消子 ctx，cancel 函数存入 c.autoRenew.cancel，
+// 以便进程关闭（Close）或运行时关闭自动续期（SetAutoRenew(false)）时能真正停止它，
+// 不再像旧实现那样用 context.Background() 启动而无法回收。
 func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 	if c == nil {
 		return
 	}
-	if c.cookie == "" {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	c.cookieMutex.RLock()
+	cookie := c.cookie
+	enabled := c.autoRenew.enabled
+	interval := c.autoRenew.interval
+	c.cookieMutex.RUnlock()
+
+	if cookie == "" {
 		return
 	}
-	if !c.autoRenew.enabled {
+	if !enabled {
 		if c.logger != nil {
 			c.logger.Debug("bilibili: auto refresh disabled by config")
 		}
 		return
 	}
+
 	c.cookieMutex.Lock()
 	if c.autoRenew.started {
 		c.cookieMutex.Unlock()
 		return
 	}
 	c.autoRenew.started = true
+	daemonCtx, cancel := context.WithCancel(ctx)
+	c.autoRenew.cancel = cancel
 	c.cookieMutex.Unlock()
 
-	interval := c.autoRenew.interval
 	if interval <= 0 {
 		interval = 6 * time.Hour
 	}
@@ -94,10 +110,10 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-daemonCtx.Done():
 				return
 			case <-ticker.C:
-				err := c.CheckAndRefreshCookie(ctx)
+				err := c.CheckAndRefreshCookie(daemonCtx)
 				if err != nil && c.logger != nil {
 					c.logger.Error("bilibili: auto refresh cookie failed", "err", err)
 				}
@@ -107,22 +123,47 @@ func (c *Client) StartAutoRefreshDaemon(ctx context.Context) {
 
 	// Also trigger one check immediately
 	go func() {
-		err := c.CheckAndRefreshCookie(ctx)
+		err := c.CheckAndRefreshCookie(daemonCtx)
 		if err != nil && c.logger != nil {
 			c.logger.Error("bilibili: initial check cookie failed", "err", err)
 		}
 	}()
 }
 
+// StopAutoRefreshDaemon 取消当前运行的守护协程并重置 started 标志，
+// 使后续 StartAutoRefreshDaemon 能重新启动。可重复调用，幂等。
+func (c *Client) StopAutoRefreshDaemon() {
+	if c == nil {
+		return
+	}
+	c.cookieMutex.Lock()
+	cancel := c.autoRenew.cancel
+	c.autoRenew.cancel = nil
+	c.autoRenew.started = false
+	c.cookieMutex.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// Close 实现 io.Closer，供应用关闭或 /reload 丢弃旧实例时停止后台续期协程。
+func (c *Client) Close() error {
+	c.StopAutoRefreshDaemon()
+	return nil
+}
+
 func (c *Client) AutoRenewStatus() platform.AutoRenewStatus {
 	if c == nil {
 		return platform.AutoRenewStatus{}
 	}
+	c.cookieMutex.RLock()
+	enabled := c.autoRenew.enabled
 	interval := c.autoRenew.interval
+	c.cookieMutex.RUnlock()
 	if interval <= 0 {
 		interval = 6 * time.Hour
 	}
-	return platform.AutoRenewStatus{Enabled: c.autoRenew.enabled, Interval: interval}
+	return platform.AutoRenewStatus{Enabled: enabled, Interval: interval}
 }
 
 func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.AutoRenewStatus, error) {
@@ -132,8 +173,10 @@ func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.Au
 	if interval <= 0 {
 		interval = 6 * time.Hour
 	}
+	c.cookieMutex.Lock()
 	c.autoRenew.enabled = enabled
 	c.autoRenew.interval = interval
+	c.cookieMutex.Unlock()
 	if c.persistFunc != nil {
 		if err := c.persistFunc(map[string]string{
 			"auto_renew_enabled":      boolStringBilibili(enabled),
@@ -145,10 +188,15 @@ func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.Au
 	if enabled {
 		c.StartAutoRefreshDaemon(context.Background())
 		go func() {
-			if err := c.CheckAndRefreshCookie(context.Background()); err != nil && c.logger != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), autoRenewImmediateTimeout)
+			defer cancel()
+			if err := c.CheckAndRefreshCookie(ctx); err != nil && c.logger != nil {
 				c.logger.Debug("bilibili: immediate auto refresh check failed", "err", err)
 			}
 		}()
+	} else {
+		// 关闭自动续期时停止守护协程，避免泄漏。
+		c.StopAutoRefreshDaemon()
 	}
 	return c.AutoRenewStatus(), nil
 }
