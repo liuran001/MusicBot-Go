@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -23,6 +24,10 @@ type guestSearchStore struct {
 	data map[string]*searchState
 }
 
+// guestSearchTokenCounter 与 UnixNano 拼接，保证 guest 搜索 token 在同一纳秒的
+// 并发调用下仍唯一。
+var guestSearchTokenCounter uint64
+
 func newGuestSearchStore() *guestSearchStore {
 	return &guestSearchStore{data: make(map[string]*searchState)}
 }
@@ -37,7 +42,10 @@ func (s *guestSearchStore) store(state *searchState) string {
 		s.data = make(map[string]*searchState)
 	}
 	s.cleanupLocked()
-	token := strconv.FormatInt(time.Now().UnixNano(), 36)
+	// 纯 UnixNano 在同一纳秒两次调用会碰撞、后者覆盖前者。追加 atomic 计数器
+	// 保证唯一（对齐 guest_mode.go 的 nextGuestResultID 与 helpers.go 的
+	// inlineCallbackTokenCounter）。
+	token := strconv.FormatInt(time.Now().UnixNano(), 36) + strconv.FormatUint(atomic.AddUint64(&guestSearchTokenCounter, 1), 36)
 	state.updatedAt = time.Now()
 	s.data[token] = state
 	return token
@@ -104,9 +112,11 @@ func (s *guestSearchStore) cleanupLocked() {
 }
 
 func (h *GuestModeHandler) guestSearchStore() *guestSearchStore {
-	if h.search == nil {
-		h.search = newGuestSearchStore()
-	}
+	h.searchOnce.Do(func() {
+		if h.search == nil {
+			h.search = newGuestSearchStore()
+		}
+	})
 	return h.search
 }
 

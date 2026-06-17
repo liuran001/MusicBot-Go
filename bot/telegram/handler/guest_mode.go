@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unicode/utf16"
 
@@ -42,6 +43,9 @@ type GuestModeHandler struct {
 	DefaultQuality   string
 
 	search *guestSearchStore
+	// searchOnce 保证 search store 懒初始化在并发回调下只发生一次，避免多个
+	// goroutine 各建一个 store 互相覆盖（丢状态 + 指针 race）。
+	searchOnce sync.Once
 }
 
 func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {

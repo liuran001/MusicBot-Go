@@ -237,6 +237,17 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		})
 		return
 	}
+	// 歌单翻页回调会读写共享的 *playlistState（currentPage，以及 lazy 路径下
+	// getCachedPage→refreshChunkAtOffset 改写 playlist.Tracks/cacheOffset）。
+	// 与 search/episode/inline 回调对齐，用 in-flight 守护序列化同一消息的并发
+	// 回调，避免快速连点导致 data race 与页码错乱。
+	plGuardKey := fmt.Sprintf("playlist:%d:%d", msg.Chat.ID, msg.MessageID)
+	releasePlGuard, acquired := tryAcquireCallbackInFlight(plGuardKey, 8*time.Second)
+	if !acquired {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		return
+	}
+	defer releasePlGuard()
 	collectionType := detectCollectionType(state.collection, state.playlist.URL)
 	collectionLabel := collectionTypeLabel(collectionType)
 	if action == "close" {
