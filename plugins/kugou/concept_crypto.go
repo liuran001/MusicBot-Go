@@ -121,6 +121,9 @@ func conceptRSAPKCS1v15EncryptHex(payload any, publicKeyPEM string) (string, err
 		return "", err
 	}
 	plain := normalizeConceptPayload(payload)
+	// Kugou's concept API server mandates PKCS#1 v1.5 RSA encryption; OAEP is not
+	// accepted by the endpoint, so we cannot migrate off the deprecated primitive.
+	//lint:ignore SA1019 server requires PKCS1v15; OAEP is rejected by the endpoint
 	encrypted, err := rsa.EncryptPKCS1v15(rand.Reader, pub, plain)
 	if err != nil {
 		return "", err
