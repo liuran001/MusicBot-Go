@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -47,7 +48,7 @@ func (r *Registry) Register(p Platform) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.platforms[name]; exists {
-		return errors.New("platform already registered: " + name)
+		return fmt.Errorf("platform already registered: %s", name)
 	}
 
 	r.platforms[name] = p
