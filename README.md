@@ -23,7 +23,7 @@
 
 镜像由 CI 自动构建并推送到 GHCR，两个版本：
 
-- `ghcr.io/liuran001/musicbot-go:latest` —— **完整版**，含 ffmpeg + Node.js，支持 `/recognize` 听歌识曲。
+- `ghcr.io/liuran001/musicbot-go:latest` —— **完整版**，含 ffmpeg，支持 `/recognize` 听歌识曲。
 - `ghcr.io/liuran001/musicbot-go:lite` —— **精简版**，不含识曲依赖，体积更小。
 
 所有运行数据（配置、数据库、缓存、脚本）放在一个挂载目录里：
@@ -49,7 +49,7 @@ docker compose up -d --build
 
 ### 裸机运行
 
-需要 Go 1.26+；用 `/recognize` 还需 ffmpeg 与 Node.js。
+需要 Go 1.26+；用 `/recognize` 还需 ffmpeg（识曲指纹编码已用纯 Go 实现，无需 Node.js）。
 
 ```bash
 go build -o MusicBot-Go

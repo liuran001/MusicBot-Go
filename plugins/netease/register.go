@@ -60,6 +60,9 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	}
 
 	if cfg.GetBool("EnableRecognize") {
+		// RecognizePort is retained for config compatibility but no longer used:
+		// recognition now runs in-process (ffmpeg + afp.wasm via wazero) instead
+		// of a Node.js HTTP sidecar, so no port is needed.
 		recognizeService := NewRecognizeService(cfg.GetInt("RecognizePort"))
 		contrib.Recognizer = NewRecognizer(recognizeService)
 	}
