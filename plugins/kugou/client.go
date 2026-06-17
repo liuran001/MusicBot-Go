@@ -51,12 +51,13 @@ const (
 )
 
 type Client struct {
-	api              *kugoulib.Kugou
-	cookie           string
-	logger           bot.Logger
-	concept          *ConceptSessionManager
-	apiHTTPClient    *http.Client
-	searchHTTPClient *http.Client
+	api               *kugoulib.Kugou
+	cookie            string
+	logger            bot.Logger
+	concept           *ConceptSessionManager
+	apiHTTPClient     *http.Client
+	searchHTTPClient  *http.Client
+	defaultHTTPClient *http.Client
 }
 
 func (c *Client) HasCookie() bool {
@@ -74,9 +75,10 @@ func (c *Client) HasVIPDownloadCookie() bool {
 func NewClient(cookie string, logger bot.Logger) *Client {
 	trimmed := strings.TrimSpace(cookie)
 	return &Client{
-		api:    kugoulib.New(trimmed),
-		cookie: trimmed,
-		logger: logger,
+		api:               kugoulib.New(trimmed),
+		cookie:            trimmed,
+		logger:            logger,
+		defaultHTTPClient: &http.Client{Timeout: 8 * time.Second},
 	}
 }
 
@@ -2258,6 +2260,9 @@ func (c *Client) apiRequestHTTPClient(rawURL string) *http.Client {
 func (c *Client) htmlHTTPClient() *http.Client {
 	if c != nil && c.apiHTTPClient != nil {
 		return c.apiHTTPClient
+	}
+	if c != nil && c.defaultHTTPClient != nil {
+		return c.defaultHTTPClient
 	}
 	return &http.Client{Timeout: 8 * time.Second}
 }
