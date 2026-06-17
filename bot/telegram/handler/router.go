@@ -91,42 +91,6 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		})
 	}
 
-	bh.Handle(r.wrapMessage(r.Music), func(ctx context.Context, update telego.Update) bool {
-		if update.Message == nil || update.Message.Text == "" {
-			return false
-		}
-		if update.Message.Chat.Type == "private" && update.Message.Voice != nil {
-			return false
-		}
-		text := strings.TrimSpace(update.Message.Text)
-		if !strings.HasPrefix(text, "/") {
-			return false
-		}
-		parts := strings.SplitN(text, " ", 2)
-		command := strings.TrimPrefix(parts[0], "/")
-		if command == "" {
-			return false
-		}
-		if strings.Contains(command, "@") {
-			seg := strings.SplitN(command, "@", 2)
-			command = seg[0]
-			if len(seg) > 1 && seg[1] != "" && botName != "" && seg[1] != botName {
-				return false
-			}
-		}
-
-		if isReservedCommand(command) || isAdminCommand(command, r.AdminCommands) {
-			return false
-		}
-		if r.PlatformManager == nil {
-			return false
-		}
-		if platformName, ok := r.PlatformManager.ResolveAlias(command); ok {
-			return r.PlatformManager.Get(platformName) != nil
-		}
-		return false
-	})
-
 	if r.Recognize != nil {
 		bh.Handle(r.wrapMessage(r.Recognize), func(ctx context.Context, update telego.Update) bool {
 			if update.Message == nil || update.Message.Voice == nil {
@@ -419,29 +383,6 @@ func matchCommandFunc(botName, cmd string) th.Predicate {
 		}
 		return command == cmd
 	}
-}
-
-func isReservedCommand(command string) bool {
-	switch command {
-	case "start", "help", "music", "program", "search", "lyric", "recognize", "about", "status", "settings", "rmcache":
-		return true
-	case "reload":
-		return true
-	default:
-		return false
-	}
-}
-
-func isAdminCommand(command string, commands []string) bool {
-	if strings.TrimSpace(command) == "" {
-		return false
-	}
-	for _, cmd := range commands {
-		if strings.TrimSpace(cmd) == command {
-			return true
-		}
-	}
-	return false
 }
 
 func hasSearchPlatformSuffix(text string, manager platform.Manager) bool {
