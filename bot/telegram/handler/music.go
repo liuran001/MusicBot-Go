@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -2882,7 +2883,7 @@ func isValidFLACFile(filePath string) bool {
 	defer file.Close()
 
 	header := make([]byte, 4)
-	if _, err := file.Read(header); err != nil {
+	if _, err := io.ReadFull(file, header); err != nil {
 		return false
 	}
 
