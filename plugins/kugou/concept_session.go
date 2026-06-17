@@ -25,7 +25,14 @@ type ConceptSessionManager struct {
 	state       conceptSession
 	pollCancel  context.CancelFunc
 	pollSeq     uint64
+	// daemonCancel 停止后台自动续期守护协程；nil 表示未运行。受 mu 保护。
+	daemonCancel  context.CancelFunc
+	daemonStarted bool
 }
+
+// conceptAutoRefreshTimeout 限定单次后台续期请求的最长耗时，
+// 避免底层 HTTP 卡死时守护协程或立即续期协程长时间挂起。
+const conceptAutoRefreshTimeout = 60 * time.Second
 
 func NewConceptSessionManager(logger interface {
 	Info(string, ...interface{})
@@ -376,9 +383,13 @@ func (m *ConceptSessionManager) SetAutoRefresh(enabled bool, interval time.Durat
 		return platform.AutoRenewStatus{}, err
 	}
 	if enabled {
-		go func() {
-			_, _ = m.ManualRenew(context.Background())
-		}()
+		// 确保守护协程已启动（首次开启或 reload 后），并立即用带超时的 ctx 续期一次，
+		// 不再裸用 context.Background()，避免底层 HTTP 卡死时 goroutine 永久泄漏。
+		m.StartAutoRefreshDaemon(context.Background())
+		go m.runAutoRefreshOnce(context.Background())
+	} else {
+		// 关闭自动续期时停止守护协程，避免泄漏。
+		m.StopAutoRefreshDaemon()
 	}
 	return platform.AutoRenewStatus{Enabled: enabled, Interval: interval}, nil
 }

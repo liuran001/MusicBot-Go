@@ -136,6 +136,18 @@ func (k *KugouPlatform) SetAutoRenew(ctx context.Context, enabled bool, interval
 	return k.client.Concept().SetAutoRefresh(enabled, interval)
 }
 
+// Close 实现 io.Closer，停止概念版会话的后台自动续期守护协程。
+// 在应用关闭或 /reload 丢弃旧平台实例时被调用，防止守护协程泄漏。
+func (k *KugouPlatform) Close() error {
+	if k == nil || k.client == nil {
+		return nil
+	}
+	if concept := k.client.Concept(); concept != nil {
+		return concept.Close()
+	}
+	return nil
+}
+
 func (k *KugouPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	if k == nil || k.client == nil {
 		return nil, platform.NewUnavailableError("kugou", "track", trackID)
