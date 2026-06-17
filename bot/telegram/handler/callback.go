@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -33,10 +32,10 @@ type parsedMusicCallback struct {
 
 const episodePageSize = 8
 
-var episodeSearchBackStore = struct {
-	mu   sync.Mutex
-	data map[string]string
-}{data: make(map[string]string)}
+// episodeSearchBackStore 保存「分集选择器返回搜索结果」的回调数据，按
+// chatID:messageID 索引。使用带 TTL 的 store 自动驱逐过期项，避免裸 map
+// 随会话累积而无界增长（与 inlineCallbackPayloads 的 30 分钟 TTL 对齐）。
+var episodeSearchBackStore = newTTLStore[string](30 * time.Minute)
 
 var searchPagePattern = regexp.MustCompile(`第\s*(\d+)\s*/\s*(\d+)\s*页`)
 
@@ -46,20 +45,16 @@ func episodeBackKey(chatID int64, messageID int) string {
 
 func setEpisodeSearchBackCallback(chatID int64, messageID int, callbackData string) {
 	key := episodeBackKey(chatID, messageID)
-	episodeSearchBackStore.mu.Lock()
-	defer episodeSearchBackStore.mu.Unlock()
 	if strings.TrimSpace(callbackData) == "" {
-		delete(episodeSearchBackStore.data, key)
+		episodeSearchBackStore.Delete(key)
 		return
 	}
-	episodeSearchBackStore.data[key] = callbackData
+	episodeSearchBackStore.Store(key, callbackData)
 }
 
 func getEpisodeSearchBackCallback(chatID int64, messageID int) string {
-	key := episodeBackKey(chatID, messageID)
-	episodeSearchBackStore.mu.Lock()
-	defer episodeSearchBackStore.mu.Unlock()
-	return episodeSearchBackStore.data[key]
+	value, _ := episodeSearchBackStore.Load(episodeBackKey(chatID, messageID))
+	return value
 }
 
 func extractSearchCurrentPage(text string) (int, bool) {
