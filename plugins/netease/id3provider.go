@@ -58,14 +58,9 @@ func (p *ID3Provider) GetTagData(ctx context.Context, track *platform.Track, inf
 	}
 
 	lyrics := ""
-	lyricData, err := p.client.GetLyric(ctx, musicID)
-	if err != nil {
-		_ = err
-	} else if lyricData != nil {
+	// Lyrics are optional; ignore fetch errors and missing data.
+	if lyricData, err := p.client.GetLyric(ctx, musicID); err == nil && lyricData != nil {
 		lyrics = strings.TrimSpace(lyricData.Lrc.Lyric)
-		if lyrics == "" {
-			_ = lyrics
-		}
 	}
 
 	markerData := CreateMarker(songDetail.Songs[0], songURL.Data[0])
