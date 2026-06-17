@@ -87,8 +87,14 @@ func newInterpreter(startPath string) (*interp.Interpreter, error) {
 		env = append(env, "GOWORK="+filepath.Join(modRoot, "go.work"))
 	}
 	options := interp.Options{
-		GoPath:       os.Getenv("GOPATH"),
-		Env:          env,
+		GoPath: os.Getenv("GOPATH"),
+		Env:    env,
+		// SECURITY: Unrestricted + the full stdlib give scripts unrestricted
+		// access to the host (os/exec, net, filesystem, etc.). A dynamic
+		// script plugin can therefore run arbitrary system operations with
+		// this process's privileges. PluginScriptDir MUST be a fully trusted,
+		// permission-controlled location — never point it at user-writable or
+		// untrusted content. See plugins/scripts/README.md.
 		Unrestricted: true,
 	}
 	interpreter := interp.New(options)
