@@ -76,15 +76,58 @@ func (m *DefaultManager) Register(platform Platform) {
 }
 
 // Reset clears all registered providers and metadata.
+//
+// 清空前先关闭实现了 io.Closer 的 provider（如持有后台 Cookie 自动续期守护协程的
+// bilibili/kugou 平台），避免 /reload 重建插件时旧实例的守护协程泄漏。
 func (m *DefaultManager) Reset() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	providers := m.collectProvidersLocked()
 	m.providers = make(map[string][]Platform)
 	m.composites = make(map[string]Platform)
 	m.meta = make(map[string]Meta)
 	m.aliases = make(map[string]string)
 	if m.registry != nil {
 		m.registry.Reset()
+	}
+	m.mu.Unlock()
+	closeProviders(providers)
+}
+
+// Close 关闭所有已注册的 provider（实现 io.Closer 的部分），供应用关闭时回收
+// 后台守护协程。不清空注册表本身。
+func (m *DefaultManager) Close() error {
+	m.mu.RLock()
+	providers := m.collectProvidersLocked()
+	m.mu.RUnlock()
+	closeProviders(providers)
+	return nil
+}
+
+// collectProvidersLocked 收集所有去重后的 provider；调用方需持有 m.mu。
+func (m *DefaultManager) collectProvidersLocked() []Platform {
+	seen := make(map[Platform]struct{})
+	providers := make([]Platform, 0)
+	for _, list := range m.providers {
+		for _, p := range list {
+			if p == nil {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			providers = append(providers, p)
+		}
+	}
+	return providers
+}
+
+// closeProviders 对实现了 io.Closer 的 provider 调用 Close，忽略其余。
+func closeProviders(providers []Platform) {
+	for _, p := range providers {
+		if closer, ok := p.(io.Closer); ok {
+			_ = closer.Close()
+		}
 	}
 }
 

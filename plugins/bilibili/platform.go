@@ -243,6 +243,15 @@ func (b *BilibiliPlatform) SetAutoRenew(ctx context.Context, enabled bool, inter
 	return b.client.SetAutoRenew(enabled, interval)
 }
 
+// Close 实现 io.Closer，停止后台 Cookie 自动续期守护协程。
+// 在应用关闭或 /reload 丢弃旧平台实例时被调用，防止守护协程泄漏。
+func (b *BilibiliPlatform) Close() error {
+	if b == nil || b.client == nil {
+		return nil
+	}
+	return b.client.Close()
+}
+
 func (b *BilibiliPlatform) Capabilities() platform.Capabilities {
 	return platform.Capabilities{
 		Download:    true,

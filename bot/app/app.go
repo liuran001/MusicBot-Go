@@ -757,6 +757,11 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	// 关闭平台插件持有的后台守护协程（如 bilibili/kugou 的 Cookie 自动续期）。
+	if dm, ok := a.PlatformManager.(*platform.DefaultManager); ok {
+		_ = dm.Close()
+	}
+
 	if a.DB != nil {
 		if err := a.DB.Close(); err != nil {
 			if a.Logger != nil {
