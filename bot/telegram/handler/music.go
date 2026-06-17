@@ -2902,7 +2902,7 @@ func getFFprobeDuration(filePath string) int {
 	cmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error",
 		"-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1:nokey=1",
+		"-of", "default=noprint_wrappers=1:nokey=1",
 		filePath,
 	)
 
