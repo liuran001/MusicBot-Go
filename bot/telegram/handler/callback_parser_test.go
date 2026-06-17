@@ -1,6 +1,9 @@
 package handler
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsInlineMusicCallbackArgs(t *testing.T) {
 	tests := []struct {
@@ -72,5 +75,65 @@ func TestParseMusicCallbackData_InvalidArgs(t *testing.T) {
 	v2 := parseMusicCallbackDataV2([]string{"music"})
 	if v2.ok {
 		t.Fatalf("expected parser to return not ok for invalid args, got v2=%+v", v2)
+	}
+}
+
+// 长 trackID 经 token store 往返时必须完整保留 quality override，
+// 不能像旧的精简 fallback 那样丢字段导致音质回落。
+func TestBuildEpisodeCallbackData_PreservesQualityViaToken(t *testing.T) {
+	trackID := strings.Repeat("a", 60)
+	data := buildEpisodeSelectCallbackData("bilibili", trackID, "lossless", 12345, 3)
+	if data == "" {
+		t.Fatal("callback data should not be empty")
+	}
+	if len(data) > 64 {
+		t.Fatalf("callback data %q exceeds Telegram 64-byte limit (%d)", data, len(data))
+	}
+	if !strings.HasPrefix(data, "music ept ") {
+		t.Fatalf("long trackID should fall back to token form, got %q", data)
+	}
+	action, platformName, parsedTrackID, qualityValue, requesterID, page, ok := parseEpisodeCallbackArgs(strings.Fields(data))
+	if !ok {
+		t.Fatalf("parseEpisodeCallbackArgs failed for %q", data)
+	}
+	if action != "p" || platformName != "bilibili" || parsedTrackID != trackID {
+		t.Fatalf("parsed = (%q,%q,%q), want (p,bilibili,%q)", action, platformName, parsedTrackID, trackID)
+	}
+	if qualityValue != "lossless" {
+		t.Fatalf("qualityValue = %q, want lossless", qualityValue)
+	}
+	if requesterID != 12345 || page != 3 {
+		t.Fatalf("requesterID/page = (%d,%d), want (12345,3)", requesterID, page)
+	}
+}
+
+// 短 trackID 走普通拼接格式，仍能完整解析。
+func TestBuildEpisodeCallbackData_ShortRoundTrip(t *testing.T) {
+	data := buildEpisodeSelectCallbackData("netease", "12345", "hires", 6789, 2)
+	if !strings.HasPrefix(data, "music ep ") || strings.HasPrefix(data, "music ept ") {
+		t.Fatalf("short trackID should use plain format, got %q", data)
+	}
+	action, platformName, trackID, qualityValue, requesterID, page, ok := parseEpisodeCallbackArgs(strings.Fields(data))
+	if !ok {
+		t.Fatalf("parseEpisodeCallbackArgs failed for %q", data)
+	}
+	if action != "p" || platformName != "netease" || trackID != "12345" || qualityValue != "hires" || requesterID != 6789 || page != 2 {
+		t.Fatalf("parsed = (%q,%q,%q,%q,%d,%d), want (p,netease,12345,hires,6789,2)", action, platformName, trackID, qualityValue, requesterID, page)
+	}
+}
+
+// 旧的 7 段精简 fallback（无 quality 段）仍可兼容解析，且补默认 hires，
+// 与 inline 路径 parseInlineEpisodeCallbackArgs 行为一致。
+func TestParseEpisodeCallbackArgs_LegacyFallbackDefaultsQuality(t *testing.T) {
+	args := strings.Fields("music ep p bilibili BV1xx 6789 2")
+	action, platformName, trackID, qualityValue, requesterID, page, ok := parseEpisodeCallbackArgs(args)
+	if !ok {
+		t.Fatalf("parseEpisodeCallbackArgs failed for legacy fallback")
+	}
+	if action != "p" || platformName != "bilibili" || trackID != "BV1xx" || requesterID != 6789 || page != 2 {
+		t.Fatalf("parsed = (%q,%q,%q,%d,%d), want (p,bilibili,BV1xx,6789,2)", action, platformName, trackID, requesterID, page)
+	}
+	if qualityValue != "hires" {
+		t.Fatalf("qualityValue = %q, want hires (default)", qualityValue)
 	}
 }
