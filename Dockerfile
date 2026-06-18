@@ -44,38 +44,59 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
       -ldflags "-s -w -X main.versionName=${VERSION} -X main.commitSHA=${COMMIT_SHA} -X main.buildTime=${BUILD_TIME}" \
       -o /out/MusicBot-Go .
 
-# ffmpeg-builder：安装完整 ffmpeg，再用 ldd 递归解析出 ffmpeg/ffprobe 运行时真正
-# 需要的二进制 + 共享库（约 19MB），剔除整包 apk 带来的编解码器/滤镜依赖（x265、
-# AV1、vpx、OpenEXR、SPIRV 等，~118MB）。/recognize 只需把音频解码为 PCM。
+# ffmpeg-builder：从源码编译最小化 ffmpeg，仅启用 bot 实际用到的编解码/复用/滤镜，
+# 把 ffmpeg 从整包 apk 的 ~118MB 砍到 ~4MB（二进制静态链接 libav*/libsw*，运行时
+# 仅依赖 libmp3lame.so）。启用项经逐条核对 bot 全部 ffmpeg/ffprobe 调用得出：
+#   - 解码: flac/alac/aac/mp3/opus/vorbis + 各 PCM（识曲解码、soda 校验/重封装）
+#   - 编码: flac（soda 无损重写）、libmp3lame（识曲转 MP3）、pcm_f32le（识曲 f32le）、
+#           pcm_s16le（-f null 校验默认重编码）
+#   - 复用: flac / mov+ipod（m4a 重封装）/ mp3 / pcm_f32le（注意 -f f32le 的 configure
+#           组件名是 pcm_f32le 而非 f32le）/ null
+#   - 滤镜: aresample/aformat/anull/abuffer/abuffersink（-ac/-ar/编码格式转换会自动插入）
+#   - bsf: aac_adtstoasc（ADTS AAC 重封装进 mp4/m4a 必需）
 FROM alpine:${ALPINE_TAG} AS ffmpeg-builder
-RUN apk add --no-cache ffmpeg
-# 把 ffmpeg/ffprobe 及其全部（含传递）共享库依赖镜像式收集到 /deps，保持原始路径。
-# 用工作队列递归遍历 ldd 输出：每个 token 以 "/" 开头的都是实际会被加载的对象
-# （已解析的 .so 绝对路径，以及 musl loader /lib/ld-musl-*.so.1），逐个解析直到
-# 没有新依赖，确保一个 .so 都不漏。cp -L 解引用 symlink，落地为 SONAME 同名实体。
-RUN set -eu; \
-    mkdir -p /deps/usr/bin; \
-    cp /usr/bin/ffmpeg /usr/bin/ffprobe /deps/usr/bin/; \
-    : > /tmp/libs.list; \
-    queue="/usr/bin/ffmpeg /usr/bin/ffprobe"; \
-    while [ -n "$queue" ]; do \
-      next=""; \
-      for f in $queue; do \
-        for lib in $(ldd "$f" 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i ~ /^\//) print $i}'); do \
-          if [ -e "$lib" ] && ! grep -qxF "$lib" /tmp/libs.list; then \
-            echo "$lib" >> /tmp/libs.list; \
-            next="$next $lib"; \
-          fi; \
-        done; \
-      done; \
-      queue="$next"; \
-    done; \
-    while read -r lib; do \
-      mkdir -p "/deps$(dirname "$lib")"; \
-      cp -L "$lib" "/deps$lib"; \
-    done < /tmp/libs.list; \
-    echo "=== collected shared libraries ==="; cat /tmp/libs.list; \
-    du -sh /deps
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG ALL_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG all_proxy
+ARG no_proxy
+ARG FFMPEG_VERSION=7.1.1
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    ALL_PROXY=${ALL_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${http_proxy} \
+    https_proxy=${https_proxy} \
+    all_proxy=${all_proxy} \
+    no_proxy=${no_proxy}
+RUN apk add --no-cache build-base nasm yasm pkgconf lame-dev zlib-dev \
+    coreutils curl ca-certificates tar xz
+WORKDIR /src
+RUN curl -fsSL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" -o ffmpeg.tar.xz \
+    && tar xf ffmpeg.tar.xz && mv "ffmpeg-${FFMPEG_VERSION}" ffmpeg
+WORKDIR /src/ffmpeg
+RUN ./configure \
+      --prefix=/usr/local \
+      --disable-everything \
+      --disable-doc --disable-htmlpages --disable-manpages --disable-txtpages \
+      --disable-network --disable-autodetect --disable-debug \
+      --disable-avdevice --disable-swscale --disable-postproc \
+      --enable-small \
+      --disable-programs --enable-ffmpeg --enable-ffprobe \
+      --enable-libmp3lame \
+      --enable-decoder=flac,alac,aac,aac_latm,mp3,mp3float,opus,vorbis,pcm_s16le,pcm_s16be,pcm_f32le,pcm_s24le,pcm_u8 \
+      --enable-encoder=flac,libmp3lame,pcm_s16le,pcm_f32le \
+      --enable-muxer=flac,mov,ipod,mp3,pcm_f32le,null \
+      --enable-demuxer=flac,mov,matroska,aac,mp3,ogg,wav,pcm_s16le \
+      --enable-parser=flac,aac,opus,vorbis,mpegaudio \
+      --enable-bsf=aac_adtstoasc \
+      --enable-filter=aresample,aformat,anull,abuffer,abuffersink \
+      --enable-protocol=file,pipe \
+    && make -j"$(nproc)" && make install
+RUN strip /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
 
 # 单一镜像（原 lite/full 已合并）。命名为 full 以兼容 docker-compose.yml 的
 # `target: full`。精简后体积接近原 lite，但内置 ffmpeg + afp.wasm 听歌识曲。
@@ -98,9 +119,11 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     no_proxy=${no_proxy}
 LABEL org.opencontainers.image.description="MusicBot-Go：含 ffmpeg（精简）+ afp.wasm 听歌识曲，及 Apple Music 支持"
 RUN apk add --no-cache ca-certificates tzdata
-# ffmpeg/ffprobe 二进制 + 仅运行时所需的共享库（来自 ffmpeg-builder 的 ldd 精简），
-# 镜像式还原到根路径（/usr/bin、/usr/lib、/lib）。/recognize 解码音频为 PCM 用。
-COPY --from=ffmpeg-builder /deps/ /
+# 源码编译的最小 ffmpeg/ffprobe（静态链接 libav*/libsw*），运行时仅依赖 libmp3lame.so。
+# musl libc 由 alpine base 提供。/recognize 解码音频为 PCM、soda 无损重写/重封装均用它。
+COPY --from=ffmpeg-builder /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
+COPY --from=ffmpeg-builder /usr/lib/libmp3lame.so.0 /usr/lib/libmp3lame.so.0
 WORKDIR /app
 COPY --from=builder /out/MusicBot-Go /app/MusicBot-Go
 COPY config_example.ini /app/config_example.ini
