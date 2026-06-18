@@ -140,19 +140,6 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Extract Docker metadata (lite)
-        id: meta_lite
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/musicbot-go
-          flavor: |
-            latest=false
-          tags: |
-            type=ref,event=branch,suffix=-lite
-            type=ref,event=tag,suffix=-lite
-            type=sha,suffix=-lite
-            type=raw,value=lite,enable={{is_default_branch}}
-
       - name: Derive build metadata
         id: docker_build_meta
         run: |
@@ -184,23 +171,6 @@ jobs:
             BUILD_TIME=${{ steps.docker_build_meta.outputs.build_time }}
           cache-from: type=gha,scope=docker-full
           cache-to: type=gha,mode=max,scope=docker-full
-
-      - name: Build and push Docker image (lite)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          target: lite
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta_lite.outputs.tags }}
-          labels: ${{ steps.meta_lite.outputs.labels }}
-          build-args: |
-            VERSION=${{ steps.docker_build_meta.outputs.version }}
-            COMMIT_SHA=${{ steps.docker_build_meta.outputs.commit }}
-            BUILD_TIME=${{ steps.docker_build_meta.outputs.build_time }}
-          cache-from: type=gha,scope=docker-lite
-          cache-to: type=gha,mode=max,scope=docker-lite
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
