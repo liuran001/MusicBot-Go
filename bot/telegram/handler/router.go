@@ -256,6 +256,12 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	if r.GuestMode != nil {
 		bh.HandleGuestMessage(func(ctx *th.Context, message telego.Message) error {
 			if r.GuestMode != nil {
+				// Skip messages sent via the bot's own inline mode —
+				// otherwise the inline song card triggers guest mode
+				// again ("请输入歌曲名或链接"), creating a loop.
+				if r.isOwnInlineMessage(&message) {
+					return nil
+				}
 				r.GuestMode.Handle(ctx, ctx.Bot(), &telego.Update{GuestMessage: &message})
 			}
 			return nil
