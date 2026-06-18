@@ -21,10 +21,9 @@
 
 ### Docker（推荐）
 
-镜像由 CI 自动构建并推送到 GHCR，两个版本：
+镜像由 CI 自动构建并推送到 GHCR：
 
-- `ghcr.io/liuran001/musicbot-go:latest` —— **完整版**，含 ffmpeg，支持 `/recognize` 听歌识曲。
-- `ghcr.io/liuran001/musicbot-go:lite` —— **精简版**，不含识曲依赖，体积更小。
+- `ghcr.io/liuran001/musicbot-go:latest` —— 含精简版 ffmpeg（仅运行时所需共享库），支持 `/recognize` 听歌识曲。识曲指纹编码已用纯 Go（wazero + afp.wasm）实现，无需 Node.js。
 
 所有运行数据（配置、数据库、缓存、脚本）放在一个挂载目录里：
 
@@ -39,13 +38,13 @@ docker run -d --name musicbot-go --restart unless-stopped \
   ghcr.io/liuran001/musicbot-go:latest -c /app/workdir/config.ini
 ```
 
-或用仓库自带的 `docker-compose.yml`（本地构建 full 版）：
+或用仓库自带的 `docker-compose.yml`（本地构建）：
 
 ```bash
 docker compose up -d --build
 ```
 
-> 用精简版（不需要识曲）时，建议在配置里显式 `EnableRecognize = false`。
+> 不需要识曲时，建议在配置里显式 `EnableRecognize = false`。
 
 ### 裸机运行
 
@@ -91,7 +90,7 @@ media_user_token = YOUR_TOKEN      # 登录 music.apple.com 后从浏览器 Cook
 | `/music <URL 或关键词>` | 下载音乐；直接发音乐链接也会自动识别下载 |
 | `/search <关键词>` | 搜索并选择下载 |
 | `/lyric <URL>` | 获取歌词 |
-| `/recognize` | 回复一条语音消息识别歌曲（需完整版 + `EnableRecognize`） |
+| `/recognize` | 回复一条语音消息识别歌曲（需 `EnableRecognize`） |
 | `/settings` | 设置默认平台与音质（支持私聊 / 群聊维度） |
 | `/status` | 查看统计与各平台账号状态 |
 | `/about` · `/help` | 关于 / 帮助 |
