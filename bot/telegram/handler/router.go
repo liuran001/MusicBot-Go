@@ -265,9 +265,29 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	_ = botName
 }
 
+// isOwnInlineMessage reports whether message was sent via the bot's own inline
+// mode. Such messages must not be processed as new user requests to prevent a
+// self-referencing loop: user picks inline result → bot sends song card → bot
+// sees its own card in the group → treats the card text as a new search query.
+func (r *Router) isOwnInlineMessage(message *telego.Message) bool {
+	if message == nil || message.ViaBot == nil {
+		return false
+	}
+	if r.MentionRouter != nil {
+		botName := strings.TrimPrefix(strings.TrimSpace(r.MentionRouter.BotName), "@")
+		if botName != "" && strings.EqualFold(message.ViaBot.Username, botName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		if handler == nil {
+			return nil
+		}
+		if r.isOwnInlineMessage(update.Message) {
 			return nil
 		}
 		if r.Whitelist != nil && update.Message != nil {
