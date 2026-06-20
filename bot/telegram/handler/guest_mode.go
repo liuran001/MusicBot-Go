@@ -183,8 +183,8 @@ func repliedMessageText(reply *telego.Message) string {
 // repliedMessageQuery resolves a music/lyric query from a replied-to message. It
 // prefers an embedded link from the message's entities (a bot-sent song message
 // hyperlinks the title to the track URL, which is far more precise than its
-// plain-text caption "「title」- artist"), falling back to the visible text or
-// caption otherwise.
+// plain-text caption "「title」- artist"), then a Telegram auto-detected URL
+// entity, falling back to the visible text or caption otherwise.
 func repliedMessageQuery(reply *telego.Message) string {
 	if reply == nil {
 		return ""
@@ -193,6 +193,7 @@ func repliedMessageQuery(reply *telego.Message) string {
 	if len(entities) == 0 {
 		entities = reply.CaptionEntities
 	}
+	// 1. Embedded link (entity carries an explicit URL, e.g. bot-sent song cards).
 	for _, entity := range entities {
 		if entity.Type == telego.EntityTypeTextLink {
 			if u := strings.TrimSpace(entity.URL); u != "" {
@@ -200,7 +201,24 @@ func repliedMessageQuery(reply *telego.Message) string {
 			}
 		}
 	}
-	return repliedMessageText(reply)
+	// 2. Telegram auto-detected plain-text URL entity (e.g. a playlist link
+	//    pasted in a group message).  Extract the URL substring so callers that
+	//    match URLs don't receive surrounding chat text.
+	text := repliedMessageText(reply)
+	for _, entity := range entities {
+		if entity.Type == telego.EntityTypeURL {
+			if entity.Offset >= 0 && entity.Length > 0 {
+				units := utf16.Encode([]rune(text))
+				if end := entity.Offset + entity.Length; end <= len(units) {
+					if u := strings.TrimSpace(string(utf16.Decode(units[entity.Offset:end]))); u != "" {
+						return u
+					}
+				}
+			}
+		}
+	}
+	// 3. Fallback: full visible text / caption.
+	return text
 }
 
 // answerGuest sends a single plain-text article in response to a guest query.
