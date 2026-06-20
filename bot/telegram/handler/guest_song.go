@@ -44,6 +44,11 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 		h.answerAndRunGuestTrack(ctx, b, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
 		return
 	}
+	// Playlist / album URL (including short links that resolve to playlists).
+	if platformName, playlistID, matched := matchPlaylistURL(ctx, h.PlatformManager, resolvedText); matched {
+		h.handleGuestPlaylist(ctx, b, message, guestQueryID, platformName, playlistID, userID, qualityOverride)
+		return
+	}
 	if strings.TrimSpace(requestedPlatform) != "" && isLikelyIDToken(strings.TrimSpace(baseText)) {
 		h.answerAndRunGuestTrack(ctx, b, guestQueryID, userID, userName, requestedPlatform, strings.TrimSpace(baseText), qualityOverride)
 		return
@@ -58,6 +63,64 @@ func (h *GuestModeHandler) answerAndRunGuestTrack(ctx context.Context, b *telego
 		return
 	}
 	go runInlineMediaFlow(detachContext(ctx), b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, platformName, trackID, qualityOverride)
+}
+
+// handleGuestPlaylist fetches a playlist's tracks and presents them as a
+// selectable search-result list in guest mode, reusing the same pagination
+// infrastructure as keyword search.
+func (h *GuestModeHandler) handleGuestPlaylist(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID, platformName, playlistID string, userID int64, qualityOverride string) {
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, "正在加载歌单…")
+	if inlineMessageID == "" {
+		return
+	}
+	go h.fetchAndRenderGuestPlaylist(detachContext(ctx), b, message, inlineMessageID, platformName, playlistID, userID, qualityOverride)
+}
+
+func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *telego.Bot, message *telego.Message, inlineMessageID, platformName, playlistID string, userID int64, qualityOverride string) {
+	if h == nil || h.PlatformManager == nil {
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "服务不可用", nil, "")
+		return
+	}
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil {
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "不支持的平台", nil, "")
+		return
+	}
+	playlist, err := plat.GetPlaylist(ctx, playlistID)
+	if err != nil || playlist == nil || len(playlist.Tracks) == 0 {
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "获取歌单失败或歌单为空", nil, "")
+		return
+	}
+
+	qualityValue := h.guestDefaultQuality(ctx, userID)
+	if strings.TrimSpace(qualityOverride) != "" {
+		qualityValue = qualityOverride
+	}
+	qualityValue = resolvePlatformQualityValue(ctx, h.repo(), botpkg.PluginScopeUser, userID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
+
+	title := strings.TrimSpace(playlist.Title)
+	if title == "" {
+		title = "歌单"
+	}
+
+	state := &searchState{
+		keyword:          title,
+		platform:         platformName,
+		quality:          qualityValue,
+		requesterID:      userID,
+		limit:            len(playlist.Tracks),
+		currentPage:      1,
+		updatedAt:        time.Now(),
+		tracksByPlatform: make(map[string][]platform.Track),
+		hasMoreByPlat:    make(map[string]bool),
+		unavailable:      make(map[string]bool),
+		action:           "music",
+	}
+	state.setTracks(platformName, playlist.Tracks)
+
+	token := h.guestSearchStore().store(state)
+	text, keyboard := h.renderGuestSearchPage(state, token, 1)
+	_ = h.editGuestInlineText(ctx, b, inlineMessageID, text, keyboard, telego.ModeMarkdownV2)
 }
 
 func (h *GuestModeHandler) answerAndRenderGuestSearch(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID, keyword, requestedPlatform, qualityOverride string) {
