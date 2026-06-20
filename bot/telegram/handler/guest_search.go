@@ -179,13 +179,26 @@ func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token strin
 	var bld strings.Builder
 	platformEmojiText := platformEmoji(h.PlatformManager, state.platform)
 	displayName := platformDisplayName(h.PlatformManager, state.platform)
-	bld.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmojiText, mdV2Replacer.Replace(displayName)))
-	if strings.TrimSpace(state.keyword) != "" {
-		bld.WriteString(fmt.Sprintf("关键词: %s\n", mdV2Replacer.Replace(state.keyword)))
+	isPlaylist := state != nil && state.playlist != nil
+	if isPlaylist {
+		// Playlist/album mode: use the same header style as PlaylistHandler
+		// (platform · label, then title/creator/track-count via
+		// formatPlaylistInfo). No keyword line, no "点击数字" hint duplication.
+		collectionLabel := strings.TrimSpace(state.collectionLabel)
+		if collectionLabel == "" {
+			collectionLabel = collectionTypeLabel(collectionTypePlaylist)
+		}
+		bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmojiText, mdV2Replacer.Replace(displayName), collectionLabel))
+		bld.WriteString(formatPlaylistInfo(state.playlist, collectionLabel))
+	} else {
+		bld.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmojiText, mdV2Replacer.Replace(displayName)))
+		if strings.TrimSpace(state.keyword) != "" {
+			bld.WriteString(fmt.Sprintf("关键词: %s\n", mdV2Replacer.Replace(state.keyword)))
+		}
 	}
 	if pageCount > 1 || hasMore {
 		bld.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, displayPageCount))
-	} else {
+	} else if !isPlaylist {
 		bld.WriteString("\n")
 	}
 
@@ -232,20 +245,22 @@ func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token strin
 		}
 	}
 
-	if platformRows := h.buildGuestPlatformSwitchRows(state, token); len(platformRows) > 0 {
-		rows = append(rows, platformRows...)
-	}
-	if strings.TrimSpace(state.searchFilterText) != "" {
-		filterText := "开"
-		toggleAction := "off"
-		if !state.biliFilter {
-			filterText = "关"
-			toggleAction = "on"
+	if !isPlaylist {
+		if platformRows := h.buildGuestPlatformSwitchRows(state, token); len(platformRows) > 0 {
+			rows = append(rows, platformRows...)
 		}
-		rows = append(rows, []telego.InlineKeyboardButton{{
-			Text:         fmt.Sprintf("%s: %s", state.searchFilterText, filterText),
-			CallbackData: fmt.Sprintf("guest %s bilifilter %s %d", token, toggleAction, state.requesterID),
-		}})
+		if strings.TrimSpace(state.searchFilterText) != "" {
+			filterText := "开"
+			toggleAction := "off"
+			if !state.biliFilter {
+				filterText = "关"
+				toggleAction = "on"
+			}
+			rows = append(rows, []telego.InlineKeyboardButton{{
+				Text:         fmt.Sprintf("%s: %s", state.searchFilterText, filterText),
+				CallbackData: fmt.Sprintf("guest %s bilifilter %s %d", token, toggleAction, state.requesterID),
+			}})
+		}
 	}
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("guest %s close %d", token, state.requesterID)}})
 

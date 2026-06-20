@@ -103,6 +103,9 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 		title = "歌单"
 	}
 
+	collectionType := detectCollectionType(playlistID, playlist.URL)
+	collectionLabel := collectionTypeLabel(collectionType)
+
 	state := &searchState{
 		keyword:          title,
 		platform:         platformName,
@@ -115,6 +118,8 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 		hasMoreByPlat:    make(map[string]bool),
 		unavailable:      make(map[string]bool),
 		action:           "music",
+		playlist:         playlist,
+		collectionLabel:  collectionLabel,
 	}
 	state.setTracks(platformName, playlist.Tracks)
 
