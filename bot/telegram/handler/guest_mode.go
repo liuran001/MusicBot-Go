@@ -204,21 +204,29 @@ func repliedMessageQuery(reply *telego.Message) string {
 	// 2. Telegram auto-detected plain-text URL entity (e.g. a playlist link
 	//    pasted in a group message).  Extract the URL substring so callers that
 	//    match URLs don't receive surrounding chat text.
-	text := repliedMessageText(reply)
+	//    Use the RAW (untrimmed) field the entities belong to — Text pairs with
+	//    Entities, Caption with CaptionEntities — because entity offsets are
+	//    UTF-16 units relative to the original field; TrimSpace would shift them.
+	raw := reply.Text
+	if len(reply.Entities) == 0 {
+		raw = reply.Caption
+	}
+	units := utf16.Encode([]rune(raw))
 	for _, entity := range entities {
-		if entity.Type == telego.EntityTypeURL {
-			if entity.Offset >= 0 && entity.Length > 0 {
-				units := utf16.Encode([]rune(text))
-				if end := entity.Offset + entity.Length; end <= len(units) {
-					if u := strings.TrimSpace(string(utf16.Decode(units[entity.Offset:end]))); u != "" {
-						return u
-					}
-				}
+		if entity.Type != telego.EntityTypeURL {
+			continue
+		}
+		if entity.Offset < 0 || entity.Length <= 0 {
+			continue
+		}
+		if end := entity.Offset + entity.Length; end <= len(units) {
+			if u := strings.TrimSpace(string(utf16.Decode(units[entity.Offset:end]))); u != "" {
+				return u
 			}
 		}
 	}
 	// 3. Fallback: full visible text / caption.
-	return text
+	return repliedMessageText(reply)
 }
 
 // answerGuest sends a single plain-text article in response to a guest query.

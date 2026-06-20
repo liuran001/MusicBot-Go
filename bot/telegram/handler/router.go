@@ -39,6 +39,7 @@ type Router struct {
 	AdminCommands            []string
 	Whitelist                *Whitelist
 	Logger                   botpkg.Logger
+	BotName                  string
 }
 
 // Register registers all handlers to the bot handler.
@@ -46,6 +47,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	if bh == nil {
 		return
 	}
+	r.BotName = botName
 
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "start"))
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "help"))
@@ -267,8 +269,6 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return nil
 		})
 	}
-
-	_ = botName
 }
 
 // isOwnInlineMessage reports whether message was sent via the bot's own inline
@@ -279,13 +279,14 @@ func (r *Router) isOwnInlineMessage(message *telego.Message) bool {
 	if message == nil || message.ViaBot == nil {
 		return false
 	}
-	if r.MentionRouter != nil {
-		botName := strings.TrimPrefix(strings.TrimSpace(r.MentionRouter.BotName), "@")
-		if botName != "" && strings.EqualFold(message.ViaBot.Username, botName) {
-			return true
-		}
+	botName := strings.TrimPrefix(strings.TrimSpace(r.BotName), "@")
+	if botName == "" && r.MentionRouter != nil {
+		botName = strings.TrimPrefix(strings.TrimSpace(r.MentionRouter.BotName), "@")
 	}
-	return false
+	if botName == "" {
+		return false
+	}
+	return strings.EqualFold(message.ViaBot.Username, botName)
 }
 
 func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
