@@ -50,6 +50,13 @@ type searchState struct {
 	// song, "lyric" fetches its lyrics. It drives the per-result button prefix
 	// in buildSearchPage and is preserved across pagination.
 	action string
+	// playlist, when non-nil, marks this state as rendering a playlist/album
+	// collection rather than keyword search results. The guest renderer uses a
+	// playlist header (title/creator/track count) and omits the keyword line
+	// and platform switch buttons when this is set.
+	playlist *platform.Playlist
+	// collectionLabel is the localized label ("歌单"/"专辑") for playlist mode.
+	collectionLabel string
 }
 
 // resultAction returns the result-button action, defaulting to "music".
