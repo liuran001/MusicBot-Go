@@ -147,7 +147,11 @@ type favoriteMeta struct {
 }
 
 // findSongMetaForFavorite resolves display metadata for a track, preferring the
-// local song cache (no network) and falling back to a platform GetTrack call.
+// local song cache (no network). It falls back to the platform's GetTrack when
+// the cache lacks the song name OR the web URL, so the favorites list can
+// hyperlink the song/artists to their pages using each platform's own URL logic
+// (the same source buildMusicCaption uses). Favoriting is infrequent, so the
+// extra call is acceptable.
 func findSongMetaForFavorite(ctx context.Context, repo botpkg.SongRepository, mgr platform.Manager, platformName, trackID string) favoriteMeta {
 	var meta favoriteMeta
 	if repo != nil {
@@ -159,16 +163,22 @@ func findSongMetaForFavorite(ctx context.Context, repo botpkg.SongRepository, mg
 			meta.songArtistsURLs = s.SongArtistsURLs
 		}
 	}
-	if meta.songName == "" && mgr != nil {
+	if (meta.songName == "" || meta.trackURL == "") && mgr != nil {
 		if plat := mgr.Get(platformName); plat != nil {
 			if track, err := plat.GetTrack(ctx, trackID); err == nil && track != nil {
 				var si botpkg.SongInfo
 				fillSongInfoFromTrack(&si, track, platformName, trackID, nil)
-				meta.songName = si.SongName
-				meta.songArtists = si.SongArtists
-				meta.songAlbum = si.SongAlbum
-				meta.trackURL = si.TrackURL
-				meta.songArtistsURLs = si.SongArtistsURLs
+				if meta.songName == "" {
+					meta.songName = si.SongName
+					meta.songArtists = si.SongArtists
+					meta.songAlbum = si.SongAlbum
+				}
+				if meta.trackURL == "" {
+					meta.trackURL = si.TrackURL
+				}
+				if meta.songArtistsURLs == "" {
+					meta.songArtistsURLs = si.SongArtistsURLs
+				}
 			}
 		}
 	}
