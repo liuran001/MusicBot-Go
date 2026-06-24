@@ -49,7 +49,7 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 	}
 	if command.Handler == nil {
 		if command.RichHandler == nil {
-			h.sendText(ctx, b, message.Chat.ID, message.MessageID, "命令不可用")
+			h.sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "adm_cmd_unavailable"))
 			return
 		}
 	}
@@ -58,7 +58,7 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 	if command.RichHandler != nil {
 		resp, err := command.RichHandler(cmdCtx, args)
 		if err != nil {
-			h.sendText(ctx, b, message.Chat.ID, message.MessageID, fmt.Sprintf("执行失败: %v", err))
+			h.sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "adm_exec_failed", map[string]any{"Err": fmt.Sprintf("%v", err)}))
 			return
 		}
 		h.sendResponse(ctx, b, message.Chat.ID, message.MessageID, resp)
@@ -66,12 +66,12 @@ func (h *AdminCommandHandler) Handle(ctx context.Context, b *telego.Bot, update 
 	}
 	result, err := command.Handler(cmdCtx, args)
 	if err != nil {
-		h.sendText(ctx, b, message.Chat.ID, message.MessageID, fmt.Sprintf("执行失败: %v", err))
+		h.sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "adm_exec_failed", map[string]any{"Err": fmt.Sprintf("%v", err)}))
 		return
 	}
 	result = strings.TrimSpace(result)
 	if result == "" {
-		result = "执行完成"
+		result = tr(ctx, "adm_exec_done")
 	}
 	result = sanitizeSensitiveText(result)
 	h.sendText(ctx, b, message.Chat.ID, message.MessageID, result)
@@ -123,7 +123,7 @@ func (h *AdminCommandHandler) sendText(ctx context.Context, b *telego.Bot, chatI
 
 func (h *AdminCommandHandler) sendResponse(ctx context.Context, b *telego.Bot, chatID int64, replyID int, resp *admincmd.Response) {
 	if resp == nil {
-		h.sendText(ctx, b, chatID, replyID, "执行完成")
+		h.sendText(ctx, b, chatID, replyID, tr(ctx, "adm_exec_done"))
 		return
 	}
 	text := sanitizeSensitiveText(strings.TrimSpace(resp.Text))
@@ -153,7 +153,7 @@ func (h *AdminCommandHandler) sendResponse(ctx context.Context, b *telego.Bot, c
 		return
 	}
 	if text == "" {
-		text = "执行完成"
+		text = tr(ctx, "adm_exec_done")
 	}
 	if h.RateLimiter != nil {
 		params := &telego.SendMessageParams{
@@ -206,13 +206,13 @@ func BuildCookieRenewCommand(manager platform.Manager) admincmd.Command {
 
 func checkCookies(ctx context.Context, manager platform.Manager, args string) (string, error) {
 	if manager == nil {
-		return "平台管理器未初始化", nil
+		return tr(ctx, "adm_platform_manager_uninitialized"), nil
 	}
 	args = strings.TrimSpace(args)
 	if args != "" {
 		platformName := resolveCookiePlatform(manager, args)
 		if platformName == "" {
-			return fmt.Sprintf("未识别的平台: %s", args), nil
+			return tr(ctx, "adm_platform_unrecognized", map[string]any{"Args": args}), nil
 		}
 		line, err := checkCookieForPlatform(ctx, manager, platformName)
 		if err != nil {
@@ -223,7 +223,7 @@ func checkCookies(ctx context.Context, manager platform.Manager, args string) (s
 
 	names := manager.List()
 	if len(names) == 0 {
-		return "没有可用的平台", nil
+		return tr(ctx, "adm_no_platforms"), nil
 	}
 	sort.Strings(names)
 	lines := make([]string, 0, len(names))
@@ -237,34 +237,34 @@ func checkCookies(ctx context.Context, manager platform.Manager, args string) (s
 		}
 	}
 	if len(lines) == 0 {
-		return "没有支持 Cookie 检查的平台", nil
+		return tr(ctx, "adm_check_none"), nil
 	}
 	return strings.Join(lines, "\n"), nil
 }
 
 func renewCookies(ctx context.Context, manager platform.Manager, args string) (string, error) {
 	if manager == nil {
-		return "平台管理器未初始化", nil
+		return tr(ctx, "adm_platform_manager_uninitialized"), nil
 	}
 	args = strings.TrimSpace(args)
 	if args != "" {
 		platformName := resolveCookiePlatform(manager, args)
 		if platformName == "" {
-			return fmt.Sprintf("未识别的平台: %s", args), nil
+			return tr(ctx, "adm_platform_unrecognized", map[string]any{"Args": args}), nil
 		}
 		line, err := renewCookieForPlatform(ctx, manager, platformName)
 		if err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(line) == "" {
-			return fmt.Sprintf("%s 不支持 Cookie 续期", platformDisplayName(manager, platformName)), nil
+			return tr(ctx, "adm_renew_cookie_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)}), nil
 		}
 		return line, nil
 	}
 
 	names := manager.List()
 	if len(names) == 0 {
-		return "没有可用的平台", nil
+		return tr(ctx, "adm_no_platforms"), nil
 	}
 	sort.Strings(names)
 	lines := make([]string, 0, len(names))
@@ -281,10 +281,10 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 		}
 	}
 	if len(lines) == 0 {
-		return "没有支持 Cookie 续期的平台", nil
+		return tr(ctx, "adm_renew_none"), nil
 	}
 	if failures > 0 {
-		lines = append(lines, fmt.Sprintf("\n完成（失败 %d 个平台）", failures))
+		lines = append(lines, tr(ctx, "adm_complete_with_failures", map[string]any{"Count": failures}))
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -319,7 +319,7 @@ func checkCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 	}
 	message := strings.TrimSpace(result.Message)
 	if message == "" {
-		message = "未知"
+		message = tr(ctx, "adm_check_unknown")
 	}
 	return fmt.Sprintf("%s %s: %s", status, platformDisplayName(manager, platformName), message), nil
 }
@@ -339,7 +339,7 @@ func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 	}
 	message = strings.TrimSpace(message)
 	if message == "" {
-		message = "续期完成"
+		message = tr(ctx, "adm_renew_done")
 	}
 	message = sanitizeSensitiveText(message)
 	return fmt.Sprintf("✅ %s: %s", platformDisplayName(manager, platformName), message), nil

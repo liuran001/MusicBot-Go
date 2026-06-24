@@ -1,0 +1,78 @@
+# Admin handler shard — Chinese (Simplified). Verbatim original strings.
+# Plain text; MarkdownV2 escaping happens at the output boundary.
+
+# --- common ---
+adm_platform_manager_uninitialized = "平台管理器未初始化"
+adm_platform_unrecognized = "未识别的平台: {{.Args}}"
+adm_platform_unrecognized_usage = "未识别的平台: {{.Name}}\n\n{{.Usage}}"
+adm_no_platforms = "没有可用的平台"
+adm_exec_failed = "执行失败: {{.Err}}"
+adm_exec_done = "执行完成"
+adm_cmd_unavailable = "命令不可用"
+adm_complete_with_failures = "\n完成（失败 {{.Count}} 个平台）"
+
+# --- account login dispatch ---
+adm_sign_unsupported = "{{.Platform}} 当前不支持签到/VIP 领取"
+adm_sign_done = "{{.Platform}} 签到/VIP 领取完成"
+adm_renew_unsupported = "{{.Platform}} 当前不支持续期"
+adm_check_unsupported = "{{.Platform}} 当前不支持账号检查"
+adm_lang_unsupported = "{{.Platform}} 当前不支持语言设置"
+adm_cookie_import_unsupported = "{{.Platform}} 当前不支持 Cookie 导入"
+adm_cookie_usage = "用法: /login {{.Platform}} cookie <cookie内容>"
+adm_cookie_import_done = "Cookie 导入完成"
+adm_qr_unsupported = "{{.Platform}} 当前不支持扫码登录"
+adm_qr_session_failed = "二维码会话创建失败"
+adm_qr_cancel_button = "取消登录"
+adm_qr_timeout = "二维码已超时，请重新执行 /login {{.Platform}} qr"
+adm_sign_usage = "用法: /login sign <platform>"
+adm_qr_poll_cancelled = "已取消登录轮询"
+
+# --- usage / help ---
+adm_login_usage = """统一账号命令:
+/status - 查看统计与账号状态
+/login <platform> help - 查看平台支持的登录方式
+/login <platform> qr - 扫码登录（如支持）
+/login <platform> cookie <cookie> - 导入 Cookie
+/login <platform> sign - 签到/VIP 领取（如支持）
+/login sign <platform> - 按平台执行签到/VIP 领取
+/login <platform> check - 检查平台账号状态
+/login check - 检查所有平台账号状态
+/login <platform> renew - 手动续期
+/login renew - 批量续期所有平台
+/login <platform> auto on|off|status [intervalSec] - 自动续期
+/login auto on|off|status [intervalSec] - 批量设置所有平台自动续期
+支持平台: {{.Platforms}}"""
+adm_login_help = "{{.Platform}} 支持: {{.Methods}}\n\n示例:\n{{.Examples}}"
+adm_lang_arg = "语言"
+
+# --- auto renewal ---
+adm_auto_unsupported = "{{.Platform}} 当前不支持自动续期"
+adm_auto_on = "已开启 {{.Platform}} 自动续期，间隔 {{.Seconds}} 秒"
+adm_auto_off = "已关闭 {{.Platform}} 自动续期（当前间隔 {{.Seconds}} 秒）"
+adm_auto_usage_platform = "用法: /login {{.Platform}} auto on [intervalSec]\n/login {{.Platform}} auto off\n/login {{.Platform}} auto status"
+adm_auto_on_batch = "✅ {{.Platform}}: 自动续期已开启，间隔 {{.Seconds}} 秒"
+adm_auto_off_batch = "✅ {{.Platform}}: 自动续期已关闭（当前间隔 {{.Seconds}} 秒）"
+adm_auto_usage_batch = "用法: /login auto on [intervalSec]\n/login auto off\n/login auto status"
+adm_auto_none = "没有支持自动续期的平台"
+adm_auto_status = "{{.Platform}} 自动续期: {{.State}}，间隔 {{.Seconds}} 秒"
+adm_auto_state_off = "关闭"
+adm_auto_state_on = "开启"
+
+# --- checkck / renewck ---
+adm_check_none = "没有支持 Cookie 检查的平台"
+adm_renew_cookie_unsupported = "{{.Platform}} 不支持 Cookie 续期"
+adm_renew_none = "没有支持 Cookie 续期的平台"
+adm_check_unknown = "未知"
+adm_renew_done = "续期完成"
+
+# --- rmcache ---
+adm_rmcache_failed = "清除缓存失败"
+adm_rmcache_all_done = "已清空所有缓存"
+adm_rmcache_platform_all_done = "已清除平台 {{.Platform}} 的全部缓存"
+adm_rmcache_invalid = "请输入有效的歌曲ID或URL，或使用格式: /rmcache <platform> <trackID>|all"
+adm_rmcache_track_done = "已清除平台 {{.Platform}} 歌曲 {{.TrackID}} 的缓存"
+
+# --- reload ---
+adm_reload_disabled = "❌ 重载未启用"
+adm_reload_failed = "❌ 重载失败: {{.Err}}"
+adm_reload_done = "✅ 配置与插件已重载"

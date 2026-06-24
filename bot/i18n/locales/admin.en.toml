@@ -1,0 +1,78 @@
+# Admin handler shard — English (fallback).
+# Plain text; MarkdownV2 escaping happens at the output boundary.
+
+# --- common ---
+adm_platform_manager_uninitialized = "Platform manager is not initialized"
+adm_platform_unrecognized = "Unrecognized platform: {{.Args}}"
+adm_platform_unrecognized_usage = "Unrecognized platform: {{.Name}}\n\n{{.Usage}}"
+adm_no_platforms = "No platforms available"
+adm_exec_failed = "Execution failed: {{.Err}}"
+adm_exec_done = "Done"
+adm_cmd_unavailable = "Command unavailable"
+adm_complete_with_failures = "\nDone ({{.Count}} platform(s) failed)"
+
+# --- account login dispatch ---
+adm_sign_unsupported = "{{.Platform}} does not currently support check-in / VIP claim"
+adm_sign_done = "{{.Platform}} check-in / VIP claim complete"
+adm_renew_unsupported = "{{.Platform}} does not currently support renewal"
+adm_check_unsupported = "{{.Platform}} does not currently support account checking"
+adm_lang_unsupported = "{{.Platform}} does not currently support language settings"
+adm_cookie_import_unsupported = "{{.Platform}} does not currently support Cookie import"
+adm_cookie_usage = "Usage: /login {{.Platform}} cookie <cookie content>"
+adm_cookie_import_done = "Cookie import complete"
+adm_qr_unsupported = "{{.Platform}} does not currently support QR login"
+adm_qr_session_failed = "Failed to create QR code session"
+adm_qr_cancel_button = "Cancel login"
+adm_qr_timeout = "QR code expired, please run /login {{.Platform}} qr again"
+adm_sign_usage = "Usage: /login sign <platform>"
+adm_qr_poll_cancelled = "Login polling cancelled"
+
+# --- usage / help ---
+adm_login_usage = """Unified account commands:
+/status - View stats and account status
+/login <platform> help - Show supported login methods for a platform
+/login <platform> qr - QR login (if supported)
+/login <platform> cookie <cookie> - Import Cookie
+/login <platform> sign - Check-in / VIP claim (if supported)
+/login sign <platform> - Run check-in / VIP claim for a platform
+/login <platform> check - Check platform account status
+/login check - Check all platform account statuses
+/login <platform> renew - Manual renewal
+/login renew - Bulk renew all platforms
+/login <platform> auto on|off|status [intervalSec] - Auto renewal
+/login auto on|off|status [intervalSec] - Set auto renewal for all platforms
+Supported platforms: {{.Platforms}}"""
+adm_login_help = "{{.Platform}} supports: {{.Methods}}\n\nExamples:\n{{.Examples}}"
+adm_lang_arg = "language"
+
+# --- auto renewal ---
+adm_auto_unsupported = "{{.Platform}} does not currently support auto renewal"
+adm_auto_on = "Enabled auto renewal for {{.Platform}}, interval {{.Seconds}} seconds"
+adm_auto_off = "Disabled auto renewal for {{.Platform}} (current interval {{.Seconds}} seconds)"
+adm_auto_usage_platform = "Usage: /login {{.Platform}} auto on [intervalSec]\n/login {{.Platform}} auto off\n/login {{.Platform}} auto status"
+adm_auto_on_batch = "✅ {{.Platform}}: auto renewal enabled, interval {{.Seconds}} seconds"
+adm_auto_off_batch = "✅ {{.Platform}}: auto renewal disabled (current interval {{.Seconds}} seconds)"
+adm_auto_usage_batch = "Usage: /login auto on [intervalSec]\n/login auto off\n/login auto status"
+adm_auto_none = "No platforms support auto renewal"
+adm_auto_status = "{{.Platform}} auto renewal: {{.State}}, interval {{.Seconds}} seconds"
+adm_auto_state_off = "off"
+adm_auto_state_on = "on"
+
+# --- checkck / renewck ---
+adm_check_none = "No platforms support Cookie checking"
+adm_renew_cookie_unsupported = "{{.Platform}} does not support Cookie renewal"
+adm_renew_none = "No platforms support Cookie renewal"
+adm_check_unknown = "Unknown"
+adm_renew_done = "Renewal complete"
+
+# --- rmcache ---
+adm_rmcache_failed = "Failed to clear cache"
+adm_rmcache_all_done = "Cleared all cache"
+adm_rmcache_platform_all_done = "Cleared all cache for platform {{.Platform}}"
+adm_rmcache_invalid = "Send a valid song ID or URL, or use the format: /rmcache <platform> <trackID>|all"
+adm_rmcache_track_done = "Cleared cache for track {{.TrackID}} on platform {{.Platform}}"
+
+# --- reload ---
+adm_reload_disabled = "❌ Reload is not enabled"
+adm_reload_failed = "❌ Reload failed: {{.Err}}"
+adm_reload_done = "✅ Config and plugins reloaded"
