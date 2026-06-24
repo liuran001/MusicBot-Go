@@ -1071,11 +1071,12 @@ func (r *Repository) AddFavorite(ctx context.Context, fav *bot.Favorite) error {
 	return r.dataDB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "scope_type"}, {Name: "scope_id"}, {Name: "platform"}, {Name: "track_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"song_name":    model.SongName,
-			"song_artists": model.SongArtists,
-			"song_album":   model.SongAlbum,
-			"track_url":    model.TrackURL,
-			"updated_at":   time.Now(),
+			"song_name":         model.SongName,
+			"song_artists":      model.SongArtists,
+			"song_album":        model.SongAlbum,
+			"track_url":         model.TrackURL,
+			"song_artists_urls": model.SongArtistsURLs,
+			"updated_at":        time.Now(),
 		}),
 	}).Create(model).Error
 }

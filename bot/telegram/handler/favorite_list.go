@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -70,6 +71,59 @@ func truncateButtonLabel(s string, max int) string {
 		return string(r[:max])
 	}
 	return string(r[:max-1]) + "…"
+}
+
+// favoriteTrackLink returns a clickable URL for a favorite's track, falling back
+// to a constructed netease song URL when none was stored.
+func favoriteTrackLink(fav *botpkg.Favorite) string {
+	if u := strings.TrimSpace(fav.TrackURL); u != "" {
+		return u
+	}
+	if fav.Platform == "netease" && strings.TrimSpace(fav.TrackID) != "" {
+		return "https://music.163.com/song?id=" + strings.TrimSpace(fav.TrackID)
+	}
+	return ""
+}
+
+// favoriteArtistsHTML renders the artists as HTML, hyperlinking each to its
+// stored URL when available. Matches buildMusicCaption's "/"-joined convention.
+func favoriteArtistsHTML(fav *botpkg.Favorite) string {
+	raw := strings.TrimSpace(fav.SongArtists)
+	if raw == "" {
+		return ""
+	}
+	artists := strings.Split(raw, "/")
+	urls := strings.Split(fav.SongArtistsURLs, ",")
+	parts := make([]string, 0, len(artists))
+	for i, a := range artists {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		esc := html.EscapeString(a)
+		if i < len(urls) && strings.TrimSpace(urls[i]) != "" {
+			esc = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(strings.TrimSpace(urls[i])), esc)
+		}
+		parts = append(parts, esc)
+	}
+	return strings.Join(parts, " / ")
+}
+
+// favoriteSongHTML renders "<song> - <artists>" with the song name linked to the
+// track URL and each artist to its URL (HTML parse mode).
+func favoriteSongHTML(fav *botpkg.Favorite) string {
+	name := strings.TrimSpace(fav.SongName)
+	if name == "" {
+		name = fav.Platform + ":" + fav.TrackID
+	}
+	nameHTML := html.EscapeString(name)
+	if link := favoriteTrackLink(fav); link != "" {
+		nameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(link), nameHTML)
+	}
+	if artistsHTML := favoriteArtistsHTML(fav); artistsHTML != "" {
+		return nameHTML + " - " + artistsHTML
+	}
+	return nameHTML
 }
 
 func favoriteScopeForView(view string, payload favoriteListPayload) (string, int64) {
@@ -141,20 +195,13 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 		sb.WriteString("\n")
 		for i, fav := range favs {
 			idx := offset + i + 1
-			name := strings.TrimSpace(fav.SongName)
-			if name == "" {
-				name = fav.Platform + ":" + fav.TrackID
-			}
-			line := fmt.Sprintf("%d. %s", idx, name)
-			if a := strings.TrimSpace(fav.SongArtists); a != "" {
-				line += " - " + a
-			}
+			line := fmt.Sprintf("%d. %s", idx, favoriteSongHTML(fav))
 			if view == "g" {
 				who := strings.TrimSpace(fav.AddedByName)
 				if who == "" {
 					who = "匿名"
 				}
-				line += fmt.Sprintf("  · 👤 %s", who)
+				line += "  · 👤 " + html.EscapeString(who)
 			}
 			sb.WriteString(line)
 			sb.WriteString("\n")
@@ -220,6 +267,7 @@ func (h *FavoritesHandler) sendListMessage(ctx context.Context, b *telego.Bot, c
 	params := &telego.SendMessageParams{
 		ChatID:             telego.ChatID{ID: chatID},
 		Text:               text,
+		ParseMode:          telego.ModeHTML,
 		LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 	}
 	if replyToID != 0 {
@@ -251,7 +299,7 @@ func (h *FavoritesHandler) answerGuestList(ctx context.Context, b *telego.Bot, m
 		Type:                telego.ResultTypeArticle,
 		ID:                  nextGuestResultID("fav"),
 		Title:               "收藏列表",
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: text, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}},
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: text, ParseMode: telego.ModeHTML, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}},
 		ReplyMarkup:         markup,
 	}
 	_, _ = b.AnswerGuestQuery(ctx, &telego.AnswerGuestQueryParams{GuestQueryID: guestQueryID, Result: article})
@@ -287,6 +335,7 @@ func (h *FavoritesHandler) editListMessage(ctx context.Context, b *telego.Bot, q
 				ChatID:             telego.ChatID{ID: msg.Chat.ID},
 				MessageID:          msg.MessageID,
 				Text:               text,
+				ParseMode:          telego.ModeHTML,
 				LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 			}
 			if markup != nil {
@@ -304,6 +353,7 @@ func (h *FavoritesHandler) editListMessage(ctx context.Context, b *telego.Bot, q
 		params := &telego.EditMessageTextParams{
 			InlineMessageID:    query.InlineMessageID,
 			Text:               text,
+			ParseMode:          telego.ModeHTML,
 			LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 		}
 		if markup != nil {

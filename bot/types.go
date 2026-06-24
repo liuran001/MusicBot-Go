@@ -53,20 +53,21 @@ const (
 // collector is shown; for personal favorites it equals ScopeID). Song metadata
 // is denormalized so the list renders without touching the volatile song cache.
 type Favorite struct {
-	ID            uint
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
-	ScopeType     string
-	ScopeID       int64
-	Platform      string
-	TrackID       string
-	AddedByUserID int64
-	AddedByName   string
-	SongName      string
-	SongArtists   string
-	SongAlbum     string
-	TrackURL      string
+	ID              uint
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+	ScopeType       string
+	ScopeID         int64
+	Platform        string
+	TrackID         string
+	AddedByUserID   int64
+	AddedByName     string
+	SongName        string
+	SongArtists     string
+	SongAlbum       string
+	TrackURL        string
+	SongArtistsURLs string
 }
 
 // UserSettings represents user preferences for the bot.

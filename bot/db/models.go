@@ -199,16 +199,17 @@ func (PluginSettingModel) TableName() string {
 // in the volatile song cache, so song metadata is denormalized here.
 type FavoriteModel struct {
 	gorm.Model
-	ScopeType     string `gorm:"uniqueIndex:idx_fav_scope_track,priority:1;not null"`
-	ScopeID       int64  `gorm:"uniqueIndex:idx_fav_scope_track,priority:2;not null"`
-	Platform      string `gorm:"uniqueIndex:idx_fav_scope_track,priority:3;not null"`
-	TrackID       string `gorm:"uniqueIndex:idx_fav_scope_track,priority:4;not null"`
-	AddedByUserID int64  `gorm:"index"`
-	AddedByName   string
-	SongName      string
-	SongArtists   string
-	SongAlbum     string
-	TrackURL      string
+	ScopeType       string `gorm:"uniqueIndex:idx_fav_scope_track,priority:1;not null"`
+	ScopeID         int64  `gorm:"uniqueIndex:idx_fav_scope_track,priority:2;not null"`
+	Platform        string `gorm:"uniqueIndex:idx_fav_scope_track,priority:3;not null"`
+	TrackID         string `gorm:"uniqueIndex:idx_fav_scope_track,priority:4;not null"`
+	AddedByUserID   int64  `gorm:"index"`
+	AddedByName     string
+	SongName        string
+	SongArtists     string
+	SongAlbum       string
+	TrackURL        string
+	SongArtistsURLs string
 }
 
 func (FavoriteModel) TableName() string {
@@ -217,20 +218,21 @@ func (FavoriteModel) TableName() string {
 
 func toFavorite(model FavoriteModel) *bot.Favorite {
 	return &bot.Favorite{
-		ID:            model.ID,
-		CreatedAt:     model.CreatedAt,
-		UpdatedAt:     model.UpdatedAt,
-		DeletedAt:     deletedAtPtr(model.DeletedAt),
-		ScopeType:     model.ScopeType,
-		ScopeID:       model.ScopeID,
-		Platform:      model.Platform,
-		TrackID:       model.TrackID,
-		AddedByUserID: model.AddedByUserID,
-		AddedByName:   model.AddedByName,
-		SongName:      model.SongName,
-		SongArtists:   model.SongArtists,
-		SongAlbum:     model.SongAlbum,
-		TrackURL:      model.TrackURL,
+		ID:              model.ID,
+		CreatedAt:       model.CreatedAt,
+		UpdatedAt:       model.UpdatedAt,
+		DeletedAt:       deletedAtPtr(model.DeletedAt),
+		ScopeType:       model.ScopeType,
+		ScopeID:         model.ScopeID,
+		Platform:        model.Platform,
+		TrackID:         model.TrackID,
+		AddedByUserID:   model.AddedByUserID,
+		AddedByName:     model.AddedByName,
+		SongName:        model.SongName,
+		SongArtists:     model.SongArtists,
+		SongAlbum:       model.SongAlbum,
+		TrackURL:        model.TrackURL,
+		SongArtistsURLs: model.SongArtistsURLs,
 	}
 }
 
@@ -239,16 +241,17 @@ func toFavoriteModel(fav *bot.Favorite) *FavoriteModel {
 		return &FavoriteModel{}
 	}
 	model := &FavoriteModel{
-		ScopeType:     fav.ScopeType,
-		ScopeID:       fav.ScopeID,
-		Platform:      fav.Platform,
-		TrackID:       fav.TrackID,
-		AddedByUserID: fav.AddedByUserID,
-		AddedByName:   fav.AddedByName,
-		SongName:      fav.SongName,
-		SongArtists:   fav.SongArtists,
-		SongAlbum:     fav.SongAlbum,
-		TrackURL:      fav.TrackURL,
+		ScopeType:       fav.ScopeType,
+		ScopeID:         fav.ScopeID,
+		Platform:        fav.Platform,
+		TrackID:         fav.TrackID,
+		AddedByUserID:   fav.AddedByUserID,
+		AddedByName:     fav.AddedByName,
+		SongName:        fav.SongName,
+		SongArtists:     fav.SongArtists,
+		SongAlbum:       fav.SongAlbum,
+		TrackURL:        fav.TrackURL,
+		SongArtistsURLs: fav.SongArtistsURLs,
 	}
 	if fav.ID != 0 {
 		model.ID = fav.ID

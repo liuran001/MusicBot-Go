@@ -139,10 +139,11 @@ func parseFavoriteToggleData(args []string) parsedFavoriteToggle {
 
 // favoriteMeta is the denormalized song metadata stored alongside a favorite.
 type favoriteMeta struct {
-	songName    string
-	songArtists string
-	songAlbum   string
-	trackURL    string
+	songName        string
+	songArtists     string
+	songAlbum       string
+	trackURL        string
+	songArtistsURLs string
 }
 
 // findSongMetaForFavorite resolves display metadata for a track, preferring the
@@ -155,6 +156,7 @@ func findSongMetaForFavorite(ctx context.Context, repo botpkg.SongRepository, mg
 			meta.songArtists = s.SongArtists
 			meta.songAlbum = s.SongAlbum
 			meta.trackURL = s.TrackURL
+			meta.songArtistsURLs = s.SongArtistsURLs
 		}
 	}
 	if meta.songName == "" && mgr != nil {
@@ -166,6 +168,7 @@ func findSongMetaForFavorite(ctx context.Context, repo botpkg.SongRepository, mg
 				meta.songArtists = si.SongArtists
 				meta.songAlbum = si.SongAlbum
 				meta.trackURL = si.TrackURL
+				meta.songArtistsURLs = si.SongArtistsURLs
 			}
 		}
 	}
@@ -216,16 +219,17 @@ func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongReposito
 
 	meta := findSongMetaForFavorite(ctx, repo, mgr, platformName, trackID)
 	fav := &botpkg.Favorite{
-		ScopeType:     scopeType,
-		ScopeID:       scopeID,
-		Platform:      platformName,
-		TrackID:       trackID,
-		AddedByUserID: clickerID,
-		AddedByName:   strings.TrimSpace(clickerName),
-		SongName:      meta.songName,
-		SongArtists:   meta.songArtists,
-		SongAlbum:     meta.songAlbum,
-		TrackURL:      meta.trackURL,
+		ScopeType:       scopeType,
+		ScopeID:         scopeID,
+		Platform:        platformName,
+		TrackID:         trackID,
+		AddedByUserID:   clickerID,
+		AddedByName:     strings.TrimSpace(clickerName),
+		SongName:        meta.songName,
+		SongArtists:     meta.songArtists,
+		SongAlbum:       meta.songAlbum,
+		TrackURL:        meta.trackURL,
+		SongArtistsURLs: meta.songArtistsURLs,
 	}
 	if err := repo.AddFavorite(ctx, fav); err != nil {
 		return favoriteToggleOutcome{}, err
