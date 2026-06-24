@@ -3,6 +3,7 @@ package netease
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -12,9 +13,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -22,6 +21,12 @@ import (
 	embind "github.com/jerbob92/wazero-emscripten-embind"
 	"github.com/tetratelabs/wazero"
 )
+
+// afpWasm is the fingerprint encoder compiled into the binary. The module is
+// loaded once at startup via wazero; no external file is required at runtime.
+//
+//go:embed recognize/wasm/afp.wasm
+var afpWasm []byte
 
 // afp.wasm fingerprint parameters, lifted verbatim from the upstream
 // ncm-audio-recognize JS reference (sandbox.bundle.cjs):
@@ -48,14 +53,6 @@ const (
 	recognizeUA     = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36"
 	recognizeOrigin = "chrome-extension://pgphbbekcgpfaekhcbjamjjkegcclhhd"
 )
-
-// candidate locations of afp.wasm (container path first, then repo-relative).
-var afpWasmPaths = []string{
-	"/app/plugins/netease/recognize/wasm/afp.wasm",
-	filepath.Join("plugins", "netease", "recognize", "wasm", "afp.wasm"),
-	// package-relative fallback (e.g. when running `go test` in this package)
-	filepath.Join("recognize", "wasm", "afp.wasm"),
-}
 
 // RecognizeService encodes an audio fingerprint with the embedded afp.wasm
 // module (driven purely in Go via wazero + embind, no Node.js) and matches it
@@ -284,17 +281,12 @@ func (s *RecognizeService) match(ctx context.Context, encoded string) (*Recogniz
 	return &result, nil
 }
 
-// loadAFPWasm reads the embedded fingerprint encoder from the known paths.
+// loadAFPWasm returns the fingerprint encoder embedded into the binary.
 func loadAFPWasm() ([]byte, error) {
-	var lastErr error
-	for _, p := range afpWasmPaths {
-		data, err := os.ReadFile(p)
-		if err == nil {
-			return data, nil
-		}
-		lastErr = err
+	if len(afpWasm) == 0 {
+		return nil, fmt.Errorf("recognize: embedded afp.wasm is empty")
 	}
-	return nil, fmt.Errorf("recognize: afp.wasm not found in %v: %w", afpWasmPaths, lastErr)
+	return afpWasm, nil
 }
 
 // decodePCM converts arbitrary audio bytes to mono float32 PCM at 48kHz using

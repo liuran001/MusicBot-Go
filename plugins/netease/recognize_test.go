@@ -16,8 +16,8 @@ func TestRecognizeFingerprint(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg not available")
 	}
-	if _, err := loadAFPWasm(); err != nil {
-		t.Skipf("afp.wasm not available: %v", err)
+	if len(afpWasm) == 0 {
+		t.Fatal("afp.wasm not embedded into the binary")
 	}
 
 	audio, err := os.ReadFile(filepath.Join("testdata", "recognize_tone.mp3"))
