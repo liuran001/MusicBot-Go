@@ -27,18 +27,20 @@ const (
 
 func GroupFavoritesSettingDefinition() botpkg.PluginSettingDefinition {
 	return botpkg.PluginSettingDefinition{
-		Plugin:       GroupFavPlugin,
-		Key:          GroupFavKey,
-		Title:        "启用群聊收藏",
-		Description:  "群内是否提供共享的群聊收藏",
-		DefaultGroup: GroupFavOn,
-		DefaultUser:  GroupFavOff,
-		GroupOnly:    true,
-		Order:        121,
+		Plugin:         GroupFavPlugin,
+		Key:            GroupFavKey,
+		Title:          "启用群聊收藏",
+		TitleKey:       "set_pdef_groupfav_title",
+		Description:    "群内是否提供共享的群聊收藏",
+		DescriptionKey: "set_pdef_groupfav_desc",
+		DefaultGroup:   GroupFavOn,
+		DefaultUser:    GroupFavOff,
+		GroupOnly:      true,
+		Order:          121,
 		Options: []botpkg.PluginSettingOption{
-			{Value: GroupFavOn, Label: "开"},
-			{Value: GroupFavAdmin, Label: "仅管理员收藏"},
-			{Value: GroupFavOff, Label: "关"},
+			{Value: GroupFavOn, Label: "开", LabelKey: "set_state_on"},
+			{Value: GroupFavAdmin, Label: "仅管理员收藏", LabelKey: "set_pdef_groupfav_admin"},
+			{Value: GroupFavOff, Label: "关", LabelKey: "set_state_off"},
 		},
 	}
 }

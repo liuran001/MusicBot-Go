@@ -51,3 +51,10 @@ set_resp_language_set = "✅ Language set to {{.Name}}"
 set_lang_name_en = "English"
 set_lang_name_zh = "简体中文"
 set_lang_name_ja = "日本語"
+
+# --- plugin setting definitions (forward button / group favorites) ---
+set_pdef_forward_title = "Show song bottom buttons"
+set_pdef_forward_desc = "Whether to show bottom buttons (send to chat / show lyrics / favorite) when sending a song"
+set_pdef_groupfav_title = "Enable group favorites"
+set_pdef_groupfav_desc = "Whether the group offers shared group favorites"
+set_pdef_groupfav_admin = "Admins only"
