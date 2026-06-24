@@ -1,0 +1,78 @@
+# Guest mode / mention router / artist / recognize / lyric-callback shard (zh).
+# Values are the EXACT original strings replaced in code.
+
+# --- guest search page (MarkdownV2) ---
+guest_search_results = "搜索结果"
+guest_pick_number_hint = "点击最下方数字选择对应歌曲"
+guest_keyword_label = "关键词: "
+guest_page_indicator = "第 {{.Page}}/{{.Total}} 页"
+
+# --- guest search buttons / toasts ---
+guest_nav_prev = "⬅️ 上一页"
+guest_nav_next = "➡️ 下一页"
+guest_nav_home = "🏠 回到主页"
+guest_filter_on = "开"
+guest_filter_off = "关"
+guest_close = "❌ 关闭"
+guest_bad_params = "参数错误"
+guest_search_expired = "搜索结果已过期，请重新搜索"
+guest_closed = "已关闭"
+guest_platform_unavailable = "平台不可用"
+guest_search_failed_retry = "搜索失败，请稍后重试"
+guest_no_results_platform = "未找到结果（{{.Platform}}）"
+guest_page_toast = "第 {{.Page}} 页"
+
+# --- guest song / playlist / lyric / recognize flows ---
+guest_service_unavailable = "服务不可用"
+guest_input_song_or_link = "请输入歌曲名或链接"
+guest_requester_unknown = "无法识别发起者"
+guest_loading_playlist = "正在加载歌单…"
+guest_unsupported_platform = "不支持的平台"
+guest_playlist_failed_or_empty = "获取歌单失败或歌单为空"
+guest_playlist_default_title = "歌单"
+guest_search_service_unavailable = "搜索服务不可用"
+guest_input_keyword = "请输入关键词"
+guest_lyric_service_unavailable = "歌词服务不可用"
+guest_fetching_lyric = "正在获取歌词…"
+guest_song_not_found = "未找到相关歌曲"
+guest_platform_no_lyrics = "此平台不支持获取歌词"
+guest_get_lyric_failed = "获取歌词失败"
+guest_recognizing = "正在识别…"
+guest_recognize_service_unavailable = "识别服务未启动"
+guest_reply_voice_message = "请回复一条语音消息"
+guest_get_voice_failed = "获取语音失败，请稍后重试"
+guest_voice_too_large = "语音过大，无法识别"
+guest_downloading_voice = "正在下载语音…"
+guest_download_voice_failed = "下载语音失败，请稍后重试"
+guest_converting_audio = "正在转换音频…"
+guest_audio_convert_failed = "音频格式转换失败，请稍后重试"
+guest_recognize_failed_short = "识别失败，可能是录音时间太短"
+
+# --- recognize handler ---
+guest_reply_voice_note = "请回复一条语音留言"
+guest_recognize_service_unavailable_admin = "识别服务未启动，请联系管理员"
+guest_recognize_failed_retry = "识别失败，请稍后重试"
+
+# --- artist info ---
+guest_artist_info = "歌手信息"
+guest_artist_unknown = "未知歌手"
+guest_artist_platform_label = "平台：{{.Platform}}"
+guest_artist_name_label = "歌手：{{.Name}}"
+guest_artist_link_label = "链接：{{.URL}}"
+guest_artist_track_count_label = "代表作品数：{{.Count}}"
+guest_artist_avatar_label = "头像：{{.URL}}"
+guest_artist_not_found = "未找到歌手"
+guest_artist_unsupported = "当前平台暂不支持歌手信息解析"
+guest_artist_unavailable = "歌手信息暂时不可用，请稍后重试"
+
+# --- lyric format-switch callbacks ---
+guest_lyric_only_requester_get = "只有发起者可以获取歌词"
+guest_lyric_fetching = "正在获取歌词..."
+guest_lyric_button_expired = "按钮已过期，请重新发送 /lyric"
+guest_lyric_only_requester_switch = "只有发起者可以切换格式"
+guest_lyric_processing = "处理中，请稍候"
+guest_lyric_generating = "正在生成 {{.Format}}"
+guest_lyric_save_default_failed_nosave = "无法保存默认设置"
+guest_lyric_admin_only_group_default = "❌ 仅管理员可保存群组默认歌词格式"
+guest_lyric_save_default_failed = "❌ 保存默认设置失败"
+guest_lyric_saved_default = "✅ 已保存为默认歌词格式: {{.Format}}"

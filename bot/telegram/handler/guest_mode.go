@@ -91,7 +91,7 @@ func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 			h.Favorites.answerGuestList(ctx, b, message, guestQueryID)
 			return
 		}
-		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_input_song_or_link"))
 		return
 	}
 
