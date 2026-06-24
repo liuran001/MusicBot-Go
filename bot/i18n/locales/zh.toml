@@ -1,0 +1,144 @@
+# Chinese (Simplified) catalog — source of truth migrated from handler/texts.go.
+# Authored as PLAIN text. MarkdownV2 escaping happens at the output boundary
+# (Localizer.Tmd), so do NOT hand-escape reserved characters here.
+
+# --- status / progress (texts.go package vars) ---
+hit_cache = "已命中缓存，正在发送…"
+input_id_or_keyword = "请发送歌曲 ID 或关键词，或使用 /rmcache all 清空全部缓存"
+inline_tap_to_send = "没反应？点此刷新"
+send_me_to = "发送到聊天…"
+wait_for_down = "等待下载…"
+fetch_info = "正在获取歌曲信息…"
+fetch_info_failed = "获取歌曲信息失败"
+downloading = "正在下载…"
+uploading = "下载完成，正在发送…"
+md5_ver_failed = "MD5 校验失败"
+download_timeout = "下载超时"
+searching = "正在搜索…"
+fetching_playlist = "正在获取歌单…"
+fetching_lyric = "正在获取歌词…"
+no_results = "没有找到结果，换个关键词试试"
+playlist_empty = "歌单里没有歌曲"
+get_lrc_failed = "未找到歌词，可能是纯音乐或平台暂不支持"
+callback_success = "Success"
+callback_denied = "仅发起人或管理员可操作"
+
+# --- usage prompts ---
+input_keyword = """请发送搜索关键词
+
+示例：
+/search 周杰伦
+/search 起风了 qq"""
+
+input_content = """请发送歌曲名、链接或 ID
+
+示例：
+/music 周杰伦
+/music https://music.163.com/song/1859603835"""
+
+input_lyric_content = """请发送歌曲名、链接或 ID，或回复一条歌曲消息
+
+示例：
+/lyric 稻香
+/lyric 稻香 qrc"""
+
+# --- download progress (parametric) ---
+downloading_named = "正在下载：{{.Title}}\n已下载：{{.WrittenMB}} MB"
+downloading_progress = "正在下载：{{.Title}}\n进度：{{.Percent}}% ({{.WrittenMB}} MB / {{.TotalMB}} MB)"
+upload_queue_ahead = "当前正在发送队列中，前面还有 {{.Count}} 个任务"
+download_queue_ahead = "当前正在下载队列中，前面还有 {{.Count}} 个任务"
+
+# --- queue / download wait ---
+queue_overloaded = "下载队列已满，请稍后重试"
+
+# --- user-visible error mapping (userVisibleDownloadError / search / playlist) ---
+err_process_timeout = "处理超时，请稍后重试"
+err_task_canceled = "任务已取消，请稍后重试"
+err_download_overloaded = "当前下载任务过多，请稍后再试"
+err_upload_overloaded = "当前发送任务过多，请稍后再试"
+err_rate_limited = "请求过于频繁，请稍后重试"
+err_auth_required = "平台认证已失效，请联系管理员更新凭据"
+err_unavailable = "当前歌曲暂不可用，请稍后再试"
+err_download_failed = "下载/发送失败，请稍后重试"
+err_search_unsupported = "此平台不支持搜索功能"
+err_search_unavailable = "搜索服务暂时不可用"
+err_playlist_unsupported = "此平台不支持获取歌单"
+err_playlist_unavailable = "歌单服务暂时不可用"
+err_playlist_not_found = "未找到歌单"
+
+# --- music info text ---
+album_label = "专辑: "
+
+# --- bot command menu (setMyCommands) ---
+cmd_help = "使用说明"
+cmd_music = "下载歌曲"
+cmd_search = "搜索歌曲"
+cmd_lyric = "获取歌词"
+cmd_fav = "收藏歌曲 / 查看收藏列表"
+cmd_settings = "默认平台、音质与歌词格式"
+cmd_recognize = "听歌识曲"
+cmd_status = "缓存与账号状态"
+cmd_about = "版本与插件信息"
+
+# --- bot profile (setMyName / setMyShortDescription / setMyDescription) ---
+bot_name = "MusicBot-Go 音乐机器人"
+bot_short_description = "多平台音乐 / 歌词下载机器人"
+bot_description = "发送歌曲名、链接或 ID，即可搜索和下载音乐。支持网易云音乐、QQ音乐等多个平台。"
+
+# --- help / about / status (MarkdownV2 templates: authored WITH markdown,
+# rendered via T not Tmd; dynamic values are escaped by their builders) ---
+help_intro = "发送歌曲名、链接或 ID，即可搜索和下载音乐。"
+help_private_hint = "私聊中可直接发送内容，无需输入命令。"
+help_section_commands = "🚀 常用命令"
+help_cmd_music = "下载歌曲"
+help_cmd_search = "搜索歌曲"
+help_cmd_lyric = "获取歌词"
+help_cmd_recognize = "听歌识曲（回复一条语音）"
+help_cmd_settings = "默认平台、音质与歌词格式"
+help_cmd_status = "缓存与账号状态"
+help_cmd_about = "版本与插件信息"
+help_section_params = "🎚 参数"
+help_quality_label = "音质"
+help_platform_label = "平台"
+help_supported_platforms = "支持平台"
+help_section_examples = "💡 示例"
+help_section_admin = "🛠 管理员命令"
+help_arg_track = "歌名|链接|ID"
+help_arg_keyword = "关键词"
+about_title = "MusicBot-Go"
+about_version = "版本"
+about_source = "源码"
+about_plugins = "插件"
+about_build = "构建"
+about_build_env = "编译环境"
+about_build_date = "编译日期"
+about_runtime_env = "运行环境"
+status_title = "状态"
+status_cache = "缓存"
+status_total = "全部"
+status_this_chat = "本聊天"
+status_your_cache = "你缓存"
+status_sent = "已发送"
+status_unit_tracks = "首"
+status_unit_times = "次"
+status_platform_cache = "平台缓存"
+status_available_platforms = "可用平台"
+status_accounts = "账号"
+status_logged_in = "已登录"
+status_state_available = "可用"
+status_state_not_logged_in = "未登录"
+status_state_error = "异常"
+status_state_uninitialized = "未初始化"
+status_state_guest = "访客"
+status_check_failed = "状态检查失败"
+status_no_accounts = "未发现可查询的平台账号"
+status_field_state = "状态"
+status_field_nickname = "昵称"
+status_field_userid = "用户ID"
+status_field_login_method = "登录方式"
+status_field_supports = "支持"
+status_field_source = "来源"
+
+help_default_platforms = "网易云音乐, QQ音乐"
+
+about_no_plugins = "无"

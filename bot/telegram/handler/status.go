@@ -59,11 +59,13 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 
 	sendCount, _ := h.Repo.GetSendCount(ctx)
-	msgText := fmt.Sprintf(statusInfo, fromCount, chatInfo, chatCount, userID, userID, userCount, sendCount)
 	parseMode := telego.ModeMarkdownV2
+	var msgText string
 	if useHTML {
-		msgText = buildStatusInfoHTML(fromCount, chatInfo, chatCount, userID, userCount, sendCount)
+		msgText = buildStatusInfoHTML(ctx, fromCount, chatInfo, chatCount, userID, userCount, sendCount)
 		parseMode = telego.ModeHTML
+	} else {
+		msgText = buildStatusInfoMarkdown(ctx, fromCount, chatInfo, chatCount, userID, userCount, sendCount)
 	}
 
 	if platformCounts, err := h.Repo.CountByPlatform(ctx); err == nil && len(platformCounts) > 0 {
@@ -80,7 +82,11 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 			}
 			lines = append(lines, fmt.Sprintf("%s: %d", display, platformCounts[name]))
 		}
-		msgText += "\n📦 平台缓存\n" + strings.Join(lines, "\n")
+		label := tr(ctx, "status_platform_cache")
+		if !useHTML {
+			label = mdV2Replacer.Replace(label)
+		}
+		msgText += "\n📦 " + label + "\n" + strings.Join(lines, "\n")
 	}
 
 	if h.PlatformManager != nil {
@@ -98,7 +104,11 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 				}
 				platformsEscaped = strings.Join(escaped, " / ")
 			}
-			msgText += fmt.Sprintf("\n\n📱 可用平台\n%s", platformsEscaped)
+			label := tr(ctx, "status_available_platforms")
+			if !useHTML {
+				label = mdV2Replacer.Replace(label)
+			}
+			msgText += fmt.Sprintf("\n\n📱 %s\n%s", label, platformsEscaped)
 		}
 	}
 
@@ -140,7 +150,7 @@ func (h *StatusHandler) buildAccountStatusSection(ctx context.Context, detailed 
 			statuses = append(statuses, platform.AccountStatus{
 				Platform:    name,
 				DisplayName: platformDisplayName(h.PlatformManager, name),
-				Summary:     "状态检查失败",
+				Summary:     tr(ctx, "status_check_failed"),
 			})
 			continue
 		}
@@ -152,59 +162,60 @@ func (h *StatusHandler) buildAccountStatusSection(ctx context.Context, detailed 
 	if len(statuses) == 0 {
 		return ""
 	}
+	accountsLabel := tr(ctx, "status_accounts")
 	if detailed {
-		return "\n\n🔐 账号\n" + renderDetailedAccountStatusesHTML(statuses)
+		return "\n\n🔐 " + accountsLabel + "\n" + renderDetailedAccountStatusesHTML(ctx, statuses)
 	}
-	return "\n\n🔐 账号\n" + mdV2Replacer.Replace(renderSafeAccountStatuses(statuses))
+	return "\n\n🔐 " + mdV2Replacer.Replace(accountsLabel) + "\n" + mdV2Replacer.Replace(renderSafeAccountStatuses(ctx, statuses))
 }
 
-func renderSafeAccountStatuses(statuses []platform.AccountStatus) string {
+func renderSafeAccountStatuses(ctx context.Context, statuses []platform.AccountStatus) string {
 	if len(statuses) == 0 {
-		return "未发现可查询的平台账号"
+		return tr(ctx, "status_no_accounts")
 	}
 	available := 0
 	lines := make([]string, 0, len(statuses)+1)
 	for _, status := range statuses {
-		state := "未登录"
+		state := tr(ctx, "status_state_not_logged_in")
 		icon := "❌"
 		if status.LoggedIn {
-			state = "可用"
+			state = tr(ctx, "status_state_available")
 			icon = "✅"
 			available++
 		} else if strings.TrimSpace(status.Summary) != "" {
-			state = classifySafeStatus(status)
+			state = classifySafeStatus(ctx, status)
 		}
 		lines = append(lines, fmt.Sprintf("%s %s：%s", icon, status.DisplayName, state))
 	}
-	return fmt.Sprintf("已登录：%d/%d\n%s", available, len(statuses), strings.Join(lines, "\n"))
+	return fmt.Sprintf("%s：%d/%d\n%s", tr(ctx, "status_logged_in"), available, len(statuses), strings.Join(lines, "\n"))
 }
 
-func renderDetailedAccountStatusesHTML(statuses []platform.AccountStatus) string {
+func renderDetailedAccountStatusesHTML(ctx context.Context, statuses []platform.AccountStatus) string {
 	blocks := make([]string, 0, len(statuses))
 	for _, status := range statuses {
 		emoji := "❌"
-		stateText := "未登录"
+		stateText := tr(ctx, "status_state_not_logged_in")
 		if status.LoggedIn {
 			emoji = "✅"
-			stateText = "已登录"
+			stateText = tr(ctx, "status_logged_in")
 		}
 		header := fmt.Sprintf("%s %s（%s）", emoji, html.EscapeString(strings.TrimSpace(status.DisplayName)), html.EscapeString(stateText))
 		detailLines := make([]string, 0, 8)
-		detailLines = append(detailLines, "状态: "+stateText)
+		detailLines = append(detailLines, tr(ctx, "status_field_state")+": "+stateText)
 		if strings.TrimSpace(status.Nickname) != "" {
-			detailLines = append(detailLines, "昵称: "+strings.TrimSpace(status.Nickname))
+			detailLines = append(detailLines, tr(ctx, "status_field_nickname")+": "+strings.TrimSpace(status.Nickname))
 		}
 		if strings.TrimSpace(status.UserID) != "" {
-			detailLines = append(detailLines, "用户ID: "+maskStatusUserID(status.UserID))
+			detailLines = append(detailLines, tr(ctx, "status_field_userid")+": "+maskStatusUserID(status.UserID))
 		}
 		if strings.TrimSpace(status.AuthMode) != "" {
-			detailLines = append(detailLines, "登录方式: "+strings.TrimSpace(status.AuthMode))
+			detailLines = append(detailLines, tr(ctx, "status_field_login_method")+": "+strings.TrimSpace(status.AuthMode))
 		}
 		if len(status.SupportedLogins) > 0 {
-			detailLines = append(detailLines, "支持: "+strings.Join(status.SupportedLogins, ", "))
+			detailLines = append(detailLines, tr(ctx, "status_field_supports")+": "+strings.Join(status.SupportedLogins, ", "))
 		}
 		if strings.TrimSpace(status.SessionSource) != "" {
-			detailLines = append(detailLines, "来源: "+strings.TrimSpace(status.SessionSource))
+			detailLines = append(detailLines, tr(ctx, "status_field_source")+": "+strings.TrimSpace(status.SessionSource))
 		}
 		if strings.TrimSpace(status.Summary) != "" {
 			for _, line := range strings.Split(strings.TrimSpace(status.Summary), "\n") {
@@ -224,25 +235,44 @@ func renderDetailedAccountStatusesHTML(statuses []platform.AccountStatus) string
 	return strings.Join(blocks, "\n")
 }
 
-func buildStatusInfoHTML(fromCount int64, chatInfo string, chatCount int64, userID int64, userCount int64, sendCount int64) string {
-	return fmt.Sprintf("<b>📊 状态</b>\n\n🎧 缓存\n全部：%d 首\n本聊天 [%s]：%d 首\n你缓存 [<a href=\"tg://user?id=%d\">%d</a>]：%d 首\n已发送：%d 次\n",
-		fromCount, chatInfo, chatCount, userID, userID, userCount, sendCount)
+// buildStatusInfoMarkdown renders the cache summary block as MarkdownV2. Labels
+// come from the catalog; the structural markdown lives here.
+func buildStatusInfoMarkdown(ctx context.Context, fromCount int64, chatInfo string, chatCount int64, userID int64, userCount int64, sendCount int64) string {
+	esc := func(id string) string { return mdV2Replacer.Replace(tr(ctx, id)) }
+	tracks := esc("status_unit_tracks")
+	return fmt.Sprintf("*📊 %s*\n\n🎧 %s\n%s：%d %s\n%s \\[%s\\]：%d %s\n%s \\[[%d](tg://user?id=%d)\\]：%d %s\n%s：%d %s\n",
+		esc("status_title"), esc("status_cache"),
+		esc("status_total"), fromCount, tracks,
+		esc("status_this_chat"), chatInfo, chatCount, tracks,
+		esc("status_your_cache"), userID, userID, userCount, tracks,
+		esc("status_sent"), sendCount, esc("status_unit_times"))
 }
 
-func classifySafeStatus(status platform.AccountStatus) string {
+func buildStatusInfoHTML(ctx context.Context, fromCount int64, chatInfo string, chatCount int64, userID int64, userCount int64, sendCount int64) string {
+	esc := func(id string) string { return html.EscapeString(tr(ctx, id)) }
+	tracks := esc("status_unit_tracks")
+	return fmt.Sprintf("<b>📊 %s</b>\n\n🎧 %s\n%s：%d %s\n%s [%s]：%d %s\n%s [<a href=\"tg://user?id=%d\">%d</a>]：%d %s\n%s：%d %s\n",
+		esc("status_title"), esc("status_cache"),
+		esc("status_total"), fromCount, tracks,
+		esc("status_this_chat"), chatInfo, chatCount, tracks,
+		esc("status_your_cache"), userID, userID, userCount, tracks,
+		esc("status_sent"), sendCount, esc("status_unit_times"))
+}
+
+func classifySafeStatus(ctx context.Context, status platform.AccountStatus) string {
 	summary := strings.ToLower(strings.TrimSpace(status.Summary))
 	if summary == "" {
-		return "未登录"
+		return tr(ctx, "status_state_not_logged_in")
 	}
 	switch {
-	case strings.Contains(summary, "失败"):
-		return "异常"
-	case strings.Contains(summary, "未初始化"):
-		return "未初始化"
-	case strings.Contains(summary, "访客"):
-		return "访客"
+	case strings.Contains(summary, "失败") || strings.Contains(summary, "fail"):
+		return tr(ctx, "status_state_error")
+	case strings.Contains(summary, "未初始化") || strings.Contains(summary, "uninitial"):
+		return tr(ctx, "status_state_uninitialized")
+	case strings.Contains(summary, "访客") || strings.Contains(summary, "guest"):
+		return tr(ctx, "status_state_guest")
 	default:
-		return "未登录"
+		return tr(ctx, "status_state_not_logged_in")
 	}
 }
 

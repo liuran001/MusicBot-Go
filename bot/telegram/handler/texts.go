@@ -1,99 +1,69 @@
 package handler
 
 import (
+	"context"
 	"sort"
 	"strings"
 
 	"github.com/liuran001/MusicBot-Go/bot/admincmd"
+	"github.com/liuran001/MusicBot-Go/bot/i18n"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
-var mdV2Replacer = strings.NewReplacer(
-	"_", "\\_", "*", "\\*", "[", "\\[", "]", "\\]", "(",
-	"\\(", ")", "\\)", "~", "\\~", "`", "\\`", ">", "\\>",
-	"#", "\\#", "+", "\\+", "-", "\\-", "=", "\\=", "|",
-	"\\|", "{", "\\{", "}", "\\}", ".", "\\.", "!", "\\!",
-)
+// mdV2Replacer escapes MarkdownV2 reserved characters. It is the same replacer
+// centralized in the i18n package; kept here as a thin alias so existing handler
+// call sites (which escape dynamic, non-catalog values like platform names and
+// chat titles) need no churn.
+var mdV2Replacer = i18n.MarkdownV2Replacer()
 
-var (
-	aboutText = `*ℹ️ MusicBot\-Go*
-版本：%s
-源码：https://github\.com/liuran001/MusicBot\-Go
+// callbackText is a protocol token shown in callback acknowledgements; it is
+// intentionally NOT localized (Telegram treats empty/▾ differently and existing
+// clients expect the literal). Kept as a const for call-site clarity.
+const callbackText = "Success"
 
-🧩 插件
-%s
-
-🛠 构建
-编译环境：%s
-编译日期：%s
-运行环境：%s`
-	hitCache          = "已命中缓存，正在发送…"
-	inputIDorKeyword  = "请发送歌曲 ID 或关键词，或使用 /rmcache all 清空全部缓存"
-	inlineTapToSend   = "没反应？点此刷新"
-	sendMeTo          = "发送到聊天…"
-	waitForDown       = "等待下载…"
-	fetchInfo         = "正在获取歌曲信息…"
-	fetchInfoFailed   = "获取歌曲信息失败"
-	downloading       = "正在下载…"
-	uploading         = "下载完成，正在发送…"
-	md5VerFailed      = "MD5 校验失败"
-	downloadTimeout   = "下载超时"
-	inputKeyword      = "请发送搜索关键词\n\n示例：\n/search 周杰伦\n/search 起风了 qq"
-	inputContent      = "请发送歌曲名、链接或 ID\n\n示例：\n/music 周杰伦\n/music https://music.163.com/song/1859603835"
-	inputLyricContent = "请发送歌曲名、链接或 ID，或回复一条歌曲消息\n\n示例：\n/lyric 稻香\n/lyric 稻香 qrc"
-	searching         = "正在搜索…"
-	fetchingPlaylist  = "正在获取歌单…"
-	fetchingLyric     = "正在获取歌词…"
-	noResults         = "没有找到结果，换个关键词试试"
-	playlistEmpty     = "歌单里没有歌曲"
-	getLrcFailed      = "未找到歌词，可能是纯音乐或平台暂不支持"
-	statusInfo        = `*📊 状态*
-
-🎧 缓存
-全部：%d 首
-本聊天 \[%s\]：%d 首
-你缓存 \[[%d](tg://user?id=%d)\]：%d 首
-已发送：%d 次
-`
-	callbackText   = "Success"
-	callbackDenied = "仅发起人或管理员可操作"
-)
-
-func buildHelpText(manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command, recognizeEnabled bool, isPrivateChat bool) string {
+// buildHelpText assembles the /help and /start text for the request language in
+// ctx. Structural markdown (bold headers, inline code, list markers) lives in
+// code; only the human-readable labels come from the catalog. Dynamic values
+// (platform names/aliases) are MarkdownV2-escaped by their builders, so the
+// whole result is sent with ParseMode=MarkdownV2.
+func buildHelpText(ctx context.Context, manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command, recognizeEnabled bool, isPrivateChat bool) string {
 	aliasText := buildAliasHint(manager)
 	platformText := buildPlatformList(manager)
 	if aliasText == "" {
 		aliasText = "`163` / `qq`"
 	}
 	if platformText == "" {
-		platformText = "网易云音乐, QQ音乐"
+		platformText = mdV2Replacer.Replace(tr(ctx, "help_default_platforms"))
 	}
-	text := "*🎵 MusicBot\\-Go*\n\n" +
-		"发送歌曲名、链接或 ID，即可搜索和下载音乐。\n"
+	esc := func(id string) string { return mdV2Replacer.Replace(tr(ctx, id)) }
+	argTrack := esc("help_arg_track")
+	argKeyword := esc("help_arg_keyword")
+
+	text := "*🎵 MusicBot\\-Go*\n\n" + esc("help_intro") + "\n"
 	if isPrivateChat {
-		text += "私聊中可直接发送内容，无需输入命令。\n"
+		text += esc("help_private_hint") + "\n"
 	}
-	text += "\n*🚀 常用命令*\n" +
-		"`/music` 歌名\\|链接\\|ID \\[平台\\] \\[音质\\] \\- 下载歌曲\n" +
-		"`/search` 关键词 \\[平台\\] \\[音质\\] \\- 搜索歌曲\n" +
-		"`/lyric` 歌名\\|链接\\|ID \\[平台\\] \\- 获取歌词\n"
+	text += "\n*🚀 " + esc("help_section_commands") + "*\n" +
+		"`/music` " + argTrack + " \\[" + esc("help_platform_label") + "\\] \\[" + esc("help_quality_label") + "\\] \\- " + esc("help_cmd_music") + "\n" +
+		"`/search` " + argKeyword + " \\[" + esc("help_platform_label") + "\\] \\[" + esc("help_quality_label") + "\\] \\- " + esc("help_cmd_search") + "\n" +
+		"`/lyric` " + argTrack + " \\[" + esc("help_platform_label") + "\\] \\- " + esc("help_cmd_lyric") + "\n"
 	if recognizeEnabled {
-		text += "`/recognize` \\- 听歌识曲（回复一条语音）\n"
+		text += "`/recognize` \\- " + esc("help_cmd_recognize") + "\n"
 	}
-	text += "`/settings` \\- 默认平台、音质与歌词格式\n" +
-		"`/status` \\- 缓存与账号状态\n" +
-		"`/about` \\- 版本与插件信息\n" +
-		"\n*🎚 参数*\n" +
-		"音质：`low` / `high` / `lossless` / `hires`\n" +
-		"平台：\n" + aliasText + "\n" +
-		"\n支持平台：" + platformText + "\n" +
-		"\n*💡 示例*\n" +
+	text += "`/settings` \\- " + esc("help_cmd_settings") + "\n" +
+		"`/status` \\- " + esc("help_cmd_status") + "\n" +
+		"`/about` \\- " + esc("help_cmd_about") + "\n" +
+		"\n*🎚 " + esc("help_section_params") + "*\n" +
+		esc("help_quality_label") + "：`low` / `high` / `lossless` / `hires`\n" +
+		esc("help_platform_label") + "：\n" + aliasText + "\n" +
+		"\n" + esc("help_supported_platforms") + "：" + platformText + "\n" +
+		"\n*💡 " + esc("help_section_examples") + "*\n" +
 		"`/music 周杰伦`\n" +
 		"`/music https://music.163.com/song/1859603835`\n" +
 		"`/search 起风了 qq`"
 	adminText := buildAdminHelp(adminCommands)
 	if isAdmin && adminText != "" {
-		text += "\n\n*🛠 管理员命令*\n" + adminText
+		text += "\n\n*🛠 " + esc("help_section_admin") + "*\n" + adminText
 	}
 	return text
 }

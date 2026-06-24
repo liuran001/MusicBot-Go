@@ -82,6 +82,9 @@ type UserSettings struct {
 	AutoDeleteList     bool
 	AutoLinkDetect     bool
 	DefaultLyricFormat string
+	// Language is the persisted UI-language override (2-letter ISO 639-1, e.g.
+	// "zh"/"en"/"ja"). Empty means "auto-detect from the Telegram client".
+	Language string
 	// DefaultLyricIncludeTranslation / DefaultLyricIncludeRoma are the persisted
 	// default translation/roma side-track toggles for /lyric. A nil pointer means
 	// "unset" — fall back to the per-format default. Only meaningful for formats
@@ -102,6 +105,9 @@ type GroupSettings struct {
 	AutoDeleteList     bool
 	AutoLinkDetect     bool
 	DefaultLyricFormat string
+	// Language is the persisted UI-language override (2-letter ISO 639-1). Empty
+	// means "auto-detect from the Telegram client".
+	Language string
 	// DefaultLyricIncludeTranslation / DefaultLyricIncludeRoma mirror the
 	// UserSettings fields for groups. A nil pointer means "unset" — fall back to
 	// the per-format default.

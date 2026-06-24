@@ -1,0 +1,145 @@
+# English catalog — the fallback language. MUST stay complete: every key any
+# other catalog uses must exist here. Authored as PLAIN text (no MarkdownV2
+# escaping); escaping happens at the output boundary via Localizer.Tmd.
+# EXCEPTION: the help/about/status block is authored WITH MarkdownV2 markup and
+# rendered via T (not Tmd); their builders escape dynamic values themselves.
+
+# --- status / progress ---
+hit_cache = "Cache hit, sending…"
+input_id_or_keyword = "Send a song ID or keyword, or use /rmcache all to clear the whole cache"
+inline_tap_to_send = "Nothing happened? Tap to refresh"
+send_me_to = "Send to chat…"
+wait_for_down = "Waiting to download…"
+fetch_info = "Fetching track info…"
+fetch_info_failed = "Failed to fetch track info"
+downloading = "Downloading…"
+uploading = "Download complete, sending…"
+md5_ver_failed = "MD5 verification failed"
+download_timeout = "Download timed out"
+searching = "Searching…"
+fetching_playlist = "Fetching playlist…"
+fetching_lyric = "Fetching lyrics…"
+no_results = "No results, try a different keyword"
+playlist_empty = "The playlist has no tracks"
+get_lrc_failed = "No lyrics found — may be instrumental or unsupported"
+callback_success = "Success"
+callback_denied = "Only the requester or an admin can do this"
+
+# --- usage prompts ---
+input_keyword = """Send a search keyword
+
+Examples:
+/search Jay Chou
+/search Take My Hand qq"""
+
+input_content = """Send a song name, link, or ID
+
+Examples:
+/music Jay Chou
+/music https://music.163.com/song/1859603835"""
+
+input_lyric_content = """Send a song name, link, or ID, or reply to a song message
+
+Examples:
+/lyric Sunny Day
+/lyric Sunny Day qrc"""
+
+# --- download progress (parametric) ---
+downloading_named = "Downloading: {{.Title}}\nDownloaded: {{.WrittenMB}} MB"
+downloading_progress = "Downloading: {{.Title}}\nProgress: {{.Percent}}% ({{.WrittenMB}} MB / {{.TotalMB}} MB)"
+upload_queue_ahead = "In the send queue, {{.Count}} task(s) ahead"
+download_queue_ahead = "In the download queue, {{.Count}} task(s) ahead"
+
+# --- queue / download wait ---
+queue_overloaded = "Download queue is full, please try again later"
+
+# --- bot command menu (setMyCommands) ---
+cmd_help = "How to use"
+cmd_music = "Download a track"
+cmd_search = "Search tracks"
+cmd_lyric = "Get lyrics"
+cmd_fav = "Favorite a track / view favorites"
+cmd_settings = "Default platform, quality, and lyric format"
+cmd_recognize = "Recognize a song"
+cmd_status = "Cache and account status"
+cmd_about = "Version and plugin info"
+
+# --- bot profile ---
+bot_name = "Music Bot"
+bot_short_description = "Multi-platform music / lyric download bot"
+bot_description = "Send a song name, link, or ID to search and download music. Supports NetEase Cloud Music, QQ Music, and more."
+
+# --- user-visible error mapping (helpers.go) ---
+err_process_timeout = "Processing timed out, please try again later"
+err_task_canceled = "Task canceled, please try again later"
+err_download_overloaded = "Too many download tasks right now, please try again later"
+err_upload_overloaded = "Too many send tasks right now, please try again later"
+err_rate_limited = "Too many requests, please try again later"
+err_auth_required = "Platform authentication expired, please ask an admin to refresh credentials"
+err_unavailable = "This track is currently unavailable, please try again later"
+err_download_failed = "Download/send failed, please try again later"
+err_search_unsupported = "This platform does not support search"
+err_search_unavailable = "Search service is temporarily unavailable"
+err_playlist_unsupported = "This platform does not support playlists"
+err_playlist_unavailable = "Playlist service is temporarily unavailable"
+err_playlist_not_found = "Playlist not found"
+
+# --- music info ---
+album_label = "Album: "
+
+# --- help / about / status (authored WITH markdown, rendered via T not Tmd) ---
+help_intro = "Send a song name, link, or ID to search and download music."
+help_private_hint = "In private chat you can send content directly without a command."
+help_section_commands = "🚀 Common commands"
+help_cmd_music = "download a track"
+help_cmd_search = "search tracks"
+help_cmd_lyric = "get lyrics"
+help_cmd_recognize = "recognize a song (reply to a voice message)"
+help_cmd_settings = "default platform, quality & lyric format"
+help_cmd_status = "cache & account status"
+help_cmd_about = "version & plugin info"
+help_section_params = "🎚 Parameters"
+help_quality_label = "Quality"
+help_platform_label = "Platform"
+help_supported_platforms = "Supported platforms"
+help_section_examples = "💡 Examples"
+help_section_admin = "🛠 Admin commands"
+help_arg_track = "name|link|ID"
+help_arg_keyword = "keyword"
+about_title = "MusicBot-Go"
+about_version = "Version"
+about_source = "Source"
+about_plugins = "Plugins"
+about_build = "Build"
+about_build_env = "Compiler"
+about_build_date = "Build date"
+about_runtime_env = "Runtime"
+status_title = "Status"
+status_cache = "Cache"
+status_total = "Total"
+status_this_chat = "This chat"
+status_your_cache = "Your cache"
+status_sent = "Sent"
+status_unit_tracks = "tracks"
+status_unit_times = "times"
+status_platform_cache = "Platform cache"
+status_available_platforms = "Available platforms"
+status_accounts = "Accounts"
+status_logged_in = "Logged in"
+status_state_available = "available"
+status_state_not_logged_in = "not logged in"
+status_state_error = "error"
+status_state_uninitialized = "uninitialized"
+status_state_guest = "guest"
+status_check_failed = "status check failed"
+status_no_accounts = "No queryable platform accounts found"
+status_field_state = "State"
+status_field_nickname = "Nickname"
+status_field_userid = "User ID"
+status_field_login_method = "Login method"
+status_field_supports = "Supports"
+status_field_source = "Source"
+
+help_default_platforms = "NetEase Cloud Music, QQ Music"
+
+about_no_plugins = "None"

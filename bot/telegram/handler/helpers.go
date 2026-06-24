@@ -564,7 +564,7 @@ func cleanupFiles(paths ...string) {
 	}
 }
 
-func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
+func buildMusicInfoText(ctx context.Context, songName, songAlbum, fileInfo, suffix string) string {
 	songName = strings.TrimSpace(songName)
 	fileInfo = strings.TrimSpace(fileInfo)
 	songAlbum = strings.TrimSpace(songAlbum)
@@ -573,7 +573,7 @@ func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
 	builder.WriteString(songName)
 	builder.WriteString("\n")
 	if songAlbum != "" {
-		builder.WriteString("专辑: ")
+		builder.WriteString(tr(ctx, "album_label"))
 		builder.WriteString(songAlbum)
 		builder.WriteString("\n")
 	}
@@ -583,77 +583,79 @@ func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
 	return builder.String()
 }
 
-func userVisibleDownloadError(err error) string {
+// userVisibleDownloadError maps a download/upload pipeline error to a localized,
+// user-facing message for the request language in ctx. Matching is done against
+// language-neutral signals (sentinel errors via errors.Is and lowercase English
+// substrings emitted by the download package), so localizing the DISPLAY text
+// never breaks the classification.
+func userVisibleDownloadError(ctx context.Context, err error) string {
 	if err != nil {
 		errText := fmt.Sprintf("%v", err)
 		errLower := strings.ToLower(errText)
-		if strings.Contains(errText, md5VerFailed) {
-			return md5VerFailed
+		if strings.Contains(errLower, "md5 verification failed") {
+			return tr(ctx, "md5_ver_failed")
 		}
-		if strings.Contains(errText, downloadTimeout) {
-			return downloadTimeout
+		if strings.Contains(errLower, "download timed out") || strings.Contains(errLower, "download timeout") {
+			return tr(ctx, "download_timeout")
 		}
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(errLower, "context deadline exceeded") {
-			return "处理超时，请稍后重试"
+			return tr(ctx, "err_process_timeout")
 		}
 		if errors.Is(err, context.Canceled) || strings.Contains(errLower, "context canceled") {
-			return "任务已取消，请稍后重试"
+			return tr(ctx, "err_task_canceled")
 		}
-		if errors.Is(err, errDownloadQueueOverloaded) || strings.Contains(errText, "download queue overloaded") {
-			return "当前下载任务过多，请稍后再试"
+		if errors.Is(err, errDownloadQueueOverloaded) || strings.Contains(errLower, "download queue overloaded") {
+			return tr(ctx, "err_download_overloaded")
 		}
-		if strings.Contains(errText, "upload queue is full") {
-			return "当前发送任务过多，请稍后再试"
+		if strings.Contains(errLower, "upload queue is full") {
+			return tr(ctx, "err_upload_overloaded")
 		}
 		if errors.Is(err, platform.ErrRateLimited) || strings.Contains(errText, "Too Many Requests") || strings.Contains(errLower, "retry after") {
-			return "请求过于频繁，请稍后重试"
+			return tr(ctx, "err_rate_limited")
 		}
 		if errors.Is(err, platform.ErrAuthRequired) {
-			return "平台认证已失效，请联系管理员更新凭据"
+			return tr(ctx, "err_auth_required")
 		}
 		if errors.Is(err, platform.ErrUnavailable) {
-			return "当前歌曲暂不可用，请稍后再试"
+			return tr(ctx, "err_unavailable")
 		}
 	}
-	return "下载/发送失败，请稍后重试"
+	return tr(ctx, "err_download_failed")
 }
 
-func userVisibleSearchError(err error, unavailableText string) string {
+func userVisibleSearchError(ctx context.Context, err error) string {
 	if err == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	if errors.Is(err, platform.ErrUnsupported) {
-		return "此平台不支持搜索功能"
+		return tr(ctx, "err_search_unsupported")
 	}
 	if errors.Is(err, platform.ErrRateLimited) {
-		return "请求过于频繁，请稍后再试"
+		return tr(ctx, "err_rate_limited")
 	}
 	if errors.Is(err, platform.ErrUnavailable) {
-		if strings.TrimSpace(unavailableText) != "" {
-			return unavailableText
-		}
-		return "搜索服务暂时不可用"
+		return tr(ctx, "err_search_unavailable")
 	}
-	return noResults
+	return tr(ctx, "no_results")
 }
 
-func userVisiblePlaylistError(err error) string {
+func userVisiblePlaylistError(ctx context.Context, err error) string {
 	if err == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	if errors.Is(err, platform.ErrUnsupported) {
-		return "此平台不支持获取歌单"
+		return tr(ctx, "err_playlist_unsupported")
 	}
 	if errors.Is(err, platform.ErrRateLimited) {
-		return "请求过于频繁，请稍后再试"
+		return tr(ctx, "err_rate_limited")
 	}
 	if errors.Is(err, platform.ErrUnavailable) {
-		return "歌单服务暂时不可用"
+		return tr(ctx, "err_playlist_unavailable")
 	}
 	if errors.Is(err, platform.ErrNotFound) {
-		return "未找到歌单"
+		return tr(ctx, "err_playlist_not_found")
 	}
-	return noResults
+	return tr(ctx, "no_results")
 }
 
 func isTelegramFileIDInvalid(err error) bool {

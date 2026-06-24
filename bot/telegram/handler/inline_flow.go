@@ -190,7 +190,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			if music.Logger != nil {
 				music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)
 			}
-			setInlineText(buildMusicInfoText("", "", "", userVisibleDownloadError(err)), retryMarkup)
+			setInlineText(buildMusicInfoText(ctx, "", "", "", userVisibleDownloadError(ctx, err)), retryMarkup)
 			return
 		}
 		modified, err := editInlineMedia(songInfo)
@@ -198,7 +198,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			if music.Logger != nil {
 				music.Logger.Error("failed to edit inline media", "platform", platformName, "trackID", trackID, "error", err)
 			}
-			setInlineText(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err)), retryMarkup)
+			setInlineText(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(ctx, err)), retryMarkup)
 			return
 		}
 		if modified && music.Repo != nil {

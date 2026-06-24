@@ -196,7 +196,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 	primaryPlatform := platformName
 	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.guestSearchLimit, true)
 	if err != nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, userVisibleSearchError(err, "搜索服务暂时不可用"), nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, userVisibleSearchError(ctx, err), nil, "")
 		return
 	}
 	qualityValue = resolvePlatformQualityValue(ctx, h.repo(), botpkg.PluginScopeUser, userID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")

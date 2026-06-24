@@ -266,7 +266,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
-		errorText := userVisibleSearchError(err, "搜索服务暂时不可用")
+		errorText := userVisibleSearchError(ctx, err)
 		params := &telego.EditMessageTextParams{
 			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
 			MessageID: msgResult.MessageID,

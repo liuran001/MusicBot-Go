@@ -113,7 +113,7 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	lazy := h.shouldLazyLoad(platformName)
 	playlist, err := h.fetchInitialPlaylist(ctx, plat, playlistID, lazy)
 	if err != nil {
-		h.editPlaylistMessage(ctx, b, msgResult, userVisiblePlaylistError(err), nil)
+		h.editPlaylistMessage(ctx, b, msgResult, userVisiblePlaylistError(ctx, err), nil)
 		return true
 	}
 	if playlist == nil {
