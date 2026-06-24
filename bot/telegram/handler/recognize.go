@@ -42,7 +42,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	} else if message.Voice != nil {
 		voiceMessage = message
 	} else {
-		sendText(ctx, b, chatID, replyID, "请回复一条语音留言")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_reply_voice_note"))
 		return
 	}
 
@@ -57,11 +57,11 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	}
 	fileInfo, err := fileBot.GetFile(ctx, &telego.GetFileParams{FileID: voiceMessage.Voice.FileID})
 	if err != nil || fileInfo == nil || fileInfo.FilePath == "" {
-		sendText(ctx, b, chatID, replyID, "获取语音失败，请稍后重试")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_get_voice_failed"))
 		return
 	}
 	if fileInfo.FileSize > 20*1024*1024 {
-		sendText(ctx, b, chatID, replyID, "语音过大，无法识别")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_voice_too_large"))
 		return
 	}
 	audioData, err := downloadTelegramFile(ctx, fileBot, fileInfo.FilePath)
@@ -69,7 +69,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		if h.Logger != nil {
 			h.Logger.Warn("failed to download voice", "file_path", fileInfo.FilePath, "error", err)
 		}
-		sendText(ctx, b, chatID, replyID, "下载语音失败，请稍后重试")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_download_voice_failed"))
 		return
 	}
 
@@ -78,12 +78,12 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		if h.Logger != nil {
 			h.Logger.Error("audio conversion failed", "error", err)
 		}
-		sendText(ctx, b, chatID, replyID, "音频格式转换失败，请稍后重试")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_audio_convert_failed"))
 		return
 	}
 
 	if h.RecognizeService == nil {
-		sendText(ctx, b, chatID, replyID, "识别服务未启动，请联系管理员")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_recognize_service_unavailable_admin"))
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		if h.Logger != nil {
 			h.Logger.Error("recognition service error", "error", err, "audio_size", len(mp3Data))
 		}
-		sendText(ctx, b, chatID, replyID, "识别失败，请稍后重试")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_recognize_failed_retry"))
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		if h.Logger != nil {
 			h.Logger.Info("recognition returned no results")
 		}
-		sendText(ctx, b, chatID, replyID, "识别失败，可能是录音时间太短")
+		sendText(ctx, b, chatID, replyID, tr(ctx, "guest_recognize_failed_short"))
 		return
 	}
 

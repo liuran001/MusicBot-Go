@@ -206,7 +206,7 @@ func (r *MentionRouter) isDirectDownload(ctx context.Context, content string) bo
 // reads the replied voice itself.
 func (r *MentionRouter) dispatchRecognize(ctx context.Context, b *telego.Bot, message *telego.Message) {
 	if r.Recognize == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, "识别服务未启动")
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "guest_recognize_service_unavailable"))
 		return
 	}
 	r.Recognize.Handle(ctx, b, &telego.Update{Message: message})
