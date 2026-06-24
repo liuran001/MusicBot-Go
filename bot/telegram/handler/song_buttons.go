@@ -9,12 +9,6 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-const (
-	lyricButtonText         = "📜 歌词"
-	favoriteButtonText      = "⭐ 收藏"
-	groupFavoriteButtonText = "👥 群收藏"
-)
-
 // songButtonOptions describes the context needed to render the bottom button row
 // under a sent song. The same row appears in three places — a normal chat audio
 // message, an inline cached-document result, and an inline/guest edit-to-audio —
@@ -58,19 +52,19 @@ func buildSongBottomKeyboard(ctx context.Context, repo botpkg.SongRepository, op
 	var actionRow []telego.InlineKeyboardButton
 	if opts.inlineContext {
 		if link := buildLyricDeepLink(opts.botName, opts.platformName, opts.trackID); link != "" {
-			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: lyricButtonText, URL: link})
+			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_lyric_btn"), URL: link})
 		}
 	} else {
 		if data := buildLyricButtonCallbackData(opts.platformName, opts.trackID, opts.quality, opts.requesterID); data != "" {
-			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: lyricButtonText, CallbackData: data})
+			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_lyric_btn"), CallbackData: data})
 		}
 	}
 	if data := buildFavoriteToggleData(botpkg.FavoriteScopeUser, opts.platformName, opts.trackID, 0); data != "" {
-		actionRow = append(actionRow, telego.InlineKeyboardButton{Text: favoriteButtonText, CallbackData: data})
+		actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_favorite_btn"), CallbackData: data})
 	}
 	if opts.isGroup && opts.chatID != 0 && groupFavoritesAvailable(resolveGroupFavoritesMode(ctx, repo, opts.chatID)) {
 		if data := buildFavoriteToggleData(botpkg.FavoriteScopeGroup, opts.platformName, opts.trackID, opts.chatID); data != "" {
-			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: groupFavoriteButtonText, CallbackData: data})
+			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_group_favorite_btn"), CallbackData: data})
 		}
 	}
 	if len(actionRow) > 0 {

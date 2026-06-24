@@ -114,9 +114,9 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
 			ID:                  inlineStableID("collection_empty", platformName+"|"+collectionID+"|"+qualityValue),
-			Title:               noResults,
-			Description:         "未找到专辑/歌单",
-			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
+			Title:               tr(ctx, "no_results"),
+			Description:         tr(ctx, "cb_collection_not_found"),
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "no_results")},
 		}
 		_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{InlineQueryID: query.ID, IsPersonal: true, CacheTime: 1, Results: []telego.InlineQueryResult{inlineMsg}})
 		return
@@ -130,9 +130,9 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 	}
 	desc := fmt.Sprintf("%s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel)
 	if playlist.TrackCount > 0 {
-		desc = fmt.Sprintf("%s · %s · %d 首", platformDisplayName(h.PlatformManager, platformName), collectionLabel, playlist.TrackCount)
+		desc = fmt.Sprintf("%s · %s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel, tr(ctx, "cb_track_count", map[string]any{"Count": playlist.TrackCount}))
 	} else if len(playlist.Tracks) > 0 {
-		desc = fmt.Sprintf("%s · %s · %d 首", platformDisplayName(h.PlatformManager, platformName), collectionLabel, len(playlist.Tracks))
+		desc = fmt.Sprintf("%s · %s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel, tr(ctx, "cb_track_count", map[string]any{"Count": len(playlist.Tracks)}))
 	}
 	thumb := buildInlineThumbnailURL(platformName, strings.TrimSpace(playlist.CoverURL), 150)
 	collectionArticle := &telego.InlineQueryResultArticle{
@@ -140,7 +140,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 		ID:                  buildInlineCollectionResultID(platformName, collectionID, qualityValue),
 		Title:               fmt.Sprintf("%s：%s", collectionLabel, title),
 		Description:         desc,
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("%s：%s\n点击后自动展开详情", collectionLabel, title)},
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("%s：%s\n%s", collectionLabel, title, tr(ctx, "cb_collection_tap_expand"))},
 		ThumbnailURL:        thumb,
 		ThumbnailWidth:      150,
 		ThumbnailHeight:     150,
@@ -198,8 +198,8 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 			inlineMsgs = append(inlineMsgs, buildInlineTrackArticle(ctx, h, platformName, tracks[i], qualityValue, query.From.ID))
 		}
 		if pageCount > 1 {
-			footerText := fmt.Sprintf("第 %d 页 / 共 %d 页", page, pageCount)
-			hint := "在链接末尾加数字翻页，例如：链接 2"
+			footerText := tr(ctx, "cb_page_footer", map[string]any{"Page": page, "Total": pageCount})
+			hint := tr(ctx, "cb_collection_page_hint")
 			inlineMsgs = append(inlineMsgs, &telego.InlineQueryResultArticle{
 				Type:                telego.ResultTypeArticle,
 				ID:                  inlineStableID("collection_page", fmt.Sprintf("%s|%s|%d|%d", platformName, collectionID, page, pageCount)),
@@ -209,7 +209,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 			})
 		}
 	}
-	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(h, platformName, qualityValue))
+	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(ctx, h, platformName, qualityValue))
 
 	_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
@@ -223,7 +223,7 @@ func (h *InlineSearchHandler) inlineEmpty(ctx context.Context, b *telego.Bot, qu
 	inlineMsg := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  query.ID,
-		Title:               "输入 help 获取帮助",
+		Title:               tr(ctx, "cb_empty_title"),
 		Description:         "MusicBot-Go",
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: "MusicBot-Go"},
 	}
@@ -238,23 +238,23 @@ func (h *InlineSearchHandler) inlineEmpty(ctx context.Context, b *telego.Bot, qu
 func (h *InlineSearchHandler) inlineHelp(ctx context.Context, b *telego.Bot, query *telego.InlineQuery) {
 	platformName := h.resolveDefaultPlatform(ctx, query.From.ID)
 	qualityValue := h.resolveDefaultQuality(ctx, query.From.ID)
-	settingTitle := fmt.Sprintf("平台：%s | 音质：%s", platformDisplayName(h.PlatformManager, platformName), qualityDisplayName(qualityValue))
+	settingTitle := tr(ctx, "cb_setting_title", map[string]any{"Platform": platformDisplayName(h.PlatformManager, platformName), "Quality": qualityDisplayName(ctx, qualityValue)})
 	settingCard := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  inlineStableID("help_settings", fmt.Sprintf("%d|%s|%s", query.From.ID, platformName, qualityValue)),
 		Title:               settingTitle,
-		Description:         "点击修改设置",
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("当前用户设置\n平台：%s\n音质：%s\n\n💡 可在关键词后临时追加参数，例如：稻香 qq high", platformDisplayName(h.PlatformManager, platformName), qualityDisplayName(qualityValue))},
-		ReplyMarkup:         buildInlineSettingsKeyboard(h.BotName),
+		Description:         tr(ctx, "cb_tap_edit_settings"),
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "cb_settings_message", map[string]any{"Platform": platformDisplayName(h.PlatformManager, platformName), "Quality": qualityDisplayName(ctx, qualityValue)})},
+		ReplyMarkup:         buildInlineSettingsKeyboard(ctx, h.BotName),
 	}
 	randomCard := h.buildInlineRandomCard(ctx, query.From.ID, query.From.ID)
 	if randomCard == nil {
 		randomCard = &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
 			ID:                  inlineStableID("help_random_empty", fmt.Sprintf("%d", query.From.ID)),
-			Title:               "🎲 随机一首",
-			Description:         "当前缓存里暂无可随机歌曲",
-			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
+			Title:               tr(ctx, "cb_random_one"),
+			Description:         tr(ctx, "cb_random_empty_desc"),
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "no_results")},
 		}
 	}
 	results := []telego.InlineQueryResult{randomCard, settingCard}
@@ -270,27 +270,26 @@ func (h *InlineSearchHandler) inlineHelp(ctx context.Context, b *telego.Bot, que
 }
 
 func (h *InlineSearchHandler) buildInlineRandomCard(ctx context.Context, id int64, requesterID int64) telego.InlineQueryResult {
-	_ = ctx
 	if h == nil {
 		return nil
 	}
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  fmt.Sprintf("z_%d", id),
-		Title:               "🎲 随机一首",
-		Description:         "点击后随机发送一首缓存歌曲",
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+		Title:               tr(ctx, "cb_random_one"),
+		Description:         tr(ctx, "cb_random_card_desc"),
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
 		ReplyMarkup:         buildInlineRandomSendKeyboard(requesterID),
 	}
 }
 
-func buildInlineSettingsKeyboard(botName string) *telego.InlineKeyboardMarkup {
+func buildInlineSettingsKeyboard(ctx context.Context, botName string) *telego.InlineKeyboardMarkup {
 	name := strings.TrimPrefix(strings.TrimSpace(botName), "@")
 	if name == "" {
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: "⚙️ 修改设置", URL: fmt.Sprintf("https://t.me/%s?start=settings", name)},
+		{Text: tr(ctx, "cb_edit_settings_btn"), URL: fmt.Sprintf("https://t.me/%s?start=settings", name)},
 	}}}
 }
 
@@ -305,7 +304,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
 			ID:                  "inline_empty_keyword",
-			Title:               "请输入关键词",
+			Title:               tr(ctx, "cb_input_keyword"),
 			Description:         "MusicBot-Go",
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: "MusicBot-Go"},
 		}
@@ -371,9 +370,9 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 		inlineMsg := &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
 			ID:                  inlineStableID("inline_no_results", keyWord+"|"+platformName+"|"+qualityValue),
-			Title:               noResults,
-			Description:         noResults,
-			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
+			Title:               tr(ctx, "no_results"),
+			Description:         tr(ctx, "no_results"),
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "no_results")},
 		}
 		params.Results = []telego.InlineQueryResult{inlineMsg}
 		_ = b.AnswerInlineQuery(ctx, params)
@@ -411,8 +410,8 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 		inlineMsg := buildInlineTrackArticle(ctx, h, platformName, track, qualityValue, query.From.ID)
 		inlineMsgs = append(inlineMsgs, inlineMsg)
 	}
-	inlineMsgs = append(inlineMsgs, buildInlineSearchPageFooter(keyWord, requestedPlatform, qualityOverride, page, pageCount, len(tracks)))
-	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(h, platformName, qualityValue))
+	inlineMsgs = append(inlineMsgs, buildInlineSearchPageFooter(ctx, keyWord, requestedPlatform, qualityOverride, page, pageCount, len(tracks)))
+	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(ctx, h, platformName, qualityValue))
 	params.Results = inlineMsgs
 	_ = b.AnswerInlineQuery(ctx, params)
 }
@@ -473,15 +472,15 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 		Type:                telego.ResultTypeArticle,
 		ID:                  buildInlinePendingResultID(platformName, trackID, qualityValue),
 		Title:               fallbackString(title, trackID),
-		Description:         inlineSubtitle(album, artists),
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+		Description:         inlineSubtitle(ctx, album, artists),
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
 		ReplyMarkup:         buildInlineSendKeyboard(platformName, trackID, qualityValue, query.From.ID),
 		ThumbnailURL:        thumbnailURL,
 		ThumbnailWidth:      150,
 		ThumbnailHeight:     150,
 	}
 	inlineMsgs = append(inlineMsgs, inlineMsg)
-	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(h, platformName, qualityValue))
+	inlineMsgs = append(inlineMsgs, buildInlineSearchHeader(ctx, h, platformName, qualityValue))
 	params := &telego.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
 		IsPersonal:    false,
@@ -491,7 +490,7 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 	_ = b.AnswerInlineQuery(ctx, params)
 }
 
-func buildInlineSearchHeader(h *InlineSearchHandler, platformName, qualityValue string) telego.InlineQueryResult {
+func buildInlineSearchHeader(ctx context.Context, h *InlineSearchHandler, platformName, qualityValue string) telego.InlineQueryResult {
 	platformText := platformDisplayName(h.PlatformManager, platformName)
 	if strings.TrimSpace(platformText) == "" {
 		platformText = platformName
@@ -499,25 +498,25 @@ func buildInlineSearchHeader(h *InlineSearchHandler, platformName, qualityValue 
 	if strings.TrimSpace(qualityValue) == "" {
 		qualityValue = "hires"
 	}
-	qualityText := qualityDisplayName(qualityValue)
+	qualityText := qualityDisplayName(ctx, qualityValue)
 	replyMarkup := (*telego.InlineKeyboardMarkup)(nil)
 	botName := strings.TrimPrefix(strings.TrimSpace(h.BotName), "@")
 	if botName != "" {
 		replyMarkup = &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-			{Text: "⚙️ 修改设置", URL: fmt.Sprintf("https://t.me/%s?start=settings", botName)},
+			{Text: tr(ctx, "cb_edit_settings_btn"), URL: fmt.Sprintf("https://t.me/%s?start=settings", botName)},
 		}}}
 	}
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  inlineStableID("meta", platformText+"|"+qualityText),
-		Title:               fmt.Sprintf("平台：%s | 音质：%s", platformText, qualityText),
-		Description:         "点击修改设置｜可在关键词后临时追加参数，例如：稻香 qq high",
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: fmt.Sprintf("当前用户设置\n平台：%s\n音质：%s\n\n💡 可在关键词后临时追加参数，例如：稻香 qq high", platformText, qualityText)},
+		Title:               tr(ctx, "cb_setting_title", map[string]any{"Platform": platformText, "Quality": qualityText}),
+		Description:         tr(ctx, "cb_search_header_desc"),
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "cb_settings_message", map[string]any{"Platform": platformText, "Quality": qualityText})},
 		ReplyMarkup:         replyMarkup,
 	}
 }
 
-func buildInlineSearchPageFooter(keyword, platformName, qualityValue string, page, pageCount, total int) telego.InlineQueryResult {
+func buildInlineSearchPageFooter(ctx context.Context, keyword, platformName, qualityValue string, page, pageCount, total int) telego.InlineQueryResult {
 	keyword = strings.TrimSpace(keyword)
 	platformName = inlinePageHintPlatformToken(strings.TrimSpace(platformName))
 	qualityValue = strings.TrimSpace(qualityValue)
@@ -547,10 +546,10 @@ func buildInlineSearchPageFooter(keyword, platformName, qualityValue string, pag
 	queryParts = append(queryParts, strconv.Itoa(nextPage))
 	hintQuery := strings.TrimSpace(strings.Join(queryParts, " "))
 	if hintQuery == "2" {
-		hintQuery = "关键词 qq hires 2"
+		hintQuery = tr(ctx, "cb_page_hint_example")
 	}
-	title := fmt.Sprintf("第 %d 页 / 共 %d 页", page, pageCount)
-	desc := fmt.Sprintf("共 %d 条结果｜在关键词末尾加数字翻页，如：%s", total, hintQuery)
+	title := tr(ctx, "cb_page_footer", map[string]any{"Page": page, "Total": pageCount})
+	desc := tr(ctx, "cb_search_page_desc", map[string]any{"Total": total, "Hint": hintQuery})
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  inlineStableID("page", fmt.Sprintf("%s|%s|%s|%d|%d|%d", keyword, platformName, qualityValue, page, pageCount, total)),
@@ -637,8 +636,8 @@ func buildInlineTrackArticle(ctx context.Context, h *InlineSearchHandler, platfo
 		Type:                telego.ResultTypeArticle,
 		ID:                  buildInlinePendingResultID(platformName, track.ID, qualityValue),
 		Title:               fallbackString(strings.TrimSpace(track.Title), track.ID),
-		Description:         inlineSubtitle(trackAlbumLabel(track.Album), inlineArtistsLabel(track.Artists)),
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+		Description:         inlineSubtitle(ctx, trackAlbumLabel(track.Album), inlineArtistsLabel(track.Artists)),
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
 		ReplyMarkup:         buildInlineSendKeyboard(platformName, track.ID, qualityValue, requesterID),
 		ThumbnailURL:        thumbnailURL,
 		ThumbnailWidth:      150,
@@ -650,7 +649,7 @@ func buildInlineTrackArticle(ctx context.Context, h *InlineSearchHandler, platfo
 // Unlike buildInlineTrackArticle it never makes a network call (no thumbnail
 // lookup), keeping the empty-query favorites list snappy. Selecting it routes
 // through the normal pending-result download flow (ChosenInlineResult).
-func buildInlineFavoriteCard(fav *botpkg.Favorite, qualityValue string, requesterID int64) telego.InlineQueryResult {
+func buildInlineFavoriteCard(ctx context.Context, fav *botpkg.Favorite, qualityValue string, requesterID int64) telego.InlineQueryResult {
 	if fav == nil {
 		return nil
 	}
@@ -670,7 +669,7 @@ func buildInlineFavoriteCard(fav *botpkg.Favorite, qualityValue string, requeste
 		ID:                  buildInlinePendingResultID(fav.Platform, fav.TrackID, qualityValue),
 		Title:               "⭐ " + title,
 		Description:         desc,
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
 		ReplyMarkup:         buildInlineSendKeyboard(fav.Platform, fav.TrackID, qualityValue, requesterID),
 	}
 }
@@ -687,8 +686,8 @@ func (h *InlineSearchHandler) buildInlineFavoriteMenuCard(ctx context.Context, u
 	return &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  inlineStableID("fav_menu", fmt.Sprintf("%d", userID)),
-		Title:               "📋 我的收藏",
-		Description:         "点开管理 / 随机 / 发送收藏",
+		Title:               tr(ctx, "cb_my_favorites"),
+		Description:         tr(ctx, "cb_favorites_menu_desc"),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: text, ParseMode: telego.ModeHTML, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}},
 		ReplyMarkup:         markup,
 	}
@@ -715,7 +714,7 @@ func (h *InlineSearchHandler) appendInlineFavoriteCards(ctx context.Context, res
 	}
 	quality := h.resolveDefaultQuality(ctx, userID)
 	for _, fav := range favs {
-		if card := buildInlineFavoriteCard(fav, quality, userID); card != nil {
+		if card := buildInlineFavoriteCard(ctx, fav, quality, userID); card != nil {
 			results = append(results, card)
 		}
 	}
@@ -812,11 +811,11 @@ func neteaseEncryptID(id string) string {
 	return encoded
 }
 
-func inlineSubtitle(album, artists string) string {
+func inlineSubtitle(ctx context.Context, album, artists string) string {
 	album = strings.TrimSpace(album)
 	artists = strings.TrimSpace(artists)
 	if artists == "" {
-		artists = "未知歌手"
+		artists = tr(ctx, "cb_unknown_artist")
 	}
 	if album == "" {
 		return artists
@@ -852,16 +851,16 @@ func fallbackString(value, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-func qualityDisplayName(quality string) string {
+func qualityDisplayName(ctx context.Context, quality string) string {
 	switch strings.TrimSpace(strings.ToLower(quality)) {
 	case "standard":
-		return "标准"
+		return tr(ctx, "cb_quality_standard")
 	case "high":
-		return "高品质"
+		return tr(ctx, "cb_quality_high")
 	case "lossless":
-		return "无损"
+		return tr(ctx, "cb_quality_lossless")
 	case "hires":
-		return "Hi-Res"
+		return tr(ctx, "cb_quality_hires")
 	default:
 		return quality
 	}
@@ -934,18 +933,18 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 	}
 	headerDesc := strings.TrimSpace(first.CreatorName)
 	if headerDesc == "" {
-		headerDesc = "点击下方分P发送"
+		headerDesc = tr(ctx, "cb_tap_episode_below")
 	}
 	results = append(results, &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  buildInlineCollectionResultID(platformName, episodeCollectionID, qualityValue),
 		Title:               fallbackString(headerTitle, baseTrackID),
 		Description:         headerDesc,
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: "正在获取选集..."},
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "cb_fetching_episodes")},
 		ReplyMarkup: func() *telego.InlineKeyboardMarkup {
 			if cb := buildInlineEpisodeShowCallbackData(platformName, baseTrackID, qualityValue, query.From.ID, 1); cb != "" {
 				return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-					{Text: inlineTapToSend, CallbackData: cb},
+					{Text: tr(ctx, "inline_tap_to_send"), CallbackData: cb},
 				}}}
 			}
 			return nil
@@ -968,7 +967,7 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 			ID:                  buildInlinePendingResultID(platformName, explicitTrackID, qualityValue),
 			Title:               fmt.Sprintf("%d. %s", displayIndex, title),
 			Description:         strings.TrimSpace(first.CreatorName),
-			InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+			InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
 			ReplyMarkup:         buildInlineSendKeyboard(platformName, explicitTrackID, qualityValue, query.From.ID),
 		})
 	}
@@ -979,8 +978,8 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 			hintQuery = strings.TrimSpace(baseTrackID)
 		}
 		hintQuery = fmt.Sprintf("%s %d", hintQuery, page+1)
-		title := fmt.Sprintf("第 %d 页 / 共 %d 页", page, pageCount)
-		desc := fmt.Sprintf("在链接后加数字翻页，如：%s", hintQuery)
+		title := tr(ctx, "cb_page_footer", map[string]any{"Page": page, "Total": pageCount})
+		desc := tr(ctx, "cb_episode_page_hint", map[string]any{"Hint": hintQuery})
 		results = append(results, &telego.InlineQueryResultArticle{
 			Type:                telego.ResultTypeArticle,
 			ID:                  inlineStableID("ep_page", fmt.Sprintf("%s|%s|%d|%d", platformName, baseTrackID, page, pageCount)),
@@ -990,7 +989,7 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 		})
 	}
 
-	results = append(results, buildInlineSearchHeader(h, platformName, qualityValue))
+	results = append(results, buildInlineSearchHeader(ctx, h, platformName, qualityValue))
 	_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{InlineQueryID: query.ID, IsPersonal: true, CacheTime: 1, Results: results})
 	return true
 }

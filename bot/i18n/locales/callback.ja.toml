@@ -1,0 +1,74 @@
+# Japanese catalog shard — inline + callback handlers (cb_ domain).
+# PLAIN text; MarkdownV2 escaping happens at the output boundary.
+
+# --- callback answers (plain alert/toast text) ---
+cb_denied = "リクエスト者または管理者のみ操作できます"
+cb_bad_params = "パラメータが不正です"
+cb_processing = "処理中です。少々お待ちください"
+cb_select_episode = "パートを選択してください"
+cb_op_expired = "操作の有効期限が切れました。もう一度検索してください"
+cb_no_random = "ランダム再生できる曲がありません"
+cb_episode_load_failed = "エピソードの読み込みに失敗しました"
+cb_episode_closed = "エピソード一覧を閉じました"
+cb_list_expired = "リストの有効期限が切れました。もう一度選択してください"
+cb_load_failed = "読み込みに失敗しました。もう一度お試しください"
+cb_already_on_page = "すでに{{.Page}}ページ目です"
+cb_page_n = "{{.Page}}ページ目"
+
+# --- pagination labels ---
+cb_page_of = "{{.Page}}/{{.Total}}ページ"
+cb_page_footer = "{{.Page}}ページ / 全{{.Total}}ページ"
+cb_track_count = "{{.Count}}曲"
+cb_track_total = "曲数: {{.Count}}"
+
+# --- collection / playlist cards ---
+cb_collection_not_found = "アルバム/プレイリストが見つかりません"
+cb_collection_tap_expand = "タップすると詳細が自動で展開されます"
+cb_collection_page_hint = "リンクの末尾に数字を付けてページ送り、例：リンク 2"
+cb_creator_label = "作成者: "
+cb_fetching_album = "アルバムを取得中..."
+
+# --- empty / help / settings cards ---
+cb_empty_title = "help と入力するとヘルプを表示します"
+cb_setting_title = "プラットフォーム：{{.Platform}} | 音質：{{.Quality}}"
+cb_tap_edit_settings = "タップして設定を変更"
+cb_settings_message = "現在のユーザー設定\nプラットフォーム：{{.Platform}}\n音質：{{.Quality}}\n\n💡 キーワードの後ろに一時パラメータを追加できます。例：稲香 qq high"
+cb_edit_settings_btn = "⚙️ 設定を変更"
+cb_search_header_desc = "タップして設定を変更｜キーワードの後ろに一時パラメータを追加できます。例：稲香 qq high"
+
+# --- random / favorites cards ---
+cb_random_one = "🎲 ランダム1曲"
+cb_random_empty_desc = "キャッシュにランダム再生できる曲がありません"
+cb_random_card_desc = "タップするとキャッシュ済みの曲をランダムに送信します"
+cb_my_favorites = "📋 お気に入り"
+cb_favorites_menu_desc = "開いて 管理 / ランダム / お気に入りの送信"
+
+# --- search cards ---
+cb_input_keyword = "キーワードを入力してください"
+cb_page_hint_example = "キーワード qq hires 2"
+cb_search_page_desc = "全{{.Total}}件｜キーワードの末尾に数字を付けてページ送り、例：{{.Hint}}"
+cb_unknown_artist = "不明なアーティスト"
+
+# --- quality labels ---
+cb_quality_standard = "標準"
+cb_quality_high = "高音質"
+cb_quality_lossless = "ロスレス"
+cb_quality_hires = "Hi-Res"
+
+# --- episode picker ---
+cb_tap_episode_below = "下のパートをタップして送信"
+cb_fetching_episodes = "エピソードを取得中..."
+cb_episode_page_hint = "リンクの後ろに数字を付けてページ送り、例：{{.Hint}}"
+cb_episodes_label = "エピソード"
+cb_prev_page = "前のページ"
+cb_next_page = "次のページ"
+cb_back_home = "最初のページに戻る"
+cb_prev_page_arrow = "⬅️ 前のページ"
+cb_next_page_arrow = "➡️ 次のページ"
+cb_home_page = "🏠 ホーム"
+cb_last_page = "⏭️ 最後のページ"
+
+# --- song bottom buttons ---
+cb_lyric_btn = "📜 歌詞"
+cb_favorite_btn = "⭐ お気に入り"
+cb_group_favorite_btn = "👥 グループお気に入り"
