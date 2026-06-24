@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -45,7 +44,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 		if err := h.Repo.DeleteAll(ctx); err != nil {
 			params := &telego.SendMessageParams{
 				ChatID:          telego.ChatID{ID: message.Chat.ID},
-				Text:            "清除缓存失败",
+				Text:            tr(ctx, "adm_rmcache_failed"),
 				ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 			}
 			if h.RateLimiter != nil {
@@ -57,7 +56,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 		}
 		params := &telego.SendMessageParams{
 			ChatID:          telego.ChatID{ID: message.Chat.ID},
-			Text:            "已清空所有缓存",
+			Text:            tr(ctx, "adm_rmcache_all_done"),
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {
@@ -85,7 +84,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 					if err != nil {
 						params := &telego.SendMessageParams{
 							ChatID:          telego.ChatID{ID: message.Chat.ID},
-							Text:            "清除缓存失败",
+							Text:            tr(ctx, "adm_rmcache_failed"),
 							ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 						}
 						if h.RateLimiter != nil {
@@ -97,7 +96,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 					}
 					params := &telego.SendMessageParams{
 						ChatID:          telego.ChatID{ID: message.Chat.ID},
-						Text:            fmt.Sprintf("已清除平台 %s 的全部缓存", platformName),
+						Text:            tr(ctx, "adm_rmcache_platform_all_done", map[string]any{"Platform": platformName}),
 						ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 					}
 					if h.RateLimiter != nil {
@@ -121,7 +120,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 				if trackID == "" {
 					params := &telego.SendMessageParams{
 						ChatID:          telego.ChatID{ID: message.Chat.ID},
-						Text:            "请输入有效的歌曲ID或URL，或使用格式: /rmcache <platform> <trackID>|all",
+						Text:            tr(ctx, "adm_rmcache_invalid"),
 						ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 					}
 					if h.RateLimiter != nil {
@@ -136,7 +135,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 				if err != nil {
 					params := &telego.SendMessageParams{
 						ChatID:          telego.ChatID{ID: message.Chat.ID},
-						Text:            "清除缓存失败",
+						Text:            tr(ctx, "adm_rmcache_failed"),
 						ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 					}
 					if h.RateLimiter != nil {
@@ -148,7 +147,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 				}
 				params := &telego.SendMessageParams{
 					ChatID:          telego.ChatID{ID: message.Chat.ID},
-					Text:            fmt.Sprintf("已清除平台 %s 歌曲 %s 的缓存", platformName, trackID),
+					Text:            tr(ctx, "adm_rmcache_track_done", map[string]any{"Platform": platformName, "TrackID": trackID}),
 					ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 				}
 				if h.RateLimiter != nil {
@@ -166,7 +165,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 			if err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID); err == nil {
 				params := &telego.SendMessageParams{
 					ChatID:          telego.ChatID{ID: message.Chat.ID},
-					Text:            fmt.Sprintf("已清除平台 %s 歌曲 %s 的缓存", platformName, trackID),
+					Text:            tr(ctx, "adm_rmcache_track_done", map[string]any{"Platform": platformName, "TrackID": trackID}),
 					ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 				}
 				if h.RateLimiter != nil {
@@ -178,7 +177,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 			}
 			params := &telego.SendMessageParams{
 				ChatID:          telego.ChatID{ID: message.Chat.ID},
-				Text:            "清除缓存失败",
+				Text:            tr(ctx, "adm_rmcache_failed"),
 				ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 			}
 			if h.RateLimiter != nil {
@@ -192,7 +191,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 			if err := h.Repo.DeleteAllQualitiesByPlatformTrackID(ctx, platformName, trackID); err == nil {
 				params := &telego.SendMessageParams{
 					ChatID:          telego.ChatID{ID: message.Chat.ID},
-					Text:            fmt.Sprintf("已清除平台 %s 歌曲 %s 的缓存", platformName, trackID),
+					Text:            tr(ctx, "adm_rmcache_track_done", map[string]any{"Platform": platformName, "TrackID": trackID}),
 					ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 				}
 				if h.RateLimiter != nil {
@@ -204,7 +203,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 			}
 			params := &telego.SendMessageParams{
 				ChatID:          telego.ChatID{ID: message.Chat.ID},
-				Text:            "清除缓存失败",
+				Text:            tr(ctx, "adm_rmcache_failed"),
 				ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 			}
 			if h.RateLimiter != nil {
@@ -217,7 +216,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 	}
 	params := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
-		Text:            "请输入有效的歌曲ID或URL，或使用格式: /rmcache <platform> <trackID>|all",
+		Text:            tr(ctx, "adm_rmcache_invalid"),
 		ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 	}
 	if h.RateLimiter != nil {

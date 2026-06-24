@@ -29,7 +29,7 @@ func (h *ReloadHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	if h.Reload == nil {
 		params := &telego.SendMessageParams{
 			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   "❌ 重载未启用",
+			Text:   tr(ctx, "adm_reload_disabled"),
 		}
 		if h.RateLimiter != nil {
 			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
@@ -45,7 +45,7 @@ func (h *ReloadHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		}
 		params := &telego.SendMessageParams{
 			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   "❌ 重载失败: " + err.Error(),
+			Text:   tr(ctx, "adm_reload_failed", map[string]any{"Err": err.Error()}),
 		}
 		if h.RateLimiter != nil {
 			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
@@ -57,7 +57,7 @@ func (h *ReloadHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 
 	params := &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   "✅ 配置与插件已重载",
+		Text:   tr(ctx, "adm_reload_done"),
 	}
 	if h.RateLimiter != nil {
 		_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)

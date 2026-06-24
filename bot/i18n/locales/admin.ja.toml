@@ -1,0 +1,78 @@
+# Admin handler shard — Japanese.
+# Plain text; MarkdownV2 escaping happens at the output boundary.
+
+# --- common ---
+adm_platform_manager_uninitialized = "プラットフォームマネージャーが初期化されていません"
+adm_platform_unrecognized = "認識できないプラットフォーム: {{.Args}}"
+adm_platform_unrecognized_usage = "認識できないプラットフォーム: {{.Name}}\n\n{{.Usage}}"
+adm_no_platforms = "利用可能なプラットフォームがありません"
+adm_exec_failed = "実行に失敗しました: {{.Err}}"
+adm_exec_done = "実行完了"
+adm_cmd_unavailable = "コマンドは利用できません"
+adm_complete_with_failures = "\n完了（{{.Count}} 個のプラットフォームで失敗）"
+
+# --- account login dispatch ---
+adm_sign_unsupported = "{{.Platform}} は現在チェックイン/VIP 受け取りに対応していません"
+adm_sign_done = "{{.Platform}} のチェックイン/VIP 受け取りが完了しました"
+adm_renew_unsupported = "{{.Platform}} は現在更新に対応していません"
+adm_check_unsupported = "{{.Platform}} は現在アカウント確認に対応していません"
+adm_lang_unsupported = "{{.Platform}} は現在言語設定に対応していません"
+adm_cookie_import_unsupported = "{{.Platform}} は現在 Cookie のインポートに対応していません"
+adm_cookie_usage = "使い方: /login {{.Platform}} cookie <cookie内容>"
+adm_cookie_import_done = "Cookie のインポートが完了しました"
+adm_qr_unsupported = "{{.Platform}} は現在 QR コードログインに対応していません"
+adm_qr_session_failed = "QR コードセッションの作成に失敗しました"
+adm_qr_cancel_button = "ログインをキャンセル"
+adm_qr_timeout = "QR コードがタイムアウトしました。/login {{.Platform}} qr を再実行してください"
+adm_sign_usage = "使い方: /login sign <platform>"
+adm_qr_poll_cancelled = "ログインのポーリングをキャンセルしました"
+
+# --- usage / help ---
+adm_login_usage = """統合アカウントコマンド:
+/status - 統計とアカウント状態を表示
+/login <platform> help - プラットフォームが対応するログイン方法を表示
+/login <platform> qr - QR コードログイン（対応している場合）
+/login <platform> cookie <cookie> - Cookie をインポート
+/login <platform> sign - チェックイン/VIP 受け取り（対応している場合）
+/login sign <platform> - プラットフォームごとにチェックイン/VIP 受け取りを実行
+/login <platform> check - プラットフォームのアカウント状態を確認
+/login check - すべてのプラットフォームのアカウント状態を確認
+/login <platform> renew - 手動更新
+/login renew - すべてのプラットフォームを一括更新
+/login <platform> auto on|off|status [intervalSec] - 自動更新
+/login auto on|off|status [intervalSec] - すべてのプラットフォームの自動更新を一括設定
+対応プラットフォーム: {{.Platforms}}"""
+adm_login_help = "{{.Platform}} 対応: {{.Methods}}\n\n例:\n{{.Examples}}"
+adm_lang_arg = "言語"
+
+# --- auto renewal ---
+adm_auto_unsupported = "{{.Platform}} は現在自動更新に対応していません"
+adm_auto_on = "{{.Platform}} の自動更新を有効にしました。間隔 {{.Seconds}} 秒"
+adm_auto_off = "{{.Platform}} の自動更新を無効にしました（現在の間隔 {{.Seconds}} 秒）"
+adm_auto_usage_platform = "使い方: /login {{.Platform}} auto on [intervalSec]\n/login {{.Platform}} auto off\n/login {{.Platform}} auto status"
+adm_auto_on_batch = "✅ {{.Platform}}: 自動更新を有効にしました。間隔 {{.Seconds}} 秒"
+adm_auto_off_batch = "✅ {{.Platform}}: 自動更新を無効にしました（現在の間隔 {{.Seconds}} 秒）"
+adm_auto_usage_batch = "使い方: /login auto on [intervalSec]\n/login auto off\n/login auto status"
+adm_auto_none = "自動更新に対応するプラットフォームがありません"
+adm_auto_status = "{{.Platform}} 自動更新: {{.State}}、間隔 {{.Seconds}} 秒"
+adm_auto_state_off = "無効"
+adm_auto_state_on = "有効"
+
+# --- checkck / renewck ---
+adm_check_none = "Cookie 確認に対応するプラットフォームがありません"
+adm_renew_cookie_unsupported = "{{.Platform}} は Cookie 更新に対応していません"
+adm_renew_none = "Cookie 更新に対応するプラットフォームがありません"
+adm_check_unknown = "不明"
+adm_renew_done = "更新完了"
+
+# --- rmcache ---
+adm_rmcache_failed = "キャッシュの削除に失敗しました"
+adm_rmcache_all_done = "すべてのキャッシュを削除しました"
+adm_rmcache_platform_all_done = "プラットフォーム {{.Platform}} のすべてのキャッシュを削除しました"
+adm_rmcache_invalid = "有効な曲 ID または URL を入力するか、/rmcache <platform> <trackID>|all の形式を使用してください"
+adm_rmcache_track_done = "プラットフォーム {{.Platform}} の曲 {{.TrackID}} のキャッシュを削除しました"
+
+# --- reload ---
+adm_reload_disabled = "❌ リロードは有効になっていません"
+adm_reload_failed = "❌ リロードに失敗しました: {{.Err}}"
+adm_reload_done = "✅ 設定とプラグインをリロードしました"
