@@ -205,10 +205,10 @@ func resolveFavoriteToggleDeny(ctx context.Context, b *telego.Bot, repo botpkg.S
 	}
 	mode := resolveGroupFavoritesMode(ctx, repo, scopeID)
 	if !groupFavoritesAvailable(mode) {
-		return "群聊收藏未启用"
+		return tr(ctx, "fav_group_disabled")
 	}
 	if mode == GroupFavAdmin && !isRequesterOrAdmin(ctx, b, scopeID, clickerID, 0) {
-		return "仅管理员可收藏到群聊"
+		return tr(ctx, "fav_group_admin_only")
 	}
 	return ""
 }
@@ -265,22 +265,22 @@ func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongReposito
 }
 
 // favoriteToggleMessage renders the user-facing toast for a toggle outcome.
-func favoriteToggleMessage(out favoriteToggleOutcome, scopeType string) string {
+func favoriteToggleMessage(ctx context.Context, out favoriteToggleOutcome, scopeType string) string {
 	if out.deny != "" {
 		return out.deny
 	}
 	group := scopeType == botpkg.FavoriteScopeGroup
 	if out.added {
 		if group {
-			return "⭐ 已收藏到群聊"
+			return tr(ctx, "fav_added_group")
 		}
-		return "⭐ 已收藏"
+		return tr(ctx, "fav_added")
 	}
 	if out.removed {
 		if group {
-			return "已从群聊取消收藏"
+			return tr(ctx, "fav_removed_group")
 		}
-		return "已取消收藏"
+		return tr(ctx, "fav_removed")
 	}
 	return ""
 }
@@ -357,7 +357,7 @@ func (h *FavoriteCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {
 	parsed := parseFavoriteToggleData(args)
 	if parsed.expired {
-		h.answer(ctx, b, query.ID, "操作已过期，请重新发送歌曲")
+		h.answer(ctx, b, query.ID, tr(ctx, "fav_expired"))
 		return
 	}
 	if !parsed.ok {
@@ -389,7 +389,7 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 		if h.Logger != nil {
 			h.Logger.Warn("favorite toggle failed", "platform", parsed.platform, "trackID", parsed.trackID, "error", err)
 		}
-		h.answer(ctx, b, query.ID, "操作失败，请稍后再试")
+		h.answer(ctx, b, query.ID, tr(ctx, "fav_action_failed"))
 		return
 	}
 
@@ -402,7 +402,7 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 		if group {
 			fav, _ := h.Repo.GetFavorite(ctx, scopeType, scopeID, parsed.platform, parsed.trackID)
 			if (fav == nil || fav.AddedByUserID != clicker) && !isRequesterOrAdmin(ctx, b, scopeID, clicker, 0) {
-				h.answer(ctx, b, query.ID, "已收藏到群聊（仅收藏者或管理员可取消）")
+				h.answer(ctx, b, query.ID, tr(ctx, "fav_group_remove_denied"))
 				return
 			}
 		}
@@ -410,21 +410,21 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 		if _, pending := favoriteUnfavoritePending.Load(key); pending {
 			favoriteUnfavoritePending.Delete(key)
 			if err := h.Repo.RemoveFavorite(ctx, scopeType, scopeID, parsed.platform, parsed.trackID); err != nil {
-				h.answer(ctx, b, query.ID, "操作失败，请稍后再试")
+				h.answer(ctx, b, query.ID, tr(ctx, "fav_action_failed"))
 				return
 			}
 			if group {
-				h.answer(ctx, b, query.ID, "已从群聊取消收藏")
+				h.answer(ctx, b, query.ID, tr(ctx, "fav_removed_group"))
 			} else {
-				h.answer(ctx, b, query.ID, "已取消收藏")
+				h.answer(ctx, b, query.ID, tr(ctx, "fav_removed"))
 			}
 			return
 		}
 		favoriteUnfavoritePending.Store(key, struct{}{})
 		if group {
-			h.answerAlert(ctx, b, query.ID, "已收藏到群聊。如需取消，请在 10 秒内再次点击按钮。")
+			h.answerAlert(ctx, b, query.ID, tr(ctx, "fav_added_group_confirm"))
 		} else {
-			h.answerAlert(ctx, b, query.ID, "已收藏。如需取消，请在 10 秒内再次点击按钮。")
+			h.answerAlert(ctx, b, query.ID, tr(ctx, "fav_added_confirm"))
 		}
 		return
 	}
@@ -434,13 +434,13 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 		if h.Logger != nil {
 			h.Logger.Warn("favorite add failed", "platform", parsed.platform, "trackID", parsed.trackID, "error", err)
 		}
-		h.answer(ctx, b, query.ID, "操作失败，请稍后再试")
+		h.answer(ctx, b, query.ID, tr(ctx, "fav_action_failed"))
 		return
 	}
 	if group {
-		h.answer(ctx, b, query.ID, "⭐ 已收藏到群聊")
+		h.answer(ctx, b, query.ID, tr(ctx, "fav_added_group"))
 	} else {
-		h.answer(ctx, b, query.ID, "⭐ 已收藏")
+		h.answer(ctx, b, query.ID, tr(ctx, "fav_added"))
 	}
 }
 
