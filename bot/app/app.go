@@ -503,7 +503,7 @@ func (a *App) Start(ctx context.Context) error {
 		FavoriteCallback:         favoriteCallback,
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
-		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},
+		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, Favorites: favoritesHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},
 		ChosenInline:             chosenInlineHandler,
 		PlatformManager:          a.PlatformManager,
 		AdminCommands:            adminCommandNames,

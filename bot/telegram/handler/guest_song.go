@@ -144,6 +144,11 @@ func (h *GuestModeHandler) answerAndRenderGuestSearch(ctx context.Context, b *te
 	if inlineMessageID == "" {
 		return
 	}
+	// Remember the group chat so a later search-result tap (which goes through the
+	// generic inline "music i" callback, carrying no chat context) can still
+	// attach the group-favorite button to the sent song.
+	chatID, isGroup := guestChatContext(message)
+	rememberInlineChat(inlineMessageID, chatID, isGroup)
 	go h.renderGuestSearch(detachContext(ctx), b, message, inlineMessageID, keyword, requestedPlatform, qualityOverride)
 }
 
