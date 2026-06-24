@@ -181,22 +181,22 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 	favs, _ := h.Repo.ListFavorites(ctx, scopeType, scopeID, pageSize, offset)
 
 	var sb strings.Builder
-	header := "⭐ 我的收藏"
+	header := tr(ctx, "fav_view_personal")
 	if view == "g" {
-		header = "👥 群聊收藏"
+		header = tr(ctx, "fav_view_group")
 	}
-	sb.WriteString(fmt.Sprintf("%s（%d 首）", header, total))
+	sb.WriteString(tr(ctx, "fav_list_header_count", map[string]any{"Header": header, "Count": total}))
 	if pageCount > 1 {
-		sb.WriteString(fmt.Sprintf("  ·  第 %d/%d 页", page, pageCount))
+		sb.WriteString(tr(ctx, "fav_list_page_indicator", map[string]any{"Page": page, "Pages": pageCount}))
 	}
 	if lc.manage {
-		sb.WriteString("  ·  🗑 管理")
+		sb.WriteString(tr(ctx, "fav_list_manage_tag"))
 	}
 	sb.WriteString("\n")
 	if total == 0 {
-		sb.WriteString("\n还没有收藏。发送歌曲后点底部「⭐ 收藏」即可收藏。")
+		sb.WriteString("\n" + tr(ctx, "fav_list_empty"))
 	} else if lc.manage {
-		sb.WriteString("\n点下方歌曲即可取消收藏。\n")
+		sb.WriteString("\n" + tr(ctx, "fav_list_manage_hint") + "\n")
 	} else {
 		sb.WriteString("\n")
 	}
@@ -207,7 +207,7 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 			if view == "g" {
 				who := strings.TrimSpace(fav.AddedByName)
 				if who == "" {
-					who = "匿名"
+					who = tr(ctx, "fav_anonymous")
 				}
 				line += "  · 👤 " + html.EscapeString(who)
 			}
@@ -244,38 +244,38 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 
 	if lc.manage {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			{Text: "✅ 完成", CallbackData: fmt.Sprintf("favm n %s %s %d n", lc.token, view, page)},
+			{Text: tr(ctx, "fav_btn_done"), CallbackData: fmt.Sprintf("favm n %s %s %d n", lc.token, view, page)},
 		})
 	} else {
 		var ctrl []telego.InlineKeyboardButton
 		if groupAvailable {
 			if view == "g" {
-				ctrl = append(ctrl, telego.InlineKeyboardButton{Text: "⭐ 我的收藏", CallbackData: fmt.Sprintf("favm n %s u 1 n", lc.token)})
+				ctrl = append(ctrl, telego.InlineKeyboardButton{Text: tr(ctx, "fav_view_personal"), CallbackData: fmt.Sprintf("favm n %s u 1 n", lc.token)})
 			} else {
-				ctrl = append(ctrl, telego.InlineKeyboardButton{Text: "👥 群聊收藏", CallbackData: fmt.Sprintf("favm n %s g 1 n", lc.token)})
+				ctrl = append(ctrl, telego.InlineKeyboardButton{Text: tr(ctx, "fav_view_group"), CallbackData: fmt.Sprintf("favm n %s g 1 n", lc.token)})
 			}
 		}
 		if total > 0 {
-			ctrl = append(ctrl, telego.InlineKeyboardButton{Text: "🎲 随机一首", CallbackData: fmt.Sprintf("favm r %s %s", lc.token, view)})
+			ctrl = append(ctrl, telego.InlineKeyboardButton{Text: tr(ctx, "fav_btn_random"), CallbackData: fmt.Sprintf("favm r %s %s", lc.token, view)})
 		}
 		if len(ctrl) > 0 {
 			rows = append(rows, ctrl)
 		}
 		bottom := make([]telego.InlineKeyboardButton, 0, 2)
 		if total > 0 {
-			bottom = append(bottom, telego.InlineKeyboardButton{Text: "🗑 管理收藏", CallbackData: fmt.Sprintf("favm n %s %s 1 m", lc.token, view)})
+			bottom = append(bottom, telego.InlineKeyboardButton{Text: tr(ctx, "fav_btn_manage"), CallbackData: fmt.Sprintf("favm n %s %s 1 m", lc.token, view)})
 		}
-		bottom = append(bottom, telego.InlineKeyboardButton{Text: "✖️ 关闭", CallbackData: fmt.Sprintf("favm c %s", lc.token)})
+		bottom = append(bottom, telego.InlineKeyboardButton{Text: tr(ctx, "fav_btn_close"), CallbackData: fmt.Sprintf("favm c %s", lc.token)})
 		rows = append(rows, bottom)
 	}
 
 	if pageCount > 1 {
 		var pg []telego.InlineKeyboardButton
 		if page > 1 {
-			pg = append(pg, telego.InlineKeyboardButton{Text: "◀ 上一页", CallbackData: fmt.Sprintf("favm n %s %s %d %s", lc.token, view, page-1, mode)})
+			pg = append(pg, telego.InlineKeyboardButton{Text: tr(ctx, "fav_btn_prev"), CallbackData: fmt.Sprintf("favm n %s %s %d %s", lc.token, view, page-1, mode)})
 		}
 		if page < pageCount {
-			pg = append(pg, telego.InlineKeyboardButton{Text: "下一页 ▶", CallbackData: fmt.Sprintf("favm n %s %s %d %s", lc.token, view, page+1, mode)})
+			pg = append(pg, telego.InlineKeyboardButton{Text: tr(ctx, "fav_btn_next"), CallbackData: fmt.Sprintf("favm n %s %s %d %s", lc.token, view, page+1, mode)})
 		}
 		if len(pg) > 0 {
 			rows = append(rows, pg)
@@ -327,7 +327,7 @@ func (h *FavoritesHandler) answerGuestList(ctx context.Context, b *telego.Bot, m
 	article := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  nextGuestResultID("fav"),
-		Title:               "收藏列表",
+		Title:               tr(ctx, "fav_list_title"),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: text, ParseMode: telego.ModeHTML, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}},
 		ReplyMarkup:         markup,
 	}
@@ -420,7 +420,7 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 	token := strings.TrimSpace(args[2])
 	payload, ok := favoriteListPayloads.Load(token)
 	if !ok {
-		h.answerCb(ctx, b, query.ID, "列表已过期，请重新打开")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_list_expired"))
 		return
 	}
 	clicker := query.From.ID
@@ -431,7 +431,7 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 			return
 		}
 		if clicker != payload.requesterID {
-			h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+			h.answerCb(ctx, b, query.ID, tr(ctx, "fav_not_your_list"))
 			return
 		}
 		view := args[3]
@@ -445,7 +445,7 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 			return
 		}
 		if clicker != payload.requesterID {
-			h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+			h.answerCb(ctx, b, query.ID, tr(ctx, "fav_not_your_list"))
 			return
 		}
 		h.handleRandom(ctx, b, query, payload, args[3])
@@ -455,7 +455,7 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 			return
 		}
 		if clicker != payload.requesterID {
-			h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+			h.answerCb(ctx, b, query.ID, tr(ctx, "fav_not_your_list"))
 			return
 		}
 		view := args[3]
@@ -473,7 +473,7 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 		h.handleRemove(ctx, b, query, payload, token, view, page, idx, clicker)
 	case "c": // close: favm c <token>
 		if clicker != payload.requesterID {
-			h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+			h.answerCb(ctx, b, query.ID, tr(ctx, "fav_not_your_list"))
 			return
 		}
 		h.answerCb(ctx, b, query.ID, "")
@@ -499,7 +499,7 @@ func (h *FavoritesHandler) closeListMessage(ctx context.Context, b *telego.Bot, 
 		}
 	}
 	if strings.TrimSpace(query.InlineMessageID) != "" {
-		params := &telego.EditMessageTextParams{InlineMessageID: query.InlineMessageID, Text: "已关闭"}
+		params := &telego.EditMessageTextParams{InlineMessageID: query.InlineMessageID, Text: tr(ctx, "fav_closed")}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
@@ -512,7 +512,7 @@ func (h *FavoritesHandler) handleRandom(ctx context.Context, b *telego.Bot, quer
 	scopeType, scopeID := favoriteScopeForView(view, payload)
 	fav, err := h.Repo.RandomFavorite(ctx, scopeType, scopeID)
 	if err != nil || fav == nil {
-		h.answerCb(ctx, b, query.ID, "收藏列表是空的")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_list_empty_toast"))
 		return
 	}
 	h.sendFavoriteTrack(ctx, b, query, payload, fav)
@@ -524,7 +524,7 @@ func (h *FavoritesHandler) handleSend(ctx context.Context, b *telego.Bot, query 
 	offset := (page - 1) * pageSize
 	favs, _ := h.Repo.ListFavorites(ctx, scopeType, scopeID, pageSize, offset)
 	if idx < 0 || idx >= len(favs) {
-		h.answerCb(ctx, b, query.ID, "该收藏已不存在")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_item_gone"))
 		return
 	}
 	h.sendFavoriteTrack(ctx, b, query, payload, favs[idx])
@@ -542,7 +542,7 @@ func (h *FavoritesHandler) sendFavoriteTrack(ctx context.Context, b *telego.Bot,
 	// Normal chat: send a new audio message attributed to the clicker.
 	if query.Message != nil {
 		if msg := query.Message.Message(); msg != nil {
-			h.answerCb(ctx, b, query.ID, "正在发送…")
+			h.answerCb(ctx, b, query.ID, tr(ctx, "fav_sending"))
 			clicker := query.From
 			sendMsg := *msg
 			sendMsg.From = &clicker
@@ -552,7 +552,7 @@ func (h *FavoritesHandler) sendFavoriteTrack(ctx context.Context, b *telego.Bot,
 	}
 	// Guest/inline: edit the message in place into the audio.
 	if strings.TrimSpace(query.InlineMessageID) != "" {
-		h.answerCb(ctx, b, query.ID, "正在发送…")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_sending"))
 		userName := callbackUserDisplayName(&query.From)
 		isGroup := payload.groupChatID != 0
 		go runInlineMediaFlow(detachContext(ctx), b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, query.InlineMessageID, query.From.ID, userName, fav.Platform, fav.TrackID, "", payload.groupChatID, isGroup)
@@ -565,14 +565,14 @@ func (h *FavoritesHandler) handleRemove(ctx context.Context, b *telego.Bot, quer
 	scopeType, scopeID := favoriteScopeForView(view, payload)
 	// Personal list: only its owner (the requester) may remove.
 	if view != "g" && clicker != payload.requesterID {
-		h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_not_your_list"))
 		return
 	}
 	pageSize := h.pageSize()
 	offset := (page - 1) * pageSize
 	favs, _ := h.Repo.ListFavorites(ctx, scopeType, scopeID, pageSize, offset)
 	if idx < 0 || idx >= len(favs) {
-		h.answerCb(ctx, b, query.ID, "该收藏已不存在")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_item_gone"))
 		h.rerender(ctx, b, query, payload, token, view, page, true)
 		return
 	}
@@ -582,15 +582,15 @@ func (h *FavoritesHandler) handleRemove(ctx context.Context, b *telego.Bot, quer
 	// to collector-only — the safe default.
 	if view == "g" {
 		if fav.AddedByUserID != clicker && !isRequesterOrAdmin(ctx, b, scopeID, clicker, 0) {
-			h.answerCb(ctx, b, query.ID, "只能取消自己收藏的歌曲（管理员可取消任意）")
+			h.answerCb(ctx, b, query.ID, tr(ctx, "fav_group_remove_denied_list"))
 			return
 		}
 	}
 	if err := h.Repo.RemoveFavorite(ctx, scopeType, scopeID, fav.Platform, fav.TrackID); err != nil {
-		h.answerCb(ctx, b, query.ID, "操作失败，请稍后再试")
+		h.answerCb(ctx, b, query.ID, tr(ctx, "fav_action_failed"))
 		return
 	}
-	h.answerCb(ctx, b, query.ID, "已取消收藏")
+	h.answerCb(ctx, b, query.ID, tr(ctx, "fav_removed"))
 	h.rerender(ctx, b, query, payload, token, view, page, true)
 }
 
@@ -640,14 +640,14 @@ func (h *FavoritesHandler) handleCommandToggle(ctx context.Context, b *telego.Bo
 	}
 	platformName, trackID, ok := h.Music.resolveTrackFromQuery(ctx, message, target)
 	if !ok {
-		h.reply(ctx, b, message, "未找到歌曲。请回复一条歌曲消息，或在命令后附上链接 / ID。")
+		h.reply(ctx, b, message, tr(ctx, "fav_command_no_track"))
 		return
 	}
 	scopeType := botpkg.FavoriteScopeUser
 	scopeID := message.From.ID
 	if wantGroup {
 		if message.Chat.Type == "private" {
-			h.reply(ctx, b, message, "私聊无法使用群聊收藏。")
+			h.reply(ctx, b, message, tr(ctx, "fav_command_no_group_private"))
 			return
 		}
 		scopeType = botpkg.FavoriteScopeGroup
@@ -655,10 +655,10 @@ func (h *FavoritesHandler) handleCommandToggle(ctx context.Context, b *telego.Bo
 	}
 	out, err := toggleFavorite(ctx, b, h.Repo, h.PlatformManager, scopeType, scopeID, message.From.ID, callbackUserDisplayName(message.From), platformName, trackID)
 	if err != nil {
-		h.reply(ctx, b, message, "操作失败，请稍后再试。")
+		h.reply(ctx, b, message, tr(ctx, "fav_command_failed"))
 		return
 	}
-	h.reply(ctx, b, message, favoriteToggleMessage(out, scopeType))
+	h.reply(ctx, b, message, favoriteToggleMessage(ctx, out, scopeType))
 }
 
 // extractGroupScopeToken strips a leading or trailing group-scope token

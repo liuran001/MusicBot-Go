@@ -65,7 +65,7 @@ func TestToggleFavoritePersonal(t *testing.T) {
 	if err != nil || !out.added {
 		t.Fatalf("expected added, got %+v err=%v", out, err)
 	}
-	if msg := favoriteToggleMessage(out, botpkg.FavoriteScopeUser); msg != "⭐ 已收藏" {
+	if msg := favoriteToggleMessage(zhCtx(), out, botpkg.FavoriteScopeUser); msg != "⭐ 已收藏" {
 		t.Fatalf("unexpected add message: %q", msg)
 	}
 	if ok, _ := repo.IsFavorited(ctx, botpkg.FavoriteScopeUser, uid, "netease", "777"); !ok {
@@ -76,7 +76,7 @@ func TestToggleFavoritePersonal(t *testing.T) {
 	if err != nil || !out.removed {
 		t.Fatalf("expected removed, got %+v err=%v", out, err)
 	}
-	if msg := favoriteToggleMessage(out, botpkg.FavoriteScopeUser); msg != "已取消收藏" {
+	if msg := favoriteToggleMessage(zhCtx(), out, botpkg.FavoriteScopeUser); msg != "已取消收藏" {
 		t.Fatalf("unexpected remove message: %q", msg)
 	}
 }
@@ -87,7 +87,7 @@ func TestToggleFavoriteGroupDisabled(t *testing.T) {
 	const gid int64 = -100
 	_ = repo.SetPluginSetting(ctx, botpkg.PluginScopeGroup, gid, GroupFavPlugin, GroupFavKey, GroupFavOff)
 
-	out, err := toggleFavorite(ctx, nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "netease", "1")
+	out, err := toggleFavorite(zhCtx(), nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "netease", "1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestToggleFavoriteGroupAdminOnlyDeniesNonAdmin(t *testing.T) {
 	_ = repo.SetPluginSetting(ctx, botpkg.PluginScopeGroup, gid, GroupFavPlugin, GroupFavKey, GroupFavAdmin)
 
 	// b is nil, so the admin check cannot succeed: a non-admin is denied.
-	out, err := toggleFavorite(ctx, nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "netease", "1")
+	out, err := toggleFavorite(zhCtx(), nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "netease", "1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
