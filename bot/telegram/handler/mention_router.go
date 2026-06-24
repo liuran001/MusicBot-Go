@@ -125,6 +125,18 @@ func (r *MentionRouter) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		return
 	}
 
+	// A mention buried mid-sentence ("aaa @bot bbb", with query text on BOTH
+	// sides) is usually conversational, not addressed to the bot. Act on it only
+	// when it carries a track/playlist link or ID (then download it); otherwise
+	// stay silent instead of running a search. Leading/trailing mentions
+	// ("@bot 晴天" / "晴天 @bot" / "晴天 @bot qq") are unaffected.
+	if r.mentionSurrounded(message) {
+		if r.isDirectDownload(ctx, content) {
+			r.dispatchMusic(ctx, b, message, content)
+		}
+		return
+	}
+
 	if isLyricKeyword(content) {
 		keyword := strings.TrimSpace(strings.Replace(content, "歌词", "", 1))
 		if keyword == "" {
@@ -135,6 +147,59 @@ func (r *MentionRouter) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	}
 
 	r.dispatchSong(ctx, b, message, content)
+}
+
+// mentionSurrounded reports whether the bot @mention sits mid-sentence — i.e.
+// there is query text on BOTH sides of it. A trailing segment that is only
+// platform/quality options (e.g. "晴天 @bot qq") counts as trailing, not
+// surrounding, so such searches still work.
+func (r *MentionRouter) mentionSurrounded(message *telego.Message) bool {
+	if message == nil {
+		return false
+	}
+	before, after, found := splitAroundMention(message.Text, message.Entities, r.BotName)
+	if !found {
+		return false
+	}
+	if strings.TrimSpace(before) == "" || strings.TrimSpace(after) == "" {
+		return false
+	}
+	if r.PlatformManager != nil {
+		if base, _, _ := parseTrailingOptions(strings.TrimSpace(after), r.PlatformManager); strings.TrimSpace(base) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// isDirectDownload reports whether content resolves to a track/playlist URL or a
+// direct ID (i.e. dispatchSong would download rather than search). Used to let a
+// mid-sentence mention through only when it carries a download link.
+func (r *MentionRouter) isDirectDownload(ctx context.Context, content string) bool {
+	if r.PlatformManager == nil {
+		return false
+	}
+	baseText, _, _ := parseTrailingOptions(content, r.PlatformManager)
+	baseText = strings.TrimSpace(baseText)
+	if baseText == "" {
+		return false
+	}
+	resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
+	if _, _, matched := matchPlaylistURL(ctx, r.PlatformManager, resolvedText); matched {
+		return true
+	}
+	if urlStr := extractFirstURL(resolvedText); urlStr != "" {
+		if _, _, matched := r.PlatformManager.MatchURL(urlStr); matched {
+			return true
+		}
+	}
+	if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
+		return true
+	}
+	if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
+		return true
+	}
+	return false
 }
 
 // dispatchRecognize forwards the original message to the recognize handler, which
