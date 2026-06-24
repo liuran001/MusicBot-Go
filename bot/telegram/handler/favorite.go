@@ -195,38 +195,26 @@ type favoriteToggleOutcome struct {
 	songName string
 }
 
-// toggleFavorite is the shared add/remove core behind both the favorite button
-// and the /fav command. It enforces group-favorites gating (enabled + admin-only)
-// using the chat admin check, which degrades to "blocked" when it cannot be
-// verified (e.g. guest mode, where the bot is not a group member).
-func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, platformName, trackID string) (favoriteToggleOutcome, error) {
-	platformName = strings.TrimSpace(platformName)
-	trackID = strings.TrimSpace(trackID)
-	if repo == nil || scopeID == 0 || clickerID == 0 || platformName == "" || trackID == "" {
-		return favoriteToggleOutcome{}, fmt.Errorf("invalid favorite toggle request")
+// resolveFavoriteToggleDeny enforces group-favorites gating (enabled +
+// admin-only), returning a non-empty user-facing reason when the action is
+// blocked. The admin check degrades to "blocked" when it cannot be verified
+// (e.g. guest mode, where the bot is not a group member).
+func resolveFavoriteToggleDeny(ctx context.Context, b *telego.Bot, repo botpkg.SongRepository, scopeType string, scopeID, clickerID int64) string {
+	if scopeType != botpkg.FavoriteScopeGroup {
+		return ""
 	}
+	mode := resolveGroupFavoritesMode(ctx, repo, scopeID)
+	if !groupFavoritesAvailable(mode) {
+		return "群聊收藏未启用"
+	}
+	if mode == GroupFavAdmin && !isRequesterOrAdmin(ctx, b, scopeID, clickerID, 0) {
+		return "仅管理员可收藏到群聊"
+	}
+	return ""
+}
 
-	if scopeType == botpkg.FavoriteScopeGroup {
-		mode := resolveGroupFavoritesMode(ctx, repo, scopeID)
-		if !groupFavoritesAvailable(mode) {
-			return favoriteToggleOutcome{deny: "群聊收藏未启用"}, nil
-		}
-		if mode == GroupFavAdmin && !isRequesterOrAdmin(ctx, b, scopeID, clickerID, 0) {
-			return favoriteToggleOutcome{deny: "仅管理员可收藏到群聊"}, nil
-		}
-	}
-
-	favorited, err := repo.IsFavorited(ctx, scopeType, scopeID, platformName, trackID)
-	if err != nil {
-		return favoriteToggleOutcome{}, err
-	}
-	if favorited {
-		if err := repo.RemoveFavorite(ctx, scopeType, scopeID, platformName, trackID); err != nil {
-			return favoriteToggleOutcome{}, err
-		}
-		return favoriteToggleOutcome{removed: true}, nil
-	}
-
+// addFavoriteWithMeta resolves song metadata and inserts the favorite.
+func addFavoriteWithMeta(ctx context.Context, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, platformName, trackID string) (string, error) {
 	meta := findSongMetaForFavorite(ctx, repo, mgr, platformName, trackID)
 	fav := &botpkg.Favorite{
 		ScopeType:       scopeType,
@@ -241,10 +229,39 @@ func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongReposito
 		TrackURL:        meta.trackURL,
 		SongArtistsURLs: meta.songArtistsURLs,
 	}
-	if err := repo.AddFavorite(ctx, fav); err != nil {
+	return meta.songName, repo.AddFavorite(ctx, fav)
+}
+
+// toggleFavorite is the immediate add/remove core behind the /fav command. The
+// favorite button uses a two-step removal (see handleToggle), but the command is
+// explicit so it toggles in one step.
+func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, platformName, trackID string) (favoriteToggleOutcome, error) {
+	platformName = strings.TrimSpace(platformName)
+	trackID = strings.TrimSpace(trackID)
+	if repo == nil || scopeID == 0 || clickerID == 0 || platformName == "" || trackID == "" {
+		return favoriteToggleOutcome{}, fmt.Errorf("invalid favorite toggle request")
+	}
+
+	if deny := resolveFavoriteToggleDeny(ctx, b, repo, scopeType, scopeID, clickerID); deny != "" {
+		return favoriteToggleOutcome{deny: deny}, nil
+	}
+
+	favorited, err := repo.IsFavorited(ctx, scopeType, scopeID, platformName, trackID)
+	if err != nil {
 		return favoriteToggleOutcome{}, err
 	}
-	return favoriteToggleOutcome{added: true, songName: meta.songName}, nil
+	if favorited {
+		if err := repo.RemoveFavorite(ctx, scopeType, scopeID, platformName, trackID); err != nil {
+			return favoriteToggleOutcome{}, err
+		}
+		return favoriteToggleOutcome{removed: true}, nil
+	}
+
+	songName, err := addFavoriteWithMeta(ctx, repo, mgr, scopeType, scopeID, clickerID, clickerName, platformName, trackID)
+	if err != nil {
+		return favoriteToggleOutcome{}, err
+	}
+	return favoriteToggleOutcome{added: true, songName: songName}, nil
 }
 
 // favoriteToggleMessage renders the user-facing toast for a toggle outcome.
@@ -303,6 +320,20 @@ func (h *FavoriteCallbackHandler) answer(ctx context.Context, b *telego.Bot, cal
 	_ = b.AnswerCallbackQuery(ctx, params)
 }
 
+func (h *FavoriteCallbackHandler) answerAlert(ctx context.Context, b *telego.Bot, callbackQueryID, text string) {
+	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: callbackQueryID, Text: text, ShowAlert: true})
+}
+
+// favoriteUnfavoritePending tracks a pending "tap again to unfavorite"
+// confirmation, keyed by (clicker, scope, track). The 10s TTL is the confirm
+// window: a tap while already favorited only arms this and prompts; a second tap
+// within the window actually removes. Adding a favorite needs no confirmation.
+var favoriteUnfavoritePending = newTTLStore[struct{}](10 * time.Second)
+
+func favoriteUnfavoriteKey(clickerID int64, scopeType string, scopeID int64, platformName, trackID string) string {
+	return fmt.Sprintf("%d|%s|%d|%s|%s", clickerID, scopeType, scopeID, platformName, trackID)
+}
+
 func (h *FavoriteCallbackHandler) Handle(ctx context.Context, b *telego.Bot, update *telego.Update) {
 	if update == nil || update.CallbackQuery == nil {
 		return
@@ -346,7 +377,14 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 	if scopeType == botpkg.FavoriteScopeGroup {
 		scopeID = parsed.chatID
 	}
-	out, err := toggleFavorite(ctx, b, h.Repo, h.PlatformManager, scopeType, scopeID, clicker, callbackUserDisplayName(&query.From), parsed.platform, parsed.trackID)
+	group := scopeType == botpkg.FavoriteScopeGroup
+
+	if deny := resolveFavoriteToggleDeny(ctx, b, h.Repo, scopeType, scopeID, clicker); deny != "" {
+		h.answer(ctx, b, query.ID, deny)
+		return
+	}
+
+	favorited, err := h.Repo.IsFavorited(ctx, scopeType, scopeID, parsed.platform, parsed.trackID)
 	if err != nil {
 		if h.Logger != nil {
 			h.Logger.Warn("favorite toggle failed", "platform", parsed.platform, "trackID", parsed.trackID, "error", err)
@@ -354,7 +392,56 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 		h.answer(ctx, b, query.ID, "操作失败，请稍后再试")
 		return
 	}
-	h.answer(ctx, b, query.ID, favoriteToggleMessage(out, scopeType))
+
+	// Already favorited: require a two-step confirmation to remove, so a single
+	// mis-tap on the (visually identical) button can't silently unfavorite.
+	if favorited {
+		// Group favorites: only the collector or an admin may remove (matching the
+		// list's permission). In guest mode the admin check fails, so it degrades
+		// to collector-only.
+		if group {
+			fav, _ := h.Repo.GetFavorite(ctx, scopeType, scopeID, parsed.platform, parsed.trackID)
+			if (fav == nil || fav.AddedByUserID != clicker) && !isRequesterOrAdmin(ctx, b, scopeID, clicker, 0) {
+				h.answer(ctx, b, query.ID, "已收藏到群聊（仅收藏者或管理员可取消）")
+				return
+			}
+		}
+		key := favoriteUnfavoriteKey(clicker, scopeType, scopeID, parsed.platform, parsed.trackID)
+		if _, pending := favoriteUnfavoritePending.Load(key); pending {
+			favoriteUnfavoritePending.Delete(key)
+			if err := h.Repo.RemoveFavorite(ctx, scopeType, scopeID, parsed.platform, parsed.trackID); err != nil {
+				h.answer(ctx, b, query.ID, "操作失败，请稍后再试")
+				return
+			}
+			if group {
+				h.answer(ctx, b, query.ID, "已从群聊取消收藏")
+			} else {
+				h.answer(ctx, b, query.ID, "已取消收藏")
+			}
+			return
+		}
+		favoriteUnfavoritePending.Store(key, struct{}{})
+		if group {
+			h.answerAlert(ctx, b, query.ID, "已收藏到群聊。如需取消，请在 10 秒内再次点击按钮。")
+		} else {
+			h.answerAlert(ctx, b, query.ID, "已收藏。如需取消，请在 10 秒内再次点击按钮。")
+		}
+		return
+	}
+
+	// Not favorited: add immediately, no confirmation.
+	if _, err := addFavoriteWithMeta(ctx, h.Repo, h.PlatformManager, scopeType, scopeID, clicker, callbackUserDisplayName(&query.From), parsed.platform, parsed.trackID); err != nil {
+		if h.Logger != nil {
+			h.Logger.Warn("favorite add failed", "platform", parsed.platform, "trackID", parsed.trackID, "error", err)
+		}
+		h.answer(ctx, b, query.ID, "操作失败，请稍后再试")
+		return
+	}
+	if group {
+		h.answer(ctx, b, query.ID, "⭐ 已收藏到群聊")
+	} else {
+		h.answer(ctx, b, query.ID, "⭐ 已收藏")
+	}
 }
 
 func (h *FavoriteCallbackHandler) handleListCallback(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, args []string) {

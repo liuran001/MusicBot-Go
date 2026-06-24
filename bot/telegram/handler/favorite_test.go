@@ -150,7 +150,7 @@ func TestFavoriteListViewSendAndManageModes(t *testing.T) {
 	}
 	h := &FavoritesHandler{Repo: repo, PageSize: 8}
 
-	scan := func(markup *telego.InlineKeyboardMarkup) (send, remove, manageEntry bool) {
+	scan := func(markup *telego.InlineKeyboardMarkup) (send, remove, manageEntry, closeBtn bool) {
 		if markup == nil {
 			return
 		}
@@ -163,22 +163,45 @@ func TestFavoriteListViewSendAndManageModes(t *testing.T) {
 					remove = true
 				case strings.HasPrefix(btn.CallbackData, "favm n TOK u 1 m"):
 					manageEntry = true
+				case btn.CallbackData == "favm c TOK":
+					closeBtn = true
 				}
 			}
 		}
 		return
 	}
 
-	// Normal mode: a send button + a "manage" entry, but NO inline remove button.
+	// Normal mode: send button + manage entry + close, but NO inline remove button.
 	_, normal := h.buildListView(ctx, favoriteListContext{token: "TOK", requesterID: uid, view: "u", page: 1})
-	if send, remove, manageEntry := scan(normal); !send || remove || !manageEntry {
-		t.Fatalf("normal mode: send=%v remove=%v manageEntry=%v", send, remove, manageEntry)
+	if send, remove, manageEntry, closeBtn := scan(normal); !send || remove || !manageEntry || !closeBtn {
+		t.Fatalf("normal mode: send=%v remove=%v manageEntry=%v close=%v", send, remove, manageEntry, closeBtn)
 	}
 
 	// Manage mode: per-song delete buttons, no send.
 	_, manage := h.buildListView(ctx, favoriteListContext{token: "TOK", requesterID: uid, view: "u", page: 1, manage: true})
-	if send, remove, _ := scan(manage); send || !remove {
+	if send, remove, _, _ := scan(manage); send || !remove {
 		t.Fatalf("manage mode: send=%v remove=%v", send, remove)
+	}
+}
+
+func TestFavoriteUnfavoritePendingFlow(t *testing.T) {
+	k := favoriteUnfavoriteKey(1, botpkg.FavoriteScopeUser, 1, "netease", "9")
+	if _, pending := favoriteUnfavoritePending.Load(k); pending {
+		t.Fatalf("expected no pending initially")
+	}
+	favoriteUnfavoritePending.Store(k, struct{}{})
+	if _, pending := favoriteUnfavoritePending.Load(k); !pending {
+		t.Fatalf("expected pending after first tap (arm)")
+	}
+	favoriteUnfavoritePending.Delete(k)
+	if _, pending := favoriteUnfavoritePending.Load(k); pending {
+		t.Fatalf("expected cleared after confirm")
+	}
+	if k == favoriteUnfavoriteKey(2, botpkg.FavoriteScopeUser, 1, "netease", "9") {
+		t.Fatalf("keys must differ by clicker")
+	}
+	if k == favoriteUnfavoriteKey(1, botpkg.FavoriteScopeGroup, 1, "netease", "9") {
+		t.Fatalf("keys must differ by scope")
 	}
 }
 
