@@ -168,6 +168,35 @@ func TestFavoriteListViewHasSendAndRemoveButtons(t *testing.T) {
 	}
 }
 
+func TestFavoriteSongHTML(t *testing.T) {
+	// Track + artist links, with HTML escaping of the names.
+	fav := &botpkg.Favorite{
+		Platform:        "netease",
+		TrackID:         "111",
+		SongName:        "A<B",
+		SongArtists:     "X&Y/Z",
+		TrackURL:        "https://example.com/song?a=1&b=2",
+		SongArtistsURLs: "https://example.com/x,https://example.com/z",
+	}
+	got := favoriteSongHTML(fav)
+	want := `<a href="https://example.com/song?a=1&amp;b=2">A&lt;B</a> - <a href="https://example.com/x">X&amp;Y</a> / <a href="https://example.com/z">Z</a>`
+	if got != want {
+		t.Fatalf("favoriteSongHTML mismatch:\n got: %s\nwant: %s", got, want)
+	}
+
+	// netease without a stored TrackURL falls back to a constructed song URL.
+	fav2 := &botpkg.Favorite{Platform: "netease", TrackID: "222", SongName: "Song", SongArtists: "Artist"}
+	if got := favoriteSongHTML(fav2); !strings.Contains(got, `<a href="https://music.163.com/song?id=222">Song</a>`) {
+		t.Fatalf("expected netease fallback link, got %s", got)
+	}
+
+	// No URL and non-netease: plain escaped text, no anchor.
+	fav3 := &botpkg.Favorite{Platform: "qqmusic", TrackID: "333", SongName: "Name", SongArtists: "Artist"}
+	if got := favoriteSongHTML(fav3); strings.Contains(got, "<a ") {
+		t.Fatalf("expected no link without URL, got %s", got)
+	}
+}
+
 func TestExtractGroupScopeToken(t *testing.T) {
 	cases := []struct {
 		in       string
