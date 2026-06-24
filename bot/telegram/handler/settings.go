@@ -37,7 +37,7 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *tel
 		if !isRequesterOrAdmin(ctx, b, message.Chat.ID, message.From.ID, 0) {
 			params := &telego.SendMessageParams{
 				ChatID: telego.ChatID{ID: message.Chat.ID},
-				Text:   "❌ 仅管理员可修改群组设置",
+				Text:   "❌ " + tr(ctx, "set_admin_only"),
 			}
 			if h.RateLimiter != nil {
 				_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
@@ -53,7 +53,7 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *tel
 	if err != nil {
 		params := &telego.SendMessageParams{
 			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   "❌ 获取设置失败，请稍后重试",
+			Text:   "❌ " + tr(ctx, "set_err_load_retry"),
 		}
 		if h.RateLimiter != nil {
 			_, _ = telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params)
@@ -84,7 +84,7 @@ func (h *SettingsHandler) Handle(ctx context.Context, b *telego.Bot, update *tel
 func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings, platforms []string) string {
 	var sb strings.Builder
 
-	sb.WriteString("⚙️ 设置\n\n")
+	sb.WriteString("⚙️ " + tr(ctx, "set_title") + "\n\n")
 
 	platformName := h.DefaultPlatform
 	qualityValue := h.DefaultQuality
@@ -104,10 +104,10 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 		qualityValue = settings.DefaultQuality
 	}
 	platformEmoji := h.getPlatformEmoji(platformName)
-	sb.WriteString(fmt.Sprintf("🎵 平台：%s %s\n", platformEmoji, h.getPlatformDisplayName(platformName)))
+	sb.WriteString(fmt.Sprintf("🎵 %s：%s %s\n", tr(ctx, "set_platform_label"), platformEmoji, h.getPlatformDisplayName(platformName)))
 
 	qualityEmoji := h.getQualityEmoji(qualityValue)
-	sb.WriteString(fmt.Sprintf("🎧 音质：%s %s\n", qualityEmoji, h.getQualityDisplayName(qualityValue)))
+	sb.WriteString(fmt.Sprintf("🎧 %s：%s %s\n", tr(ctx, "set_quality_label"), qualityEmoji, h.getQualityDisplayName(ctx, qualityValue)))
 
 	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	lyricSummary := lyricFormatDisplayName(lyricFormat)
@@ -115,30 +115,30 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, lyricFormat)
 		var extras []string
 		if includeTranslation {
-			extras = append(extras, "翻译")
+			extras = append(extras, tr(ctx, "set_label_translation"))
 		}
 		if includeRoma {
-			extras = append(extras, "罗马音")
+			extras = append(extras, tr(ctx, "set_label_roma"))
 		}
 		if len(extras) > 0 {
-			lyricSummary += " · 含" + strings.Join(extras, "/")
+			lyricSummary += " · " + tr(ctx, "set_lyric_include_prefix") + strings.Join(extras, "/")
 		}
 	}
-	sb.WriteString(fmt.Sprintf("🎤 歌词：%s\n", lyricSummary))
+	sb.WriteString(fmt.Sprintf("🎤 %s：%s\n", tr(ctx, "set_lyric_label"), lyricSummary))
 
 	autoDeleteEnabled := h.resolveAutoDeleteList(chatType, settings, groupSettings)
-	autoDeleteText := "关闭"
+	autoDeleteText := tr(ctx, "set_state_off_full")
 	if autoDeleteEnabled {
-		autoDeleteText = "开启"
+		autoDeleteText = tr(ctx, "set_state_on_full")
 	}
 	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
-	autoLinkDetectText := "关闭"
+	autoLinkDetectText := tr(ctx, "set_state_off_full")
 	if autoLinkDetectEnabled {
-		autoLinkDetectText = "开启"
+		autoLinkDetectText = tr(ctx, "set_state_on_full")
 	}
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("🧹 点歌后自动删列表：%s\n", autoDeleteText))
-	sb.WriteString(fmt.Sprintf("🔗 会话内自动识别链接：%s\n", autoLinkDetectText))
+	sb.WriteString(fmt.Sprintf("🧹 %s：%s\n", tr(ctx, "set_autodelete_summary_label"), autoDeleteText))
+	sb.WriteString(fmt.Sprintf("🔗 %s：%s\n", tr(ctx, "set_autolink_summary_label"), autoLinkDetectText))
 
 	for _, def := range h.sortedPluginSettingDefinitions() {
 		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled, chatType != "private") {
@@ -149,7 +149,7 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	}
 
 	if len(platforms) > 1 {
-		sb.WriteString("\n💡 可用平台\n")
+		sb.WriteString("\n💡 " + tr(ctx, "set_available_platforms") + "\n")
 		var platformNames []string
 		for _, p := range platforms {
 			platformNames = append(platformNames, h.getPlatformDisplayName(p))
@@ -158,7 +158,7 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n点击下方按钮修改")
+	sb.WriteString("\n" + tr(ctx, "set_tap_to_modify"))
 
 	return sb.String()
 }
@@ -214,19 +214,19 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 
 	qualityButtons := []telego.InlineKeyboardButton{
 		{
-			Text:         h.formatQualityButton("standard", qualityValue == "standard"),
+			Text:         h.formatQualityButton(ctx, "standard", qualityValue == "standard"),
 			CallbackData: "settings quality standard",
 		},
 		{
-			Text:         h.formatQualityButton("high", qualityValue == "high"),
+			Text:         h.formatQualityButton(ctx, "high", qualityValue == "high"),
 			CallbackData: "settings quality high",
 		},
 		{
-			Text:         h.formatQualityButton("lossless", qualityValue == "lossless"),
+			Text:         h.formatQualityButton(ctx, "lossless", qualityValue == "lossless"),
 			CallbackData: "settings quality lossless",
 		},
 		{
-			Text:         h.formatQualityButton("hires", qualityValue == "hires"),
+			Text:         h.formatQualityButton(ctx, "hires", qualityValue == "hires"),
 			CallbackData: "settings quality hires",
 		},
 	}
@@ -236,18 +236,18 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 	autoLinkDetectEnabled := h.resolveAutoLinkDetect(chatType, settings, groupSettings)
 	rows = append(rows, []telego.InlineKeyboardButton{
 		{
-			Text:         h.formatToggleButton("🧹 自动删列表", autoDeleteEnabled),
+			Text:         h.formatToggleButton(ctx, "🧹 "+tr(ctx, "set_btn_autodelete"), autoDeleteEnabled),
 			CallbackData: fmt.Sprintf("settings autodelete %s", h.toggleValue(autoDeleteEnabled)),
 		},
 		{
-			Text:         h.formatToggleButton("🔗 识别链接", autoLinkDetectEnabled),
+			Text:         h.formatToggleButton(ctx, "🔗 "+tr(ctx, "set_btn_autolink"), autoLinkDetectEnabled),
 			CallbackData: fmt.Sprintf("settings autolink %s", h.toggleValue(autoLinkDetectEnabled)),
 		},
 	})
 
 	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	rows = append(rows, []telego.InlineKeyboardButton{{
-		Text:         fmt.Sprintf("🎤 歌词：%s", lyricFormatDisplayName(lyricFormat)),
+		Text:         fmt.Sprintf("🎤 %s：%s", tr(ctx, "set_lyric_label"), lyricFormatDisplayName(lyricFormat)),
 		CallbackData: "settings lyricmenu",
 	}})
 	for _, def := range h.sortedPluginSettingDefinitions() {
@@ -263,7 +263,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 			CallbackData: fmt.Sprintf("settings pcycle %s %s", def.Plugin, def.Key),
 		}})
 	}
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "✖️ 关闭", CallbackData: "settings close"}})
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "✖️ " + tr(ctx, "set_btn_close"), CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -349,7 +349,7 @@ var settingsLyricFormatRows = [][]string{
 
 // buildLyricFormatMenuKeyboard builds the default-lyric-format submenu: a grid
 // of formats (current marked "✅") plus a back button to the main settings.
-func (h *SettingsHandler) buildLyricFormatMenuKeyboard(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) *telego.InlineKeyboardMarkup {
+func (h *SettingsHandler) buildLyricFormatMenuKeyboard(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) *telego.InlineKeyboardMarkup {
 	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	rows := make([][]telego.InlineKeyboardButton, 0, len(settingsLyricFormatRows)+1)
 	for _, row := range settingsLyricFormatRows {
@@ -377,48 +377,48 @@ func (h *SettingsHandler) buildLyricFormatMenuKeyboard(chatType string, settings
 		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, current)
 		rows = append(rows, []telego.InlineKeyboardButton{
 			{
-				Text:         h.formatToggleButton("🌐 翻译", includeTranslation),
+				Text:         h.formatToggleButton(ctx, "🌐 "+tr(ctx, "set_label_translation"), includeTranslation),
 				CallbackData: fmt.Sprintf("settings lyrictrans %s", h.toggleValue(includeTranslation)),
 			},
 			{
-				Text:         h.formatToggleButton("🔤 罗马音", includeRoma),
+				Text:         h.formatToggleButton(ctx, "🔤 "+tr(ctx, "set_label_roma"), includeRoma),
 				CallbackData: fmt.Sprintf("settings lyricroma %s", h.toggleValue(includeRoma)),
 			},
 		})
 	}
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "⬅️ 返回", CallbackData: "settings lyricback"}})
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: "⬅️ " + tr(ctx, "set_btn_back"), CallbackData: "settings lyricback"}})
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // buildLyricFormatMenuText is the header text shown above the format submenu.
-func (h *SettingsHandler) buildLyricFormatMenuText(chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) string {
+func (h *SettingsHandler) buildLyricFormatMenuText(ctx context.Context, chatType string, settings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) string {
 	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	var sb strings.Builder
-	sb.WriteString("🎤 默认歌词格式\n\n")
-	sb.WriteString(fmt.Sprintf("当前：%s\n", lyricFormatDisplayName(current)))
+	sb.WriteString("🎤 " + tr(ctx, "set_lyric_menu_title") + "\n\n")
+	sb.WriteString(fmt.Sprintf("%s：%s\n", tr(ctx, "set_lyric_menu_current"), lyricFormatDisplayName(current)))
 	if lyricFormatSupportsSideTracks(current) {
 		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, current)
-		sb.WriteString(fmt.Sprintf("翻译：%s ｜ 罗马音：%s\n", enabledText(includeTranslation), enabledText(includeRoma)))
+		sb.WriteString(fmt.Sprintf("%s：%s ｜ %s：%s\n", tr(ctx, "set_label_translation"), enabledText(ctx, includeTranslation), tr(ctx, "set_label_roma"), enabledText(ctx, includeRoma)))
 	}
-	sb.WriteString("\n选择 /lyric 默认导出的歌词格式（音频内嵌歌词始终为 LRC，不受影响）")
+	sb.WriteString("\n" + tr(ctx, "set_lyric_menu_hint"))
 	if lyricFormatSupportsSideTracks(current) {
-		sb.WriteString("\n该格式支持翻译/罗马音，可在下方开关")
+		sb.WriteString("\n" + tr(ctx, "set_lyric_menu_sidetrack_hint"))
 	}
 	return sb.String()
 }
 
 // enabledText renders a bool as a 开/关 label for settings summaries.
-func enabledText(enabled bool) string {
+func enabledText(ctx context.Context, enabled bool) string {
 	if enabled {
-		return "开"
+		return tr(ctx, "set_state_on")
 	}
-	return "关"
+	return tr(ctx, "set_state_off")
 }
 
-func (h *SettingsHandler) formatToggleButton(label string, enabled bool) string {
-	state := "关"
+func (h *SettingsHandler) formatToggleButton(ctx context.Context, label string, enabled bool) string {
+	state := tr(ctx, "set_state_off")
 	if enabled {
-		state = "开"
+		state = tr(ctx, "set_state_on")
 	}
 	return fmt.Sprintf("%s：%s", label, state)
 }
@@ -506,8 +506,8 @@ func (h *SettingsHandler) shouldShowPluginSetting(def botpkg.PluginSettingDefini
 	return true
 }
 
-func (h *SettingsHandler) formatQualityButton(quality string, isSelected bool) string {
-	name := h.getQualityDisplayName(quality)
+func (h *SettingsHandler) formatQualityButton(ctx context.Context, quality string, isSelected bool) string {
+	name := h.getQualityDisplayName(ctx, quality)
 	if isSelected {
 		return fmt.Sprintf("✅ %s", name)
 	}
@@ -537,16 +537,16 @@ func (h *SettingsHandler) getQualityEmoji(quality string) string {
 	}
 }
 
-func (h *SettingsHandler) getQualityDisplayName(quality string) string {
+func (h *SettingsHandler) getQualityDisplayName(ctx context.Context, quality string) string {
 	switch quality {
 	case "standard":
-		return "标准"
+		return tr(ctx, "set_quality_standard")
 	case "high":
-		return "高品质"
+		return tr(ctx, "set_quality_high")
 	case "lossless":
-		return "无损"
+		return tr(ctx, "set_quality_lossless")
 	case "hires":
-		return "Hi-Res"
+		return tr(ctx, "set_quality_hires")
 	default:
 		return quality
 	}
@@ -572,7 +572,7 @@ func (h *SettingsCallbackHandler) handleLyricMenuNavigation(ctx context.Context,
 		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, userID, 0) {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
-				Text:            "❌ 仅管理员可修改群组设置",
+				Text:            "❌ " + tr(ctx, "set_admin_only"),
 				ShowAlert:       true,
 			})
 			return
@@ -584,7 +584,7 @@ func (h *SettingsCallbackHandler) handleLyricMenuNavigation(ctx context.Context,
 	if err != nil {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 			CallbackQueryID: query.ID,
-			Text:            "❌ 获取设置失败",
+			Text:            "❌ " + tr(ctx, "set_err_load"),
 			ShowAlert:       true,
 		})
 		return
@@ -596,8 +596,8 @@ func (h *SettingsCallbackHandler) handleLyricMenuNavigation(ctx context.Context,
 	var text string
 	var keyboard *telego.InlineKeyboardMarkup
 	if enterMenu {
-		text = h.SettingsHandler.buildLyricFormatMenuText(chatType, settings, groupSettings)
-		keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(chatType, settings, groupSettings)
+		text = h.SettingsHandler.buildLyricFormatMenuText(ctx, chatType, settings, groupSettings)
+		keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(ctx, chatType, settings, groupSettings)
 	} else {
 		platforms := h.PlatformManager.List()
 		text = h.SettingsHandler.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
@@ -668,7 +668,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, 0) {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
-				Text:            "❌ 仅管理员可修改群组设置",
+				Text:            "❌ " + tr(ctx, "set_admin_only"),
 				ShowAlert:       true,
 			})
 			return
@@ -680,7 +680,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	if err != nil {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 			CallbackQueryID: query.ID,
-			Text:            "❌ 获取设置失败",
+			Text:            "❌ " + tr(ctx, "set_err_load"),
 			ShowAlert:       true,
 		})
 		return
@@ -705,12 +705,12 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				if groupSettings != nil && groupSettings.DefaultPlatform != settingValue {
 					groupSettings.DefaultPlatform = settingValue
 					changed = true
-					responseText = fmt.Sprintf("✅ 已切换到 %s", h.SettingsHandler.getPlatformDisplayName(settingValue))
+					responseText = "✅ " + tr(ctx, "set_resp_platform_switched", map[string]any{"Name": h.SettingsHandler.getPlatformDisplayName(settingValue)})
 				}
 			} else if settings != nil && settings.DefaultPlatform != settingValue {
 				settings.DefaultPlatform = settingValue
 				changed = true
-				responseText = fmt.Sprintf("✅ 已切换到 %s", h.SettingsHandler.getPlatformDisplayName(settingValue))
+				responseText = "✅ " + tr(ctx, "set_resp_platform_switched", map[string]any{"Name": h.SettingsHandler.getPlatformDisplayName(settingValue)})
 			}
 		}
 
@@ -729,12 +729,12 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				if groupSettings != nil && groupSettings.DefaultQuality != settingValue {
 					groupSettings.DefaultQuality = settingValue
 					changed = true
-					responseText = fmt.Sprintf("✅ 音质已设置为 %s", h.SettingsHandler.getQualityDisplayName(settingValue))
+					responseText = "✅ " + tr(ctx, "set_resp_quality_set", map[string]any{"Name": h.SettingsHandler.getQualityDisplayName(ctx, settingValue)})
 				}
 			} else if settings != nil && settings.DefaultQuality != settingValue {
 				settings.DefaultQuality = settingValue
 				changed = true
-				responseText = fmt.Sprintf("✅ 音质已设置为 %s", h.SettingsHandler.getQualityDisplayName(settingValue))
+				responseText = "✅ " + tr(ctx, "set_resp_quality_set", map[string]any{"Name": h.SettingsHandler.getQualityDisplayName(ctx, settingValue)})
 			}
 		}
 	case "autodelete":
@@ -747,18 +747,18 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				groupSettings.AutoDeleteList = enabled
 				changed = true
 				if enabled {
-					responseText = "✅ 已开启自动删除列表"
+					responseText = "✅ " + tr(ctx, "set_resp_autodelete_on")
 				} else {
-					responseText = "✅ 已关闭自动删除列表"
+					responseText = "✅ " + tr(ctx, "set_resp_autodelete_off")
 				}
 			}
 		} else if settings != nil && settings.AutoDeleteList != enabled {
 			settings.AutoDeleteList = enabled
 			changed = true
 			if enabled {
-				responseText = "✅ 已开启自动删除列表"
+				responseText = "✅ " + tr(ctx, "set_resp_autodelete_on")
 			} else {
-				responseText = "✅ 已关闭自动删除列表"
+				responseText = "✅ " + tr(ctx, "set_resp_autodelete_off")
 			}
 		}
 	case "autolink":
@@ -771,18 +771,18 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				groupSettings.AutoLinkDetect = enabled
 				changed = true
 				if enabled {
-					responseText = "✅ 已开启会话内链接自动识别"
+					responseText = "✅ " + tr(ctx, "set_resp_autolink_on")
 				} else {
-					responseText = "✅ 已关闭会话内链接自动识别"
+					responseText = "✅ " + tr(ctx, "set_resp_autolink_off")
 				}
 			}
 		} else if settings != nil && settings.AutoLinkDetect != enabled {
 			settings.AutoLinkDetect = enabled
 			changed = true
 			if enabled {
-				responseText = "✅ 已开启会话内链接自动识别"
+				responseText = "✅ " + tr(ctx, "set_resp_autolink_on")
 			} else {
-				responseText = "✅ 已关闭会话内链接自动识别"
+				responseText = "✅ " + tr(ctx, "set_resp_autolink_off")
 			}
 		}
 	case "pset":
@@ -807,13 +807,13 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			if err := h.Repo.SetPluginSetting(ctx, scopeType, scopeID, pluginName, pluginKey, pluginValue); err != nil {
 				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 					CallbackQueryID: query.ID,
-					Text:            "❌ 保存设置失败",
+					Text:            "❌ " + tr(ctx, "set_err_save"),
 					ShowAlert:       true,
 				})
 				return
 			}
 			changed = true
-			responseText = fmt.Sprintf("✅ %s 已设置为: %s", def.Title, def.LabelOf(pluginValue))
+			responseText = "✅ " + tr(ctx, "set_resp_plugin_set", map[string]any{"Title": def.Title, "Label": def.LabelOf(pluginValue)})
 		}
 	case "pcycle":
 		if len(args) < 4 {
@@ -845,13 +845,13 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		if err := h.Repo.SetPluginSetting(ctx, scopeType, scopeID, pluginName, pluginKey, next); err != nil {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
-				Text:            "❌ 保存设置失败",
+				Text:            "❌ " + tr(ctx, "set_err_save"),
 				ShowAlert:       true,
 			})
 			return
 		}
 		changed = true
-		responseText = fmt.Sprintf("✅ %s 已设置为: %s", def.Title, def.LabelOf(next))
+		responseText = "✅ " + tr(ctx, "set_resp_plugin_set", map[string]any{"Title": def.Title, "Label": def.LabelOf(next)})
 	case "lyricfmt":
 		if !isKnownLyricFormat(settingValue) {
 			break
@@ -861,21 +861,21 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			if groupSettings != nil && groupSettings.DefaultLyricFormat != resolved {
 				groupSettings.DefaultLyricFormat = resolved
 				changed = true
-				responseText = fmt.Sprintf("✅ 默认歌词格式已设置为 %s", lyricFormatDisplayName(resolved))
+				responseText = "✅ " + tr(ctx, "set_resp_lyricfmt_set", map[string]any{"Name": lyricFormatDisplayName(resolved)})
 			}
 		} else if settings != nil && settings.DefaultLyricFormat != resolved {
 			settings.DefaultLyricFormat = resolved
 			changed = true
-			responseText = fmt.Sprintf("✅ 默认歌词格式已设置为 %s", lyricFormatDisplayName(resolved))
+			responseText = "✅ " + tr(ctx, "set_resp_lyricfmt_set", map[string]any{"Name": lyricFormatDisplayName(resolved)})
 		}
 	case "lyrictrans", "lyricroma":
 		if settingValue != "on" && settingValue != "off" {
 			break
 		}
 		enabled := settingValue == "on"
-		label := "翻译"
+		label := tr(ctx, "set_label_translation")
 		if settingType == "lyricroma" {
-			label = "罗马音"
+			label = tr(ctx, "set_label_roma")
 		}
 		if msg != nil && msg.Chat.Type != "private" {
 			if groupSettings != nil {
@@ -895,7 +895,11 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			changed = true
 		}
 		if changed {
-			responseText = fmt.Sprintf("✅ 默认%s已%s", label, map[bool]string{true: "开启", false: "关闭"}[enabled])
+			state := tr(ctx, "set_state_off_full")
+			if enabled {
+				state = tr(ctx, "set_state_on_full")
+			}
+			responseText = "✅ " + tr(ctx, "set_resp_lyric_sidetrack", map[string]any{"Label": label, "State": state})
 		}
 	}
 
@@ -905,7 +909,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				if err := h.Repo.UpdateGroupSettings(ctx, groupSettings); err != nil {
 					_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 						CallbackQueryID: query.ID,
-						Text:            "❌ 保存设置失败",
+						Text:            "❌ " + tr(ctx, "set_err_save"),
 						ShowAlert:       true,
 					})
 					return
@@ -913,7 +917,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			} else if err := h.Repo.UpdateUserSettings(ctx, settings); err != nil {
 				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 					CallbackQueryID: query.ID,
-					Text:            "❌ 保存设置失败",
+					Text:            "❌ " + tr(ctx, "set_err_save"),
 					ShowAlert:       true,
 				})
 				return
@@ -931,8 +935,8 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			var keyboard *telego.InlineKeyboardMarkup
 			if settingType == "lyricfmt" || settingType == "lyrictrans" || settingType == "lyricroma" {
 				// Stay in the lyric-format submenu so the ✅/toggle state updates.
-				text = h.SettingsHandler.buildLyricFormatMenuText(chatType, settings, groupSettings)
-				keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(chatType, settings, groupSettings)
+				text = h.SettingsHandler.buildLyricFormatMenuText(ctx, chatType, settings, groupSettings)
+				keyboard = h.SettingsHandler.buildLyricFormatMenuKeyboard(ctx, chatType, settings, groupSettings)
 			} else {
 				platforms := h.PlatformManager.List()
 				text = h.SettingsHandler.buildSettingsText(ctx, chatType, settings, groupSettings, platforms)
