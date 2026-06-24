@@ -126,9 +126,11 @@ COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
 COPY --from=ffmpeg-builder /usr/lib/libmp3lame.so.0 /usr/lib/libmp3lame.so.0
 WORKDIR /app
 COPY --from=builder /out/MusicBot-Go /app/MusicBot-Go
+# config_example.ini 与 afp.wasm 均已通过 go:embed 编译进二进制：
+#   - afp.wasm 由 bot 通过 wazero 在进程内执行（纯 Go，无 Node.js）
+#   - 配置文件缺失时，bot 会用内置模板自动生成
+# 这里仅保留示例配置供进容器参考，运行时不再依赖它。
 COPY config_example.ini /app/config_example.ini
-# afp.wasm 听歌识曲指纹编码器（由 bot 通过 wazero 在进程内执行，纯 Go，无 Node.js）。
-COPY plugins/netease/recognize/wasm/afp.wasm /app/plugins/netease/recognize/wasm/afp.wasm
 RUN mkdir -p /app/workdir
 
 # Apple Music：AAC 256k 由 bot 内置原生解密（零配置）。无损 / Hi-Res / Atmos

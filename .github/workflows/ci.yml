@@ -90,10 +90,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          mkdir -p dist/package/plugins/netease
+          mkdir -p dist/package
           go build -trimpath -ldflags "-X main.versionName=${{ steps.build_meta.outputs.version }} -X main.commitSHA=${{ steps.build_meta.outputs.commit }} -X main.buildTime=${{ steps.build_meta.outputs.build_time }}" -o "dist/package/musicbot-go-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
           cp README.md config_example.ini dist/package/
-          cp -R plugins/netease/recognize dist/package/plugins/netease/
           if [ "${{ matrix.goos }}" = "windows" ]; then
             (cd dist/package && zip -r "../musicbot-go-${{ matrix.goos }}-${{ matrix.goarch }}.zip" .)
           else
