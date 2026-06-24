@@ -108,16 +108,27 @@ func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 // case-insensitive string search when entities are unavailable. Matching is
 // case-insensitive because Telegram usernames are.
 func stripBotMention(text string, entities []telego.MessageEntity, botName string) string {
-	if text == "" {
+	before, after, found := splitAroundMention(text, entities, botName)
+	if !found {
 		return text
+	}
+	return strings.TrimSpace(joinMentionGap(before, after))
+}
+
+// splitAroundMention locates the bot's @mention and returns the raw text on
+// either side of it (UTF-16-correct via entities, with a case-insensitive string
+// fallback mirroring stripBotMention). found is false when no mention is present.
+func splitAroundMention(text string, entities []telego.MessageEntity, botName string) (before, after string, found bool) {
+	if text == "" {
+		return "", "", false
 	}
 	botName = strings.TrimPrefix(strings.TrimSpace(botName), "@")
 	if botName == "" {
-		return text
+		return "", "", false
 	}
 	mentionLower := "@" + strings.ToLower(botName)
 
-	// Entity-based precise removal.
+	// Entity-based precise split.
 	units := utf16.Encode([]rune(text))
 	for _, entity := range entities {
 		if entity.Type != telego.EntityTypeMention {
@@ -130,9 +141,7 @@ func stripBotMention(text string, entities []telego.MessageEntity, botName strin
 		if strings.ToLower(strings.TrimSpace(seg)) != mentionLower {
 			continue
 		}
-		before := string(utf16.Decode(units[:entity.Offset]))
-		after := string(utf16.Decode(units[entity.Offset+entity.Length:]))
-		return strings.TrimSpace(joinMentionGap(before, after))
+		return string(utf16.Decode(units[:entity.Offset])), string(utf16.Decode(units[entity.Offset+entity.Length:])), true
 	}
 
 	// Fallback: case-insensitive search for "@botname" as a whole token.
@@ -143,7 +152,7 @@ func stripBotMention(text string, entities []telego.MessageEntity, botName strin
 		// Ensure the next char isn't a username continuation (so "@bot2" of a
 		// different bot isn't matched as "@bot").
 		if end >= len(text) || !isUsernameByte(text[end]) {
-			return strings.TrimSpace(joinMentionGap(text[:idx], text[end:]))
+			return text[:idx], text[end:], true
 		}
 		next := strings.Index(lower[end:], mentionLower)
 		if next < 0 {
@@ -151,7 +160,7 @@ func stripBotMention(text string, entities []telego.MessageEntity, botName strin
 		}
 		idx = end + next
 	}
-	return text
+	return "", "", false
 }
 
 // joinMentionGap rejoins the text around a removed mention, collapsing the

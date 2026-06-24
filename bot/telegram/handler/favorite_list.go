@@ -59,6 +59,19 @@ func (h *FavoritesHandler) pageSize() int {
 	return 8
 }
 
+// truncateButtonLabel rune-safely caps a button label so a long title doesn't
+// produce an oversized button.
+func truncateButtonLabel(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "…"
+}
+
 func favoriteScopeForView(view string, payload favoriteListPayload) (string, int64) {
 	if view == "g" {
 		return botpkg.FavoriteScopeGroup, payload.groupChatID
@@ -149,20 +162,20 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 	}
 
 	var rows [][]telego.InlineKeyboardButton
-	if len(favs) > 0 {
-		var rmRow []telego.InlineKeyboardButton
-		for i := range favs {
-			idx := offset + i + 1
-			data := fmt.Sprintf("favm x %s %s %d %d", lc.token, view, page, i)
-			rmRow = append(rmRow, telego.InlineKeyboardButton{Text: fmt.Sprintf("🗑%d", idx), CallbackData: data})
-			if len(rmRow) == 4 {
-				rows = append(rows, rmRow)
-				rmRow = nil
-			}
+	// One row per song: a wide "send" button (downloads/sends the track) plus a
+	// compact "remove" button.
+	for i, fav := range favs {
+		idx := offset + i + 1
+		name := strings.TrimSpace(fav.SongName)
+		if name == "" {
+			name = fav.Platform + ":" + fav.TrackID
 		}
-		if len(rmRow) > 0 {
-			rows = append(rows, rmRow)
-		}
+		sendData := fmt.Sprintf("favm s %s %s %d %d", lc.token, view, page, i)
+		rmData := fmt.Sprintf("favm x %s %s %d %d", lc.token, view, page, i)
+		rows = append(rows, []telego.InlineKeyboardButton{
+			{Text: truncateButtonLabel(fmt.Sprintf("▶️ %d. %s", idx, name), 42), CallbackData: sendData},
+			{Text: "🗑", CallbackData: rmData},
+		})
 	}
 
 	var ctrl []telego.InlineKeyboardButton
@@ -355,6 +368,19 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 			return
 		}
 		h.handleRandom(ctx, b, query, payload, args[3])
+	case "s": // send a specific favorite: favm s <token> <view> <page> <idx>
+		if len(args) < 6 {
+			h.answerCb(ctx, b, query.ID, "")
+			return
+		}
+		if clicker != payload.requesterID {
+			h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+			return
+		}
+		view := args[3]
+		page, _ := strconv.Atoi(args[4])
+		idx, _ := strconv.Atoi(args[5])
+		h.handleSend(ctx, b, query, payload, view, page, idx)
 	case "x": // remove: favm x <token> <view> <page> <idx>
 		if len(args) < 6 {
 			h.answerCb(ctx, b, query.ID, "")
@@ -376,14 +402,34 @@ func (h *FavoritesHandler) handleRandom(ctx context.Context, b *telego.Bot, quer
 		h.answerCb(ctx, b, query.ID, "收藏列表是空的")
 		return
 	}
-	if h.Music == nil {
+	h.sendFavoriteTrack(ctx, b, query, payload, fav)
+}
+
+func (h *FavoritesHandler) handleSend(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, payload favoriteListPayload, view string, page, idx int) {
+	scopeType, scopeID := favoriteScopeForView(view, payload)
+	pageSize := h.pageSize()
+	offset := (page - 1) * pageSize
+	favs, _ := h.Repo.ListFavorites(ctx, scopeType, scopeID, pageSize, offset)
+	if idx < 0 || idx >= len(favs) {
+		h.answerCb(ctx, b, query.ID, "该收藏已不存在")
+		return
+	}
+	h.sendFavoriteTrack(ctx, b, query, payload, favs[idx])
+}
+
+// sendFavoriteTrack delivers a favorited track. In a normal chat it sends a new
+// audio message; in guest/inline mode it edits the list message in place into
+// the audio — the same approach as guest search (the only way to deliver media
+// when the bot can't post a new message to the chat).
+func (h *FavoritesHandler) sendFavoriteTrack(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery, payload favoriteListPayload, fav *botpkg.Favorite) {
+	if h.Music == nil || fav == nil {
 		h.answerCb(ctx, b, query.ID, "")
 		return
 	}
-	// Normal chat: send a new audio message.
+	// Normal chat: send a new audio message attributed to the clicker.
 	if query.Message != nil {
 		if msg := query.Message.Message(); msg != nil {
-			h.answerCb(ctx, b, query.ID, "🎲 正在发送…")
+			h.answerCb(ctx, b, query.ID, "正在发送…")
 			clicker := query.From
 			sendMsg := *msg
 			sendMsg.From = &clicker
@@ -391,9 +437,9 @@ func (h *FavoritesHandler) handleRandom(ctx context.Context, b *telego.Bot, quer
 			return
 		}
 	}
-	// Guest/inline: edit the list message in place into the audio.
+	// Guest/inline: edit the message in place into the audio.
 	if strings.TrimSpace(query.InlineMessageID) != "" {
-		h.answerCb(ctx, b, query.ID, "🎲 正在发送…")
+		h.answerCb(ctx, b, query.ID, "正在发送…")
 		userName := callbackUserDisplayName(&query.From)
 		isGroup := payload.groupChatID != 0
 		go runInlineMediaFlow(detachContext(ctx), b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, query.InlineMessageID, query.From.ID, userName, fav.Platform, fav.TrackID, "", payload.groupChatID, isGroup)

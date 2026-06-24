@@ -140,6 +140,34 @@ func TestBuildLyricDeepLinkAndButton(t *testing.T) {
 	}
 }
 
+func TestFavoriteListViewHasSendAndRemoveButtons(t *testing.T) {
+	repo := newStubRepo()
+	ctx := context.Background()
+	const uid int64 = 7
+	if err := repo.AddFavorite(ctx, &botpkg.Favorite{ScopeType: botpkg.FavoriteScopeUser, ScopeID: uid, Platform: "netease", TrackID: "555", AddedByUserID: uid, SongName: "Song", SongArtists: "Artist"}); err != nil {
+		t.Fatalf("add favorite: %v", err)
+	}
+	h := &FavoritesHandler{Repo: repo, PageSize: 8}
+	_, markup := h.buildListView(ctx, favoriteListContext{token: "TOK", requesterID: uid, view: "u", page: 1})
+	if markup == nil {
+		t.Fatalf("expected a keyboard")
+	}
+	var hasSend, hasRemove bool
+	for _, row := range markup.InlineKeyboard {
+		for _, btn := range row {
+			if strings.HasPrefix(btn.CallbackData, "favm s TOK u 1 0") {
+				hasSend = true
+			}
+			if strings.HasPrefix(btn.CallbackData, "favm x TOK u 1 0") {
+				hasRemove = true
+			}
+		}
+	}
+	if !hasSend || !hasRemove {
+		t.Fatalf("expected per-song send+remove buttons, hasSend=%v hasRemove=%v", hasSend, hasRemove)
+	}
+}
+
 func TestExtractGroupScopeToken(t *testing.T) {
 	cases := []struct {
 		in       string
