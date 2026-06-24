@@ -261,11 +261,12 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 		if len(ctrl) > 0 {
 			rows = append(rows, ctrl)
 		}
+		bottom := make([]telego.InlineKeyboardButton, 0, 2)
 		if total > 0 {
-			rows = append(rows, []telego.InlineKeyboardButton{
-				{Text: "🗑 管理收藏", CallbackData: fmt.Sprintf("favm n %s %s 1 m", lc.token, view)},
-			})
+			bottom = append(bottom, telego.InlineKeyboardButton{Text: "🗑 管理收藏", CallbackData: fmt.Sprintf("favm n %s %s 1 m", lc.token, view)})
 		}
+		bottom = append(bottom, telego.InlineKeyboardButton{Text: "✖️ 关闭", CallbackData: fmt.Sprintf("favm c %s", lc.token)})
+		rows = append(rows, bottom)
 	}
 
 	if pageCount > 1 {
@@ -470,8 +471,40 @@ func (h *FavoritesHandler) handleListCallback(ctx context.Context, b *telego.Bot
 		page, _ := strconv.Atoi(args[4])
 		idx, _ := strconv.Atoi(args[5])
 		h.handleRemove(ctx, b, query, payload, token, view, page, idx, clicker)
+	case "c": // close: favm c <token>
+		if clicker != payload.requesterID {
+			h.answerCb(ctx, b, query.ID, "这不是你打开的收藏列表")
+			return
+		}
+		h.answerCb(ctx, b, query.ID, "")
+		h.closeListMessage(ctx, b, query)
 	default:
 		h.answerCb(ctx, b, query.ID, "")
+	}
+}
+
+// closeListMessage closes the list: deletes the message in a normal chat, or
+// edits an inline (guest) message to a closed state since inline messages can't
+// be deleted.
+func (h *FavoritesHandler) closeListMessage(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery) {
+	if query.Message != nil {
+		if msg := query.Message.Message(); msg != nil {
+			params := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
+			if h.RateLimiter != nil {
+				_ = telegram.DeleteMessageWithRetry(ctx, h.RateLimiter, b, params)
+			} else {
+				_ = b.DeleteMessage(ctx, params)
+			}
+			return
+		}
+	}
+	if strings.TrimSpace(query.InlineMessageID) != "" {
+		params := &telego.EditMessageTextParams{InlineMessageID: query.InlineMessageID, Text: "已关闭"}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
 	}
 }
 
