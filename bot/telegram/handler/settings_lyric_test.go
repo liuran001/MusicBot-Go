@@ -33,7 +33,7 @@ func TestLyricFormatMenuTogglesOnlyForSideTrackFormats(t *testing.T) {
 
 	// A side-track-capable default format (ttml) shows the toggles.
 	ttml := &botpkg.UserSettings{UserID: 1, DefaultLyricFormat: "ttml"}
-	kb := h.buildLyricFormatMenuKeyboard("private", ttml, nil)
+	kb := h.buildLyricFormatMenuKeyboard(zhCtx(), "private", ttml, nil)
 	trans, roma := findLyricToggleButtons(kb)
 	if trans == nil || roma == nil {
 		t.Fatal("ttml default should expose translation/roma toggles")
@@ -41,7 +41,7 @@ func TestLyricFormatMenuTogglesOnlyForSideTrackFormats(t *testing.T) {
 
 	// A pure word format (yrc) does not carry side tracks → no toggles.
 	yrc := &botpkg.UserSettings{UserID: 1, DefaultLyricFormat: "yrc"}
-	kb = h.buildLyricFormatMenuKeyboard("private", yrc, nil)
+	kb = h.buildLyricFormatMenuKeyboard(zhCtx(), "private", yrc, nil)
 	trans, roma = findLyricToggleButtons(kb)
 	if trans != nil || roma != nil {
 		t.Error("yrc default should not expose side-track toggles")
@@ -77,7 +77,7 @@ func TestLyricFormatMenuToggleButtonReflectsState(t *testing.T) {
 	h := &SettingsHandler{}
 	on := true
 	s := &botpkg.UserSettings{UserID: 1, DefaultLyricFormat: "ttml", DefaultLyricIncludeTranslation: &on}
-	kb := h.buildLyricFormatMenuKeyboard("private", s, nil)
+	kb := h.buildLyricFormatMenuKeyboard(zhCtx(), "private", s, nil)
 	trans, _ := findLyricToggleButtons(kb)
 	if trans == nil {
 		t.Fatal("expected translation toggle")
