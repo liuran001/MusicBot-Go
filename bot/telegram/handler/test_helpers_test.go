@@ -21,6 +21,7 @@ type stubSongRepository struct {
 	userSettings   map[int64]*botpkg.UserSettings  // by UserID
 	groupSettings  map[int64]*botpkg.GroupSettings // by ChatID
 	pluginSettings map[string]string
+	favorites      map[string]*botpkg.Favorite // by "scope:scopeID:platform:trackID"
 	sendCount      int64
 }
 
@@ -32,6 +33,7 @@ func newStubRepo() *stubSongRepository {
 		userSettings:   make(map[int64]*botpkg.UserSettings),
 		groupSettings:  make(map[int64]*botpkg.GroupSettings),
 		pluginSettings: make(map[string]string),
+		favorites:      make(map[string]*botpkg.Favorite),
 	}
 }
 
@@ -337,6 +339,94 @@ func (r *stubSongRepository) SetPluginSetting(ctx context.Context, scopeType str
 	defer r.mu.Unlock()
 	r.pluginSettings[scopeType+":"+plugin+":"+key+":"+strconv.FormatInt(scopeID, 10)] = value
 	return nil
+}
+
+func favKey(scopeType string, scopeID int64, platform, trackID string) string {
+	return scopeType + ":" + strconv.FormatInt(scopeID, 10) + ":" + platform + ":" + trackID
+}
+
+func (r *stubSongRepository) IsFavorited(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.favorites[favKey(scopeType, scopeID, platform, trackID)]
+	return ok, nil
+}
+
+func (r *stubSongRepository) GetFavorite(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) (*botpkg.Favorite, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.favorites[favKey(scopeType, scopeID, platform, trackID)], nil
+}
+
+func (r *stubSongRepository) AddFavorite(ctx context.Context, fav *botpkg.Favorite) error {
+	if fav == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clone := *fav
+	r.favorites[favKey(fav.ScopeType, fav.ScopeID, fav.Platform, fav.TrackID)] = &clone
+	return nil
+}
+
+func (r *stubSongRepository) RemoveFavorite(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.favorites, favKey(scopeType, scopeID, platform, trackID))
+	return nil
+}
+
+func (r *stubSongRepository) ListFavorites(ctx context.Context, scopeType string, scopeID int64, limit, offset int) ([]*botpkg.Favorite, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []*botpkg.Favorite
+	for _, f := range r.favorites {
+		if f.ScopeType == scopeType && f.ScopeID == scopeID {
+			all = append(all, f)
+		}
+	}
+	if offset >= len(all) {
+		return nil, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], nil
+}
+
+func (r *stubSongRepository) CountFavorites(ctx context.Context, scopeType string, scopeID int64) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var n int64
+	for _, f := range r.favorites {
+		if f.ScopeType == scopeType && f.ScopeID == scopeID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r *stubSongRepository) RandomFavorite(ctx context.Context, scopeType string, scopeID int64) (*botpkg.Favorite, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, f := range r.favorites {
+		if f.ScopeType == scopeType && f.ScopeID == scopeID {
+			return f, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *stubSongRepository) FindCachedSongMeta(ctx context.Context, platform, trackID string) (*botpkg.SongInfo, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, s := range r.platformSongs {
+		if s.Platform == platform && s.TrackID == trackID {
+			return s, nil
+		}
+	}
+	return nil, nil
 }
 
 // stubPlatformManager implements platform.Manager for testing.

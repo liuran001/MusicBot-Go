@@ -256,11 +256,15 @@ func (h *InlineSearchHandler) inlineHelp(ctx context.Context, b *telego.Bot, que
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: noResults},
 		}
 	}
+	results := []telego.InlineQueryResult{randomCard, settingCard}
+	results = h.appendInlineFavoriteCards(ctx, results, query.From.ID)
 	_ = b.AnswerInlineQuery(ctx, &telego.AnswerInlineQueryParams{
 		InlineQueryID: query.ID,
 		IsPersonal:    true,
-		Results:       []telego.InlineQueryResult{randomCard, settingCard},
-		CacheTime:     600,
+		Results:       results,
+		// Short cache so a just-added/removed favorite shows up promptly in the
+		// empty-query list instead of being served stale from Telegram's cache.
+		CacheTime: 5,
 	})
 }
 
@@ -641,6 +645,59 @@ func buildInlineTrackArticle(ctx context.Context, h *InlineSearchHandler, platfo
 	}
 }
 
+// buildInlineFavoriteCard builds a lightweight inline result card for a favorite.
+// Unlike buildInlineTrackArticle it never makes a network call (no thumbnail
+// lookup), keeping the empty-query favorites list snappy. Selecting it routes
+// through the normal pending-result download flow (ChosenInlineResult).
+func buildInlineFavoriteCard(fav *botpkg.Favorite, qualityValue string, requesterID int64) telego.InlineQueryResult {
+	if fav == nil {
+		return nil
+	}
+	title := strings.TrimSpace(fav.SongName)
+	if title == "" {
+		title = fav.TrackID
+	}
+	desc := strings.TrimSpace(fav.SongArtists)
+	if album := strings.TrimSpace(fav.SongAlbum); album != "" {
+		if desc != "" {
+			desc += " · "
+		}
+		desc += album
+	}
+	return &telego.InlineQueryResultArticle{
+		Type:                telego.ResultTypeArticle,
+		ID:                  buildInlinePendingResultID(fav.Platform, fav.TrackID, qualityValue),
+		Title:               "⭐ " + title,
+		Description:         desc,
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: waitForDown},
+		ReplyMarkup:         buildInlineSendKeyboard(fav.Platform, fav.TrackID, qualityValue, requesterID),
+	}
+}
+
+// appendInlineFavoriteCards appends the user's personal favorites as inline
+// result cards (group favorites are unavailable here — inline mode has no chat
+// ID). Errors and empty lists are silently skipped.
+func (h *InlineSearchHandler) appendInlineFavoriteCards(ctx context.Context, results []telego.InlineQueryResult, userID int64) []telego.InlineQueryResult {
+	if h == nil || h.Repo == nil || userID == 0 {
+		return results
+	}
+	limit := h.inlinePageSize()
+	if limit <= 0 || limit > 24 {
+		limit = 24
+	}
+	favs, err := h.Repo.ListFavorites(ctx, botpkg.FavoriteScopeUser, userID, limit, 0)
+	if err != nil || len(favs) == 0 {
+		return results
+	}
+	quality := h.resolveDefaultQuality(ctx, userID)
+	for _, fav := range favs {
+		if card := buildInlineFavoriteCard(fav, quality, userID); card != nil {
+			results = append(results, card)
+		}
+	}
+	return results
+}
+
 func buildInlineThumbnailURL(platformName, rawURL string, size int) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
@@ -945,7 +1002,15 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 	}
 	var keyboard *telego.InlineKeyboardMarkup
 	if resolveForwardButtonEnabledForUser(ctx, h.Repo, query.From.ID) {
-		keyboard = buildForwardKeyboard(songInfo.TrackURL, platformName, trackID)
+		keyboard = buildSongBottomKeyboard(ctx, h.Repo, songButtonOptions{
+			platformName:  platformName,
+			trackID:       trackID,
+			trackURL:      songInfo.TrackURL,
+			quality:       qualityValue,
+			requesterID:   query.From.ID,
+			botName:       h.BotName,
+			inlineContext: true,
+		})
 	}
 
 	newAudio := &telego.InlineQueryResultCachedDocument{

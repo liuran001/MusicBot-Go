@@ -27,6 +27,7 @@ type MentionRouter struct {
 	Search          *SearchHandler
 	Lyric           MessageHandler
 	Recognize       MessageHandler
+	Favorites       *FavoritesHandler
 	PlatformManager platform.Manager
 	BotName         string
 }
@@ -103,6 +104,23 @@ func (r *MentionRouter) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		content = repliedMessageQuery(message.ReplyToMessage)
 	}
 	if strings.TrimSpace(content) == "" {
+		// A bare "@bot" with nothing to act on shows the favorites list (group
+		// favorites by default in a group), matching the guest-mode behavior.
+		if r.Favorites != nil {
+			requesterID := int64(0)
+			if message.From != nil {
+				requesterID = message.From.ID
+			}
+			groupChatID := int64(0)
+			isGroupChat := false
+			if message.Chat.Type != "private" {
+				groupChatID = message.Chat.ID
+				isGroupChat = true
+			}
+			view := r.Favorites.defaultListView(ctx, groupChatID, isGroupChat)
+			r.Favorites.sendListMessage(ctx, b, message.Chat.ID, message.MessageID, requesterID, groupChatID, isGroupChat, view)
+			return
+		}
 		sendText(ctx, b, message.Chat.ID, message.MessageID, inputContent)
 		return
 	}

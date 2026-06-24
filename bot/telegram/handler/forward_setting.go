@@ -19,8 +19,8 @@ func ForwardButtonSettingDefinition() botpkg.PluginSettingDefinition {
 	return botpkg.PluginSettingDefinition{
 		Plugin:                ForwardButtonPlugin,
 		Key:                   ForwardButtonKey,
-		Title:                 "展示 发送到聊天 按钮",
-		Description:           "发送歌曲时是否显示“发送到聊天...”按钮",
+		Title:                 "展示歌曲底部按钮",
+		Description:           "发送歌曲时是否显示底部按钮（发送到聊天 / 展示歌词 / 收藏）",
 		DefaultUser:           ForwardButtonOn,
 		DefaultGroup:          ForwardButtonOn,
 		RequireAutoLinkDetect: false,
@@ -61,4 +61,14 @@ func resolveForwardButtonEnabledForUser(ctx context.Context, repo botpkg.SongRep
 		return true
 	}
 	return resolveForwardButtonEnabled(ctx, repo, botpkg.PluginScopeUser, userID)
+}
+
+// resolveShowBottomButtons resolves the "展示歌曲底部按钮" master toggle for an
+// inline/guest media flow, where only a user ID is always available. In a group
+// (guest mode, chatID known) it reads the group scope; otherwise the user scope.
+func resolveShowBottomButtons(ctx context.Context, repo botpkg.SongRepository, userID, chatID int64, isGroup bool) bool {
+	if isGroup && chatID != 0 {
+		return resolveForwardButtonEnabled(ctx, repo, botpkg.PluginScopeGroup, chatID)
+	}
+	return resolveForwardButtonEnabledForUser(ctx, repo, userID)
 }

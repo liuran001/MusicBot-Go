@@ -334,6 +334,37 @@ func (h *LyricHandler) formatLyricsError(err error) string {
 	return getLrcFailed
 }
 
+// SendTrackLyrics fetches and sends a track's lyrics as a document to chatID,
+// exactly like /lyric. It backs the inline/guest "歌词" button, which deep-links
+// to the bot's private chat (?start=lyric_<platform>_<trackID>) because those
+// contexts cannot post a new message to the originating chat. It is also the
+// handler for the lyric_ /start deep link.
+func (h *LyricHandler) SendTrackLyrics(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, platformName, trackID string, requesterID int64) {
+	if h == nil || b == nil || h.PlatformManager == nil {
+		return
+	}
+	plat := h.PlatformManager.Get(platformName)
+	if plat == nil || !plat.SupportsLyrics() {
+		sendText(ctx, b, chatID, replyToMessageID, "此平台不支持获取歌词")
+		return
+	}
+	lyrics, err := plat.GetLyrics(ctx, trackID)
+	if err != nil || lyrics == nil {
+		sendText(ctx, b, chatID, replyToMessageID, getLrcFailed)
+		return
+	}
+	baseName := h.buildLyricBaseName(ctx, plat, trackID)
+	defaultFormat := h.resolveDefaultLyricFormat(ctx, &telego.Message{Chat: telego.Chat{ID: chatID}, From: &telego.User{ID: requesterID}})
+	state := lyricRenderState{
+		format:             defaultFormat,
+		defaultFormat:      defaultFormat,
+		includeTranslation: lyricFormatDefaultTranslation(defaultFormat),
+		includeRoma:        false,
+		showSettings:       false,
+	}
+	h.sendLyricDocumentState(ctx, b, chatID, replyToMessageID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
 // sendLyricDocument is the initial entry from the /lyric command. It renders
 // with a collapsed keyboard (only the "更换歌词格式" entry button). The initial
 // translation/roma toggles are resolved by the caller (persisted per-scope

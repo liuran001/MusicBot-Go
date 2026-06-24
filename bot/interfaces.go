@@ -47,6 +47,14 @@ type SongRepository interface {
 	UpdateGroupSettings(ctx context.Context, settings *GroupSettings) error
 	GetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string) (string, error)
 	SetPluginSetting(ctx context.Context, scopeType string, scopeID int64, plugin string, key string, value string) error
+	IsFavorited(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) (bool, error)
+	GetFavorite(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) (*Favorite, error)
+	AddFavorite(ctx context.Context, fav *Favorite) error
+	RemoveFavorite(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) error
+	ListFavorites(ctx context.Context, scopeType string, scopeID int64, limit, offset int) ([]*Favorite, error)
+	CountFavorites(ctx context.Context, scopeType string, scopeID int64) (int64, error)
+	RandomFavorite(ctx context.Context, scopeType string, scopeID int64) (*Favorite, error)
+	FindCachedSongMeta(ctx context.Context, platform, trackID string) (*SongInfo, error)
 }
 
 // WorkerPool limits concurrency for background tasks.

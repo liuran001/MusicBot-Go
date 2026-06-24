@@ -239,6 +239,7 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 	}
 
 	pluginSettingDefinitions = append(pluginSettingDefinitions, handler.ForwardButtonSettingDefinition())
+	pluginSettingDefinitions = append(pluginSettingDefinitions, handler.GroupFavoritesSettingDefinition())
 
 	if err := dynManager.Load(ctx, conf, platformManager); err != nil {
 		if log != nil {
@@ -430,6 +431,8 @@ func (a *App) Start(ctx context.Context) error {
 		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
 	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
+	favoritesHandler := &handler.FavoritesHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Music: musicHandler, BotName: botName, Logger: a.Logger, PageSize: pageSize}
+	favoriteCallback := &handler.FavoriteCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Music: musicHandler, Favorites: favoritesHandler, BotName: botName, Logger: a.Logger, PageSize: pageSize}
 	adminHandler := &handler.AdminCommandHandler{
 		BotName:     botName,
 		AdminIDs:    a.adminSet,
@@ -453,6 +456,7 @@ func (a *App) Start(ctx context.Context) error {
 		Music:            musicHandler,
 		LyricHandler:     guestLyricHandler,
 		SearchHandler:    searchHandler,
+		Favorites:        favoritesHandler,
 		RateLimiter:      rateLimiter,
 		RecognizeService: a.RecognizeService,
 		CacheDir:         cacheDir,
@@ -464,11 +468,13 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	routerLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
+	musicHandler.LyricHandler = routerLyricHandler
 	mentionRouter := &handler.MentionRouter{
 		Music:           musicHandler,
 		Search:          searchHandler,
 		Lyric:           routerLyricHandler,
 		Recognize:       recognizeHandler,
+		Favorites:       favoritesHandler,
 		PlatformManager: a.PlatformManager,
 		BotName:         botName,
 	}
@@ -486,6 +492,7 @@ func (a *App) Start(ctx context.Context) error {
 		About:                    &handler.AboutHandler{RuntimeVer: a.Build.RuntimeVer, BinVersion: a.Build.BinVersion, CommitSHA: a.Build.CommitSHA, BuildTime: a.Build.BuildTime, BuildArch: a.Build.BuildArch, DynPlugins: a.DynPlugins, RateLimiter: rateLimiter},
 		Status:                   &handler.StatusHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.adminSet},
 		Settings:                 settingsHandler,
+		Favorites:                favoritesHandler,
 		RmCache:                  &handler.RmCacheHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, AdminIDs: a.adminSet},
 		Callback:                 &handler.CallbackMusicHandler{Music: musicHandler, BotName: botName, RateLimiter: rateLimiter},
 		SettingsCallback:         &handler.SettingsCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, SettingsHandler: settingsHandler, RateLimiter: rateLimiter},
@@ -493,6 +500,7 @@ func (a *App) Start(ctx context.Context) error {
 		PlaylistCallback:         playlistCallback,
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
 		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()},
+		FavoriteCallback:         favoriteCallback,
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},
@@ -520,6 +528,7 @@ func (a *App) Start(ctx context.Context) error {
 		{Command: "music", Description: "下载歌曲"},
 		{Command: "search", Description: "搜索歌曲"},
 		{Command: "lyric", Description: "获取歌词"},
+		{Command: "fav", Description: "收藏歌曲 / 查看收藏列表"},
 		{Command: "settings", Description: "默认平台、音质与歌词格式"},
 	}
 	if enableRecognize {

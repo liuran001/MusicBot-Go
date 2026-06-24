@@ -870,7 +870,7 @@ func (h *CallbackMusicHandler) runInlineDownloadFlow(ctx context.Context, b *tel
 	if h == nil || h.Music == nil || b == nil || inlineMessageID == "" {
 		return
 	}
-	runInlineMediaFlow(ctx, b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, platformName, trackID, qualityOverride)
+	runInlineMediaFlow(ctx, b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, platformName, trackID, qualityOverride, 0, false)
 }
 
 func (h *CallbackMusicHandler) shouldAutoDeleteListMessage(ctx context.Context, msg *telego.Message, userID int64, userSettings *botpkg.UserSettings, groupSettings *botpkg.GroupSettings) bool {
