@@ -145,7 +145,8 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 			continue
 		}
 		value := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
-		sb.WriteString(fmt.Sprintf("🔌 %s：%s\n", def.Title, def.LabelOf(value)))
+		resolve := func(key string) string { return tr(ctx, key) }
+		sb.WriteString(fmt.Sprintf("🔌 %s：%s\n", def.TitleLocalized(resolve), def.LabelOfLocalized(resolve, value)))
 	}
 
 	if len(platforms) > 1 {
@@ -258,11 +259,16 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 			continue
 		}
 		current := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
+		resolve := func(key string) string { return tr(ctx, key) }
 		rows = append(rows, []telego.InlineKeyboardButton{{
-			Text:         fmt.Sprintf("🔌 %s：%s", def.Title, def.LabelOf(current)),
+			Text:         fmt.Sprintf("🔌 %s：%s", def.TitleLocalized(resolve), def.LabelOfLocalized(resolve, current)),
 			CallbackData: fmt.Sprintf("settings pcycle %s %s", def.Plugin, def.Key),
 		}})
 	}
+	rows = append(rows, []telego.InlineKeyboardButton{{
+		Text:         "🌐 " + tr(ctx, "set_language_label") + "：" + languageDisplayName(ctx, h.resolveLanguage(chatType, settings, groupSettings)),
+		CallbackData: "settings langmenu",
+	}})
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: "✖️ " + tr(ctx, "set_btn_close"), CallbackData: "settings close"}})
 
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
@@ -653,6 +659,20 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		return
 	}
 
+	// Open the language submenu (swaps keyboard+text; no change yet).
+	if args[1] == "langmenu" {
+		h.handleLanguageMenuNavigation(ctx, b, query, msg)
+		return
+	}
+	// Persist a language pick: "settings langset <auto|en|zh|ja>".
+	if args[1] == "langset" {
+		if len(args) < 3 {
+			return
+		}
+		h.applyLanguageSelection(ctx, b, query, msg, args[2])
+		return
+	}
+
 	if len(args) < 3 {
 		return
 	}
@@ -813,7 +833,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				return
 			}
 			changed = true
-			responseText = "✅ " + tr(ctx, "set_resp_plugin_set", map[string]any{"Title": def.Title, "Label": def.LabelOf(pluginValue)})
+			responseText = "✅ " + tr(ctx, "set_resp_plugin_set", map[string]any{"Title": def.TitleLocalized(func(k string) string { return tr(ctx, k) }), "Label": def.LabelOfLocalized(func(k string) string { return tr(ctx, k) }, pluginValue)})
 		}
 	case "pcycle":
 		if len(args) < 4 {
@@ -851,7 +871,7 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			return
 		}
 		changed = true
-		responseText = "✅ " + tr(ctx, "set_resp_plugin_set", map[string]any{"Title": def.Title, "Label": def.LabelOf(next)})
+		responseText = "✅ " + tr(ctx, "set_resp_plugin_set", map[string]any{"Title": def.TitleLocalized(func(k string) string { return tr(ctx, k) }), "Label": def.LabelOfLocalized(func(k string) string { return tr(ctx, k) }, next)})
 	case "lyricfmt":
 		if !isKnownLyricFormat(settingValue) {
 			break
