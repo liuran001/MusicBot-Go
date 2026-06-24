@@ -10,6 +10,10 @@ const (
 type PluginSettingOption struct {
 	Value string
 	Label string
+	// LabelKey is an optional i18n catalog key. When set, the settings renderer
+	// resolves it against the request language and uses the result instead of
+	// Label. Label remains the fallback when the key is empty or unresolved.
+	LabelKey string
 }
 
 type PluginSettingDefinition struct {
@@ -25,6 +29,11 @@ type PluginSettingDefinition struct {
 	// menu; it is only shown and editable in group settings.
 	GroupOnly bool
 	Order     int
+	// TitleKey / DescriptionKey are optional i18n catalog keys. When set, the
+	// settings renderer resolves them against the request language; Title /
+	// Description remain the fallback when a key is empty or unresolved.
+	TitleKey       string
+	DescriptionKey string
 }
 
 func (d PluginSettingDefinition) Validate(value string) bool {
