@@ -752,10 +752,6 @@ func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.Inline
 	}}
 }
 
-func buildForwardKeyboardWithEpisodes(trackURL, platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
-	return buildForwardKeyboard(trackURL, platformName, trackID)
-}
-
 func buildInlineSendKeyboard(platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
 	callbackData := buildInlineSendCallbackData(platformName, trackID, qualityValue, requesterID)
 	if callbackData == "" {

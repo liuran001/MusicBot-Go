@@ -33,6 +33,7 @@ type GuestModeHandler struct {
 	Music            *MusicHandler
 	LyricHandler     *LyricHandler
 	SearchHandler    *SearchHandler
+	Favorites        *FavoritesHandler
 	RateLimiter      *telegram.RateLimiter
 	RecognizeService recognize.Service
 	CacheDir         string
@@ -84,6 +85,12 @@ func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	}
 
 	if content == "" {
+		// A bare "@bot" in guest mode shows the favorites list. Guest mode has
+		// the group chat ID (Message.Chat.ID), so group favorites work here.
+		if h.Favorites != nil {
+			h.Favorites.answerGuestList(ctx, b, message, guestQueryID)
+			return
+		}
 		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
 		return
 	}

@@ -37,11 +37,11 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 	}
 	resolvedText := resolveShortLinkText(ctx, h.PlatformManager, baseText)
 	if platformName, trackID, matched := h.PlatformManager.MatchText(resolvedText); matched {
-		h.answerAndRunGuestTrack(ctx, b, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
+		h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
 		return
 	}
 	if platformName, trackID, matched := h.PlatformManager.MatchURL(resolvedText); matched {
-		h.answerAndRunGuestTrack(ctx, b, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
+		h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
 		return
 	}
 	// Playlist / album URL (including short links that resolve to playlists).
@@ -50,19 +50,30 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 		return
 	}
 	if strings.TrimSpace(requestedPlatform) != "" && isLikelyIDToken(strings.TrimSpace(baseText)) {
-		h.answerAndRunGuestTrack(ctx, b, guestQueryID, userID, userName, requestedPlatform, strings.TrimSpace(baseText), qualityOverride)
+		h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, requestedPlatform, strings.TrimSpace(baseText), qualityOverride)
 		return
 	}
 
 	h.answerAndRenderGuestSearch(ctx, b, message, guestQueryID, baseText, requestedPlatform, qualityOverride)
 }
 
-func (h *GuestModeHandler) answerAndRunGuestTrack(ctx context.Context, b *telego.Bot, guestQueryID string, userID int64, userName, platformName, trackID, qualityOverride string) {
+func (h *GuestModeHandler) answerAndRunGuestTrack(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID string, userID int64, userName, platformName, trackID, qualityOverride string) {
 	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, waitForDown)
 	if inlineMessageID == "" {
 		return
 	}
-	go runInlineMediaFlow(detachContext(ctx), b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, platformName, trackID, qualityOverride)
+	chatID, isGroup := guestChatContext(message)
+	go runInlineMediaFlow(detachContext(ctx), b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, platformName, trackID, qualityOverride, chatID, isGroup)
+}
+
+// guestChatContext returns the originating group chat ID and whether it is a
+// group, for guest messages (where Message.Chat.ID is available — unlike inline
+// mode). Used to enable group favorites on the guest path.
+func guestChatContext(message *telego.Message) (int64, bool) {
+	if message == nil {
+		return 0, false
+	}
+	return message.Chat.ID, message.Chat.Type != "private"
 }
 
 // handleGuestPlaylist fetches a playlist's tracks and presents them as a
@@ -390,7 +401,8 @@ func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot,
 		return
 	}
 	userID, userName := guestRequester(message)
-	runInlineMediaFlow(ctx, b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, result.Platform, result.TrackID, "")
+	chatID, isGroup := guestChatContext(message)
+	runInlineMediaFlow(ctx, b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, inlineMessageID, userID, userName, result.Platform, result.TrackID, "", chatID, isGroup)
 }
 
 func (h *GuestModeHandler) guestDefaultPlatform(ctx context.Context, userID int64) string {

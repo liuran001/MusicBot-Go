@@ -95,6 +95,7 @@ type MusicHandler struct {
 	AdminCommands      []admincmd.Command
 	Playlist           *PlaylistHandler
 	Artist             *ArtistHandler
+	LyricHandler       *LyricHandler
 	RecognizeEnabled   bool
 	Limiter            chan struct{}
 	UploadLimiter      chan struct{}
@@ -242,6 +243,16 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 		if platformName, trackID, qualityOverride, ok := parseInlineStartParameter(args); ok {
 			h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
+			return
+		}
+		if platformName, trackID, ok := parseLyricStartParameter(args); ok {
+			if h.LyricHandler != nil {
+				requesterID := int64(0)
+				if message.From != nil {
+					requesterID = message.From.ID
+				}
+				h.LyricHandler.SendTrackLyrics(ctx, b, message.Chat.ID, message.MessageID, platformName, trackID, requesterID)
+			}
 			return
 		}
 		if inlineQuery, ok := parseInlineSearchStartParameter(args); ok {
@@ -2016,7 +2027,16 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		requesterID = message.From.ID
 	}
 	if resolveForwardButtonEnabledForMessage(ctx, h.Repo, message) {
-		params.ReplyMarkup = buildForwardKeyboardWithEpisodes(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID, "", requesterID)
+		params.ReplyMarkup = buildSongBottomKeyboard(ctx, h.Repo, songButtonOptions{
+			platformName: songInfo.Platform,
+			trackID:      songInfo.TrackID,
+			trackURL:     songInfo.TrackURL,
+			quality:      songInfo.Quality,
+			requesterID:  requesterID,
+			botName:      h.BotName,
+			chatID:       message.Chat.ID,
+			isGroup:      message.Chat.Type != "private",
+		})
 	}
 
 	if songInfo.ThumbFileID != "" {

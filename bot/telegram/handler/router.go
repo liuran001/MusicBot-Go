@@ -24,6 +24,7 @@ type Router struct {
 	Settings                 MessageHandler
 	Reload                   MessageHandler
 	Admin                    MessageHandler
+	Favorites                MessageHandler
 	GuestMode                MessageHandler
 	MentionRouter            *MentionRouter
 	GuestSearchCallback      CallbackHandler
@@ -33,6 +34,7 @@ type Router struct {
 	PlaylistCallback         CallbackHandler
 	InlineCollectionCallback CallbackHandler
 	LyricCallback            CallbackHandler
+	FavoriteCallback         CallbackHandler
 	Inline                   InlineHandler
 	ChosenInline             ChosenInlineHandler
 	PlatformManager          platform.Manager
@@ -61,6 +63,10 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapMessage(r.About), matchCommandFunc(botName, "about"))
 	bh.Handle(r.wrapMessage(r.Status), matchCommandFunc(botName, "status"))
 	bh.Handle(r.wrapMessage(r.Settings), matchCommandFunc(botName, "settings"))
+	if r.Favorites != nil {
+		bh.Handle(r.wrapMessage(r.Favorites), matchCommandFunc(botName, "fav"))
+		bh.Handle(r.wrapMessage(r.Favorites), matchCommandFunc(botName, "favorites"))
+	}
 	bh.Handle(r.wrapMessage(r.RmCache), matchCommandFunc(botName, "rmcache"))
 	bh.Handle(r.wrapMessage(r.Reload), matchCommandFunc(botName, "reload"))
 	for _, cmd := range r.AdminCommands {
@@ -244,6 +250,15 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	bh.Handle(r.wrapCallback(r.InlineCollectionCallback), callbackPrefix("ipl"))
 	if r.LyricCallback != nil {
 		bh.Handle(r.wrapCallback(r.LyricCallback), callbackPrefix("lyric "))
+	}
+	if r.FavoriteCallback != nil {
+		bh.Handle(r.wrapCallback(r.FavoriteCallback), func(ctx context.Context, update telego.Update) bool {
+			if update.CallbackQuery == nil {
+				return false
+			}
+			d := strings.TrimSpace(update.CallbackQuery.Data)
+			return strings.HasPrefix(d, "fav ") || strings.HasPrefix(d, "favm ")
+		})
 	}
 	if r.GuestSearchCallback != nil {
 		bh.Handle(r.wrapCallback(r.GuestSearchCallback), callbackPrefix("guest "))

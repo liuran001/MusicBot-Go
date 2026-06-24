@@ -21,7 +21,10 @@ type PluginSettingDefinition struct {
 	DefaultGroup          string
 	Options               []PluginSettingOption
 	RequireAutoLinkDetect bool
-	Order                 int
+	// GroupOnly hides this setting from the per-user (private chat) settings
+	// menu; it is only shown and editable in group settings.
+	GroupOnly bool
+	Order     int
 }
 
 func (d PluginSettingDefinition) Validate(value string) bool {

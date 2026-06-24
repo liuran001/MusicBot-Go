@@ -77,7 +77,7 @@ func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface) 
 	if err := cacheDB.AutoMigrate(&SongInfoModel{}); err != nil {
 		return nil, err
 	}
-	if err := dataDB.AutoMigrate(&UserSettingsModel{}, &BotStatModel{}, &GroupSettingsModel{}, &PluginSettingModel{}); err != nil {
+	if err := dataDB.AutoMigrate(&UserSettingsModel{}, &BotStatModel{}, &GroupSettingsModel{}, &PluginSettingModel{}, &FavoriteModel{}); err != nil {
 		return nil, err
 	}
 
@@ -995,6 +995,202 @@ func (r *Repository) SetPluginSetting(ctx context.Context, scopeType string, sco
 			"updated_at":    time.Now(),
 		}),
 	}).Create(&model).Error
+}
+
+// favoriteScope normalizes a scope type, returning "" when invalid so callers
+// can reject the request before touching the database.
+func favoriteScope(scopeType string) string {
+	switch strings.TrimSpace(strings.ToLower(scopeType)) {
+	case bot.FavoriteScopeUser:
+		return bot.FavoriteScopeUser
+	case bot.FavoriteScopeGroup:
+		return bot.FavoriteScopeGroup
+	default:
+		return ""
+	}
+}
+
+// IsFavorited reports whether (scope, platform, trackID) is currently favorited.
+func (r *Repository) IsFavorited(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) (bool, error) {
+	if r == nil || r.dataDB == nil {
+		return false, errors.New("repository not configured")
+	}
+	scope := favoriteScope(scopeType)
+	if scope == "" || scopeID == 0 {
+		return false, nil
+	}
+	var count int64
+	err := r.dataDB.WithContext(ctx).Model(&FavoriteModel{}).
+		Where("scope_type = ? AND scope_id = ? AND platform = ? AND track_id = ?", scope, scopeID, strings.TrimSpace(platform), strings.TrimSpace(trackID)).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// GetFavorite returns a single favorite, or (nil, nil) when not found.
+func (r *Repository) GetFavorite(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) (*bot.Favorite, error) {
+	if r == nil || r.dataDB == nil {
+		return nil, errors.New("repository not configured")
+	}
+	scope := favoriteScope(scopeType)
+	if scope == "" || scopeID == 0 {
+		return nil, nil
+	}
+	var model FavoriteModel
+	err := r.dataDB.WithContext(ctx).
+		Where("scope_type = ? AND scope_id = ? AND platform = ? AND track_id = ?", scope, scopeID, strings.TrimSpace(platform), strings.TrimSpace(trackID)).
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toFavorite(model), nil
+}
+
+// AddFavorite inserts a favorite, idempotently refreshing the denormalized song
+// metadata on conflict. The original collector (AddedByUserID) is preserved.
+func (r *Repository) AddFavorite(ctx context.Context, fav *bot.Favorite) error {
+	if r == nil || r.dataDB == nil {
+		return errors.New("repository not configured")
+	}
+	if fav == nil {
+		return errors.New("nil favorite")
+	}
+	scope := favoriteScope(fav.ScopeType)
+	if scope == "" || fav.ScopeID == 0 || strings.TrimSpace(fav.Platform) == "" || strings.TrimSpace(fav.TrackID) == "" {
+		return errors.New("invalid favorite key")
+	}
+	model := toFavoriteModel(fav)
+	model.ScopeType = scope
+	model.Platform = strings.TrimSpace(fav.Platform)
+	model.TrackID = strings.TrimSpace(fav.TrackID)
+	return r.dataDB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "scope_type"}, {Name: "scope_id"}, {Name: "platform"}, {Name: "track_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"song_name":    model.SongName,
+			"song_artists": model.SongArtists,
+			"song_album":   model.SongAlbum,
+			"track_url":    model.TrackURL,
+			"updated_at":   time.Now(),
+		}),
+	}).Create(model).Error
+}
+
+// RemoveFavorite hard-deletes a favorite. A hard delete (not soft) is required
+// so the row vacates the unique index and the same track can be re-favorited.
+func (r *Repository) RemoveFavorite(ctx context.Context, scopeType string, scopeID int64, platform, trackID string) error {
+	if r == nil || r.dataDB == nil {
+		return errors.New("repository not configured")
+	}
+	scope := favoriteScope(scopeType)
+	if scope == "" || scopeID == 0 {
+		return errors.New("invalid favorite key")
+	}
+	return r.dataDB.WithContext(ctx).Unscoped().
+		Where("scope_type = ? AND scope_id = ? AND platform = ? AND track_id = ?", scope, scopeID, strings.TrimSpace(platform), strings.TrimSpace(trackID)).
+		Delete(&FavoriteModel{}).Error
+}
+
+// ListFavorites returns favorites for a scope, newest first, with paging.
+func (r *Repository) ListFavorites(ctx context.Context, scopeType string, scopeID int64, limit, offset int) ([]*bot.Favorite, error) {
+	if r == nil || r.dataDB == nil {
+		return nil, errors.New("repository not configured")
+	}
+	scope := favoriteScope(scopeType)
+	if scope == "" || scopeID == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var models []FavoriteModel
+	err := r.dataDB.WithContext(ctx).
+		Where("scope_type = ? AND scope_id = ?", scope, scopeID).
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&models).Error
+	if err != nil {
+		return nil, err
+	}
+	results := make([]*bot.Favorite, 0, len(models))
+	for _, model := range models {
+		results = append(results, toFavorite(model))
+	}
+	return results, nil
+}
+
+// CountFavorites returns how many favorites a scope holds.
+func (r *Repository) CountFavorites(ctx context.Context, scopeType string, scopeID int64) (int64, error) {
+	if r == nil || r.dataDB == nil {
+		return 0, errors.New("repository not configured")
+	}
+	scope := favoriteScope(scopeType)
+	if scope == "" || scopeID == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.dataDB.WithContext(ctx).Model(&FavoriteModel{}).
+		Where("scope_type = ? AND scope_id = ?", scope, scopeID).
+		Count(&count).Error
+	return count, err
+}
+
+// RandomFavorite returns a random favorite from a scope, or (nil, nil) if empty.
+func (r *Repository) RandomFavorite(ctx context.Context, scopeType string, scopeID int64) (*bot.Favorite, error) {
+	if r == nil || r.dataDB == nil {
+		return nil, errors.New("repository not configured")
+	}
+	scope := favoriteScope(scopeType)
+	if scope == "" || scopeID == 0 {
+		return nil, nil
+	}
+	var model FavoriteModel
+	err := r.dataDB.WithContext(ctx).
+		Where("scope_type = ? AND scope_id = ?", scope, scopeID).
+		Order("RANDOM()").
+		Limit(1).
+		Take(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toFavorite(model), nil
+}
+
+// FindCachedSongMeta returns cached metadata for a track regardless of quality,
+// preferring the most recently updated row. Used to denormalize song name/artist
+// into a favorite when only (platform, trackID) is known (e.g. a button click).
+func (r *Repository) FindCachedSongMeta(ctx context.Context, platform, trackID string) (*bot.SongInfo, error) {
+	if r == nil || r.cacheDB == nil {
+		return nil, errors.New("repository not configured")
+	}
+	platform = strings.TrimSpace(platform)
+	trackID = strings.TrimSpace(trackID)
+	if platform == "" || trackID == "" {
+		return nil, nil
+	}
+	var model SongInfoModel
+	err := r.cacheDB.WithContext(ctx).
+		Where("platform = ? AND track_id = ?", platform, trackID).
+		Order("updated_at DESC").
+		First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toInternal(model), nil
 }
 
 // Close closes the database connection.

@@ -141,7 +141,7 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	sb.WriteString(fmt.Sprintf("🔗 会话内自动识别链接：%s\n", autoLinkDetectText))
 
 	for _, def := range h.sortedPluginSettingDefinitions() {
-		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
+		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled, chatType != "private") {
 			continue
 		}
 		value := h.resolvePluginSettingValue(ctx, chatType, settings, groupSettings, def)
@@ -251,7 +251,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 		CallbackData: "settings lyricmenu",
 	}})
 	for _, def := range h.sortedPluginSettingDefinitions() {
-		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled) {
+		if !h.shouldShowPluginSetting(def, autoLinkDetectEnabled, chatType != "private") {
 			continue
 		}
 		if len(def.Options) == 0 {
@@ -496,7 +496,10 @@ func (h *SettingsHandler) toggleValue(enabled bool) string {
 	return "on"
 }
 
-func (h *SettingsHandler) shouldShowPluginSetting(def botpkg.PluginSettingDefinition, autoLinkDetectEnabled bool) bool {
+func (h *SettingsHandler) shouldShowPluginSetting(def botpkg.PluginSettingDefinition, autoLinkDetectEnabled bool, isGroup bool) bool {
+	if def.GroupOnly && !isGroup {
+		return false
+	}
 	if def.RequireAutoLinkDetect {
 		return autoLinkDetectEnabled
 	}

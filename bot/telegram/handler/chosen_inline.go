@@ -102,7 +102,7 @@ func (h *ChosenInlineMusicHandler) handleChosenTrack(ctx context.Context, b *tel
 	if h.tryPresentChosenInlineEpisodePicker(ctx, b, chosen, platformName, trackID, qualityValue) {
 		return
 	}
-	runInlineMediaFlow(ctx, b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, chosen.InlineMessageID, chosen.From.ID, chosen.From.Username, platformName, trackID, qualityValue)
+	runInlineMediaFlow(ctx, b, inlineMediaFlowDeps{Music: h.Music, RateLimiter: h.RateLimiter}, chosen.InlineMessageID, chosen.From.ID, chosen.From.Username, platformName, trackID, qualityValue, 0, false)
 }
 
 func (h *ChosenInlineMusicHandler) tryPresentChosenInlineEpisodePicker(ctx context.Context, b *telego.Bot, chosen *telego.ChosenInlineResult, platformName, trackID, qualityValue string) bool {

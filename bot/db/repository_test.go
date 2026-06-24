@@ -572,3 +572,93 @@ func TestVerifyAndUpdateQuality(t *testing.T) {
 		}
 	})
 }
+
+func TestRepositoryFavorites(t *testing.T) {
+	file, err := os.CreateTemp("", "music163bot-*.db")
+	if err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+	path := file.Name()
+	_ = file.Close()
+	defer os.Remove(path)
+
+	file2, err := os.CreateTemp("", "music163bot-data-*.db")
+	if err != nil {
+		t.Fatalf("create temp data db: %v", err)
+	}
+	dataPath := file2.Name()
+	_ = file2.Close()
+	defer os.Remove(dataPath)
+
+	base := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	gormLogger := logpkg.NewGormLogger(base, logger.Silent)
+	repo, err := NewSQLiteRepository(path, dataPath, gormLogger)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+
+	const uid int64 = 1001
+	const gid int64 = -200300
+
+	// Not favorited initially.
+	if ok, err := repo.IsFavorited(ctx, bot.FavoriteScopeUser, uid, "netease", "111"); err != nil || ok {
+		t.Fatalf("expected not favorited, got ok=%v err=%v", ok, err)
+	}
+
+	// Add a personal favorite.
+	if err := repo.AddFavorite(ctx, &bot.Favorite{ScopeType: bot.FavoriteScopeUser, ScopeID: uid, Platform: "netease", TrackID: "111", AddedByUserID: uid, SongName: "Song A", SongArtists: "Artist A"}); err != nil {
+		t.Fatalf("add personal favorite: %v", err)
+	}
+	if ok, _ := repo.IsFavorited(ctx, bot.FavoriteScopeUser, uid, "netease", "111"); !ok {
+		t.Fatalf("expected favorited after add")
+	}
+
+	// Group favorite is a different scope: same track is independent.
+	if err := repo.AddFavorite(ctx, &bot.Favorite{ScopeType: bot.FavoriteScopeGroup, ScopeID: gid, Platform: "netease", TrackID: "111", AddedByUserID: uid, AddedByName: "Alice", SongName: "Song A"}); err != nil {
+		t.Fatalf("add group favorite: %v", err)
+	}
+	if n, _ := repo.CountFavorites(ctx, bot.FavoriteScopeUser, uid); n != 1 {
+		t.Fatalf("expected 1 personal favorite, got %d", n)
+	}
+	if n, _ := repo.CountFavorites(ctx, bot.FavoriteScopeGroup, gid); n != 1 {
+		t.Fatalf("expected 1 group favorite, got %d", n)
+	}
+
+	// Idempotent add refreshes metadata but does not duplicate.
+	if err := repo.AddFavorite(ctx, &bot.Favorite{ScopeType: bot.FavoriteScopeUser, ScopeID: uid, Platform: "netease", TrackID: "111", AddedByUserID: uid, SongName: "Song A v2"}); err != nil {
+		t.Fatalf("re-add personal favorite: %v", err)
+	}
+	if n, _ := repo.CountFavorites(ctx, bot.FavoriteScopeUser, uid); n != 1 {
+		t.Fatalf("expected still 1 personal favorite after re-add, got %d", n)
+	}
+
+	// Remove then re-add must work (hard delete vacates the unique index).
+	if err := repo.RemoveFavorite(ctx, bot.FavoriteScopeUser, uid, "netease", "111"); err != nil {
+		t.Fatalf("remove favorite: %v", err)
+	}
+	if ok, _ := repo.IsFavorited(ctx, bot.FavoriteScopeUser, uid, "netease", "111"); ok {
+		t.Fatalf("expected not favorited after remove")
+	}
+	if err := repo.AddFavorite(ctx, &bot.Favorite{ScopeType: bot.FavoriteScopeUser, ScopeID: uid, Platform: "netease", TrackID: "111", AddedByUserID: uid, SongName: "Song A"}); err != nil {
+		t.Fatalf("re-add after remove: %v", err)
+	}
+	if ok, _ := repo.IsFavorited(ctx, bot.FavoriteScopeUser, uid, "netease", "111"); !ok {
+		t.Fatalf("expected favorited after re-add")
+	}
+
+	// List + Random for the group scope.
+	favs, err := repo.ListFavorites(ctx, bot.FavoriteScopeGroup, gid, 8, 0)
+	if err != nil || len(favs) != 1 || favs[0].AddedByName != "Alice" {
+		t.Fatalf("unexpected group list: %+v err=%v", favs, err)
+	}
+	rnd, err := repo.RandomFavorite(ctx, bot.FavoriteScopeGroup, gid)
+	if err != nil || rnd == nil || rnd.TrackID != "111" {
+		t.Fatalf("unexpected random favorite: %+v err=%v", rnd, err)
+	}
+
+	// Empty scope returns nil random without error.
+	if rnd, err := repo.RandomFavorite(ctx, bot.FavoriteScopeUser, 999999); err != nil || rnd != nil {
+		t.Fatalf("expected nil random for empty scope, got %+v err=%v", rnd, err)
+	}
+}

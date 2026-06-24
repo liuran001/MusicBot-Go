@@ -38,6 +38,37 @@ type SongInfo struct {
 	FromChatName    string
 }
 
+// Favorite scope constants identify whether a favorite belongs to a single user
+// or is shared within a group chat. They reuse the same string values as the
+// plugin-setting scopes so callers can pass either interchangeably.
+const (
+	FavoriteScopeUser  = PluginScopeUser
+	FavoriteScopeGroup = PluginScopeGroup
+)
+
+// Favorite represents a favorited track. A favorite is keyed by
+// (ScopeType, ScopeID, Platform, TrackID): personal favorites use
+// ScopeType="user" with ScopeID=userID, group favorites use ScopeType="group"
+// with ScopeID=chatID. AddedByUserID records who created it (for group lists the
+// collector is shown; for personal favorites it equals ScopeID). Song metadata
+// is denormalized so the list renders without touching the volatile song cache.
+type Favorite struct {
+	ID            uint
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
+	ScopeType     string
+	ScopeID       int64
+	Platform      string
+	TrackID       string
+	AddedByUserID int64
+	AddedByName   string
+	SongName      string
+	SongArtists   string
+	SongAlbum     string
+	TrackURL      string
+}
+
 // UserSettings represents user preferences for the bot.
 type UserSettings struct {
 	ID                 uint

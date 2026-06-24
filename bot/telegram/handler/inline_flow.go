@@ -31,9 +31,11 @@ type inlineMediaFlowDeps struct {
 // It is safe to call from any handler that holds an inline_message_id.
 //
 // userID/userName identify the requester (used for per-user cache/quality and
-// the forward-button setting). The whole operation is serialized per
-// inline_message_id via withInlineMessageLock so concurrent taps don't race.
-func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlowDeps, inlineMessageID string, userID int64, userName, platformName, trackID, qualityOverride string) {
+// the forward-button setting). chatID/isGroup carry the originating chat for
+// guest mode (where Message.Chat.ID is known); inline mode passes 0/false. The
+// whole operation is serialized per inline_message_id via withInlineMessageLock
+// so concurrent taps don't race.
+func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlowDeps, inlineMessageID string, userID int64, userName, platformName, trackID, qualityOverride string, chatID int64, isGroup bool) {
 	music := deps.Music
 	if music == nil || b == nil || strings.TrimSpace(inlineMessageID) == "" {
 		return
@@ -89,8 +91,18 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 				media.Thumbnail = &telego.InputFile{FileID: songInfo.ThumbFileID}
 			}
 			var replyMarkup *telego.InlineKeyboardMarkup
-			if resolveForwardButtonEnabledForUser(ctx, music.Repo, userID) {
-				replyMarkup = buildForwardKeyboard(songInfo.TrackURL, songInfo.Platform, songInfo.TrackID)
+			if resolveShowBottomButtons(ctx, music.Repo, userID, chatID, isGroup) {
+				replyMarkup = buildSongBottomKeyboard(ctx, music.Repo, songButtonOptions{
+					platformName:  songInfo.Platform,
+					trackID:       songInfo.TrackID,
+					trackURL:      songInfo.TrackURL,
+					quality:       qualityOverride,
+					requesterID:   userID,
+					botName:       music.BotName,
+					inlineContext: true,
+					chatID:        chatID,
+					isGroup:       isGroup,
+				})
 			}
 			params := &telego.EditMessageMediaParams{
 				InlineMessageID: inlineMessageID,
