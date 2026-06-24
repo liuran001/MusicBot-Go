@@ -56,7 +56,7 @@ func TestMatchArtistURL(t *testing.T) {
 func TestFormatArtistMessage(t *testing.T) {
 	manager := newStubManager()
 	manager.Register(&artistTestPlatform{stubPlatform: newStubPlatform("soda")})
-	text := formatArtistMessage(manager, "soda", &platform.Artist{
+	text := formatArtistMessage(zhCtx(), manager, "soda", &platform.Artist{
 		Name:      "周杰伦",
 		URL:       "https://music.douyin.com/qishui/share/artist?artist_id=1",
 		AvatarURL: "https://img.example/avatar.jpg",
@@ -127,7 +127,7 @@ func TestArtistHandlerTryHandle(t *testing.T) {
 		},
 	}}
 
-	if !h.TryHandle(context.Background(), bot, update) {
+	if !h.TryHandle(zhCtx(), bot, update) {
 		t.Fatalf("TryHandle() = false, want true")
 	}
 	for _, want := range []string{"平台：汽水音乐", "歌手：Artist A", "链接：https://music.douyin.com/qishui/share/artist?artist_id=423456789"} {

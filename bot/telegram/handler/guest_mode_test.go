@@ -164,7 +164,7 @@ func TestRenderGuestSearchPage_SelectButtonsUseInlineFlow(t *testing.T) {
 	state.setTracks("netease", []platform.Track{{ID: "33894312", Title: "晴天", Artists: []platform.Artist{{Name: "周杰伦"}}}})
 	token := h.guestSearchStore().store(state)
 
-	text, keyboard := h.renderGuestSearchPage(state, token, 1)
+	text, keyboard := h.renderGuestSearchPage(zhCtx(), state, token, 1)
 	if text == "" {
 		t.Fatal("empty page text")
 	}
