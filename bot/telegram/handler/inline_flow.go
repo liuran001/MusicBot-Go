@@ -4,11 +4,45 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
 	"github.com/mymmrac/telego"
 )
+
+// guestInlineChat maps an inline_message_id to the group chat it was summoned in.
+// Guest-mode sends edit an inline message into audio, but the callback that
+// triggers the send (e.g. a search-result tap, which reuses the generic
+// "music i" inline callback, or a retry button) carries no chat context. So when
+// a guest inline message is created we remember its chat here, and the media
+// flow recovers it to attach the group-favorite button. Regular inline mode never
+// stores anything (it has no chat ID), so it correctly gets no group favorites.
+type guestInlineChat struct {
+	chatID  int64
+	isGroup bool
+}
+
+var guestInlineChatStore = newTTLStore[guestInlineChat](2 * time.Hour)
+
+func rememberInlineChat(inlineMessageID string, chatID int64, isGroup bool) {
+	inlineMessageID = strings.TrimSpace(inlineMessageID)
+	if inlineMessageID == "" || chatID == 0 {
+		return
+	}
+	guestInlineChatStore.Store(inlineMessageID, guestInlineChat{chatID: chatID, isGroup: isGroup})
+}
+
+func lookupInlineChat(inlineMessageID string) (int64, bool) {
+	inlineMessageID = strings.TrimSpace(inlineMessageID)
+	if inlineMessageID == "" {
+		return 0, false
+	}
+	if v, ok := guestInlineChatStore.Load(inlineMessageID); ok {
+		return v.chatID, v.isGroup
+	}
+	return 0, false
+}
 
 // inlineMediaFlowDeps carries the dependencies needed to turn an inline message
 // (identified by inline_message_id) into a music audio result in place. It is
@@ -39,6 +73,14 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 	music := deps.Music
 	if music == nil || b == nil || strings.TrimSpace(inlineMessageID) == "" {
 		return
+	}
+	// Remember the chat for this inline message (so later callbacks on it — a
+	// retry tap, a search-result selection — can recover it), or recover it when
+	// the caller had no chat context (the generic inline "music i" callback).
+	if chatID != 0 {
+		rememberInlineChat(inlineMessageID, chatID, isGroup)
+	} else if cid, grp := lookupInlineChat(inlineMessageID); cid != 0 {
+		chatID, isGroup = cid, grp
 	}
 	rl := deps.RateLimiter
 	withInlineMessageLock(inlineMessageID, func() {

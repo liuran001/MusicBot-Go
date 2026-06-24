@@ -21,6 +21,7 @@ type InlineSearchHandler struct {
 	Repo             botpkg.SongRepository
 	PlatformManager  platform.Manager
 	CollectionChosen *ChosenInlineMusicHandler
+	Favorites        *FavoritesHandler
 	BotName          string
 	DefaultPlatform  string
 	DefaultQuality   string
@@ -674,9 +675,29 @@ func buildInlineFavoriteCard(fav *botpkg.Favorite, qualityValue string, requeste
 	}
 }
 
+// buildInlineFavoriteMenuCard builds a card that, when selected, posts the full
+// favorites menu (the same list message with send / manage / random buttons).
+// Inline mode has no chat ID, so it's a personal list.
+func (h *InlineSearchHandler) buildInlineFavoriteMenuCard(ctx context.Context, userID int64) telego.InlineQueryResult {
+	if h == nil || h.Favorites == nil || userID == 0 {
+		return nil
+	}
+	token := storeFavoriteListPayload(favoriteListPayload{requesterID: userID})
+	text, markup := h.Favorites.buildListView(ctx, favoriteListContext{token: token, requesterID: userID, view: "u", page: 1})
+	return &telego.InlineQueryResultArticle{
+		Type:                telego.ResultTypeArticle,
+		ID:                  inlineStableID("fav_menu", fmt.Sprintf("%d", userID)),
+		Title:               "📋 我的收藏",
+		Description:         "点开管理 / 随机 / 发送收藏",
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: text, ParseMode: telego.ModeHTML, LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true}},
+		ReplyMarkup:         markup,
+	}
+}
+
 // appendInlineFavoriteCards appends the user's personal favorites as inline
 // result cards (group favorites are unavailable here — inline mode has no chat
-// ID). Errors and empty lists are silently skipped.
+// ID). A "favorites menu" card is placed above the songs so the full list (with
+// management) can be opened. Errors and empty lists are silently skipped.
 func (h *InlineSearchHandler) appendInlineFavoriteCards(ctx context.Context, results []telego.InlineQueryResult, userID int64) []telego.InlineQueryResult {
 	if h == nil || h.Repo == nil || userID == 0 {
 		return results
@@ -688,6 +709,9 @@ func (h *InlineSearchHandler) appendInlineFavoriteCards(ctx context.Context, res
 	favs, err := h.Repo.ListFavorites(ctx, botpkg.FavoriteScopeUser, userID, limit, 0)
 	if err != nil || len(favs) == 0 {
 		return results
+	}
+	if menu := h.buildInlineFavoriteMenuCard(ctx, userID); menu != nil {
+		results = append(results, menu)
 	}
 	quality := h.resolveDefaultQuality(ctx, userID)
 	for _, fav := range favs {

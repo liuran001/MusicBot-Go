@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	"github.com/mymmrac/telego"
 )
 
 func TestFavoriteToggleCallbackRoundTrip(t *testing.T) {
@@ -140,7 +141,7 @@ func TestBuildLyricDeepLinkAndButton(t *testing.T) {
 	}
 }
 
-func TestFavoriteListViewHasSendAndRemoveButtons(t *testing.T) {
+func TestFavoriteListViewSendAndManageModes(t *testing.T) {
 	repo := newStubRepo()
 	ctx := context.Background()
 	const uid int64 = 7
@@ -148,23 +149,36 @@ func TestFavoriteListViewHasSendAndRemoveButtons(t *testing.T) {
 		t.Fatalf("add favorite: %v", err)
 	}
 	h := &FavoritesHandler{Repo: repo, PageSize: 8}
-	_, markup := h.buildListView(ctx, favoriteListContext{token: "TOK", requesterID: uid, view: "u", page: 1})
-	if markup == nil {
-		t.Fatalf("expected a keyboard")
-	}
-	var hasSend, hasRemove bool
-	for _, row := range markup.InlineKeyboard {
-		for _, btn := range row {
-			if strings.HasPrefix(btn.CallbackData, "favm s TOK u 1 0") {
-				hasSend = true
-			}
-			if strings.HasPrefix(btn.CallbackData, "favm x TOK u 1 0") {
-				hasRemove = true
+
+	scan := func(markup *telego.InlineKeyboardMarkup) (send, remove, manageEntry bool) {
+		if markup == nil {
+			return
+		}
+		for _, row := range markup.InlineKeyboard {
+			for _, btn := range row {
+				switch {
+				case strings.HasPrefix(btn.CallbackData, "favm s TOK u 1 0"):
+					send = true
+				case strings.HasPrefix(btn.CallbackData, "favm x TOK u 1 0"):
+					remove = true
+				case strings.HasPrefix(btn.CallbackData, "favm n TOK u 1 m"):
+					manageEntry = true
+				}
 			}
 		}
+		return
 	}
-	if !hasSend || !hasRemove {
-		t.Fatalf("expected per-song send+remove buttons, hasSend=%v hasRemove=%v", hasSend, hasRemove)
+
+	// Normal mode: a send button + a "manage" entry, but NO inline remove button.
+	_, normal := h.buildListView(ctx, favoriteListContext{token: "TOK", requesterID: uid, view: "u", page: 1})
+	if send, remove, manageEntry := scan(normal); !send || remove || !manageEntry {
+		t.Fatalf("normal mode: send=%v remove=%v manageEntry=%v", send, remove, manageEntry)
+	}
+
+	// Manage mode: per-song delete buttons, no send.
+	_, manage := h.buildListView(ctx, favoriteListContext{token: "TOK", requesterID: uid, view: "u", page: 1, manage: true})
+	if send, remove, _ := scan(manage); send || !remove {
+		t.Fatalf("manage mode: send=%v remove=%v", send, remove)
 	}
 }
 
