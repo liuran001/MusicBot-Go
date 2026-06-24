@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,11 +52,11 @@ func (h *InlineCollectionCallbackHandler) Handle(ctx context.Context, b *telego.
 	}
 	requesterID, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
 	if err != nil || requesterID == 0 {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_bad_params"), ShowAlert: true})
 		return
 	}
 	if query.From.ID != requesterID {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_denied"), ShowAlert: true})
 		return
 	}
 	page := 1
@@ -68,7 +67,7 @@ func (h *InlineCollectionCallbackHandler) Handle(ctx context.Context, b *telego.
 		page = 1
 	case "page":
 		if len(parts) < 5 {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_bad_params"), ShowAlert: true})
 			return
 		}
 		page, err = strconv.Atoi(parts[3])
@@ -76,28 +75,28 @@ func (h *InlineCollectionCallbackHandler) Handle(ctx context.Context, b *telego.
 			page = 1
 		}
 	default:
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_bad_params"), ShowAlert: true})
 		return
 	}
 
 	withInlineMessageLock(query.InlineMessageID, func() {
 		state, ok := h.Chosen.getInlineCollectionState(token)
 		if !ok || state == nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "列表已过期，请重新选择", ShowAlert: true})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_list_expired"), ShowAlert: true})
 			return
 		}
 
 		targetPage := normalizeInlineCollectionPage(h.Chosen, state, page)
 		if lastPage, ok := h.getLastInlineCollectionPage(query.InlineMessageID); ok && lastPage == targetPage {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", targetPage)})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_already_on_page", map[string]any{"Page": targetPage})})
 			return
 		}
 		if err := h.Chosen.ensureInlineCollectionChunk(ctx, state, targetPage); err != nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "加载失败，请重试", ShowAlert: true})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_load_failed"), ShowAlert: true})
 			return
 		}
 
-		text, markup := h.Chosen.renderInlineCollectionPage(state, token, targetPage)
+		text, markup := h.Chosen.renderInlineCollectionPage(ctx, state, token, targetPage)
 		params := &telego.EditMessageTextParams{
 			InlineMessageID:    query.InlineMessageID,
 			Text:               text,
@@ -114,7 +113,7 @@ func (h *InlineCollectionCallbackHandler) Handle(ctx context.Context, b *telego.
 		if editErr == nil {
 			h.setLastInlineCollectionPage(query.InlineMessageID, targetPage)
 		}
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("第 %d 页", targetPage)})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_page_n", map[string]any{"Page": targetPage})})
 	})
 }
 

@@ -1,0 +1,74 @@
+# English catalog shard — inline + callback handlers (cb_ domain).
+# PLAIN text; MarkdownV2 escaping happens at the output boundary.
+
+# --- callback answers (plain alert/toast text) ---
+cb_denied = "Only the requester or an admin can do this"
+cb_bad_params = "Invalid parameters"
+cb_processing = "Processing, please wait"
+cb_select_episode = "Choose an episode"
+cb_op_expired = "This action has expired, please search again"
+cb_no_random = "No songs available to shuffle"
+cb_episode_load_failed = "Failed to load episodes"
+cb_episode_closed = "Episode list closed"
+cb_list_expired = "The list has expired, please select again"
+cb_load_failed = "Loading failed, please try again"
+cb_already_on_page = "Already on page {{.Page}}"
+cb_page_n = "Page {{.Page}}"
+
+# --- pagination labels ---
+cb_page_of = "Page {{.Page}}/{{.Total}}"
+cb_page_footer = "Page {{.Page}} / {{.Total}}"
+cb_track_count = "{{.Count}} tracks"
+cb_track_total = "Tracks: {{.Count}}"
+
+# --- collection / playlist cards ---
+cb_collection_not_found = "Album/playlist not found"
+cb_collection_tap_expand = "Tap to expand the details automatically"
+cb_collection_page_hint = "Add a number to the end of the link to page, e.g. link 2"
+cb_creator_label = "Creator: "
+cb_fetching_album = "Fetching album..."
+
+# --- empty / help / settings cards ---
+cb_empty_title = "Type help for assistance"
+cb_setting_title = "Platform: {{.Platform}} | Quality: {{.Quality}}"
+cb_tap_edit_settings = "Tap to edit settings"
+cb_settings_message = "Current user settings\nPlatform: {{.Platform}}\nQuality: {{.Quality}}\n\n💡 You can append temporary options after the keyword, e.g. 稻香 qq high"
+cb_edit_settings_btn = "⚙️ Edit settings"
+cb_search_header_desc = "Tap to edit settings｜append temporary options after the keyword, e.g. 稻香 qq high"
+
+# --- random / favorites cards ---
+cb_random_one = "🎲 Random track"
+cb_random_empty_desc = "No songs to shuffle in the cache right now"
+cb_random_card_desc = "Tap to send a random cached song"
+cb_my_favorites = "📋 My favorites"
+cb_favorites_menu_desc = "Open to manage / shuffle / send favorites"
+
+# --- search cards ---
+cb_input_keyword = "Please enter a keyword"
+cb_page_hint_example = "keyword qq hires 2"
+cb_search_page_desc = "{{.Total}} results total｜add a number to the end of the keyword to page, e.g. {{.Hint}}"
+cb_unknown_artist = "Unknown artist"
+
+# --- quality labels ---
+cb_quality_standard = "Standard"
+cb_quality_high = "High"
+cb_quality_lossless = "Lossless"
+cb_quality_hires = "Hi-Res"
+
+# --- episode picker ---
+cb_tap_episode_below = "Tap an episode below to send"
+cb_fetching_episodes = "Fetching episodes..."
+cb_episode_page_hint = "Add a number to the link to page, e.g. {{.Hint}}"
+cb_episodes_label = "Episodes"
+cb_prev_page = "Previous"
+cb_next_page = "Next"
+cb_back_home = "Back to start"
+cb_prev_page_arrow = "⬅️ Previous"
+cb_next_page_arrow = "➡️ Next"
+cb_home_page = "🏠 Home"
+cb_last_page = "⏭️ Last page"
+
+# --- song bottom buttons ---
+cb_lyric_btn = "📜 Lyrics"
+cb_favorite_btn = "⭐ Favorite"
+cb_group_favorite_btn = "👥 Group favorite"
