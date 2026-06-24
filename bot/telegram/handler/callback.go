@@ -332,7 +332,7 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	}
 	backCallback := fmt.Sprintf("search %d home %d", listMsg.MessageID, reqID)
 	setEpisodeSearchBackCallback(listMsg.Chat.ID, listMsg.MessageID, backCallback)
-	text, keyboard := buildEpisodePickerPage(platformName, baseTrackID, qualityOverride, reqID, episodes, 1, backCallback)
+	text, keyboard := buildEpisodePickerPage(ctx, platformName, baseTrackID, qualityOverride, reqID, episodes, 1, backCallback)
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false
 	}
@@ -367,7 +367,7 @@ func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, platformName, 
 	return provider.ListEpisodes(ctx, strings.TrimSpace(trackID))
 }
 
-func buildEpisodePickerPage(platformName, trackID, qualityValue string, requesterID int64, episodes []platform.Episode, page int, backCallback string) (string, *telego.InlineKeyboardMarkup) {
+func buildEpisodePickerPage(ctx context.Context, platformName, trackID, qualityValue string, requesterID int64, episodes []platform.Episode, page int, backCallback string) (string, *telego.InlineKeyboardMarkup) {
 	if len(episodes) == 0 {
 		return "", nil
 	}
@@ -388,8 +388,8 @@ func buildEpisodePickerPage(platformName, trackID, qualityValue string, requeste
 	}
 	visible := episodes[start:end]
 
-	textLines := buildEpisodeHeaderLines(episodes)
-	textLines = append(textLines, fmt.Sprintf("第 %d/%d 页", page, totalPages), "")
+	textLines := buildEpisodeHeaderLines(ctx, episodes)
+	textLines = append(textLines, tr(ctx, "pl_page_of", map[string]any{"Page": page, "Total": totalPages}), "")
 	for _, ep := range visible {
 		title := strings.TrimSpace(ep.Title)
 		if title == "" {
@@ -423,12 +423,12 @@ func buildEpisodePickerPage(platformName, trackID, qualityValue string, requeste
 		nav := make([]telego.InlineKeyboardButton, 0, 2)
 		if page > 1 {
 			if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, page-1); cb != "" {
-				nav = append(nav, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: cb})
+				nav = append(nav, telego.InlineKeyboardButton{Text: tr(ctx, "pl_prev_page_arrow"), CallbackData: cb})
 			}
 		}
 		if page < totalPages {
 			if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, page+1); cb != "" {
-				nav = append(nav, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: cb})
+				nav = append(nav, telego.InlineKeyboardButton{Text: tr(ctx, "pl_next_page_arrow"), CallbackData: cb})
 			}
 		}
 		if len(nav) > 0 {
@@ -437,12 +437,12 @@ func buildEpisodePickerPage(platformName, trackID, qualityValue string, requeste
 		extraRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page > 1 {
 			if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, 1); cb != "" {
-				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: "🏠 回到主页", CallbackData: cb})
+				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_home_arrow"), CallbackData: cb})
 			}
 		}
 		if page < totalPages {
 			if cb := buildEpisodeNavCallbackData(platformName, trackID, qualityValue, requesterID, totalPages); cb != "" {
-				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: "⏭️ 最后一页", CallbackData: cb})
+				extraRow = append(extraRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_last_page_arrow"), CallbackData: cb})
 			}
 		}
 		if len(extraRow) > 0 {
@@ -456,15 +456,15 @@ func buildEpisodePickerPage(platformName, trackID, qualityValue string, requeste
 	if closeCB := buildEpisodeCloseCallbackData(platformName, trackID, qualityValue, requesterID); closeCB != "" {
 		bottom := make([]telego.InlineKeyboardButton, 0, 2)
 		if strings.TrimSpace(backCallback) != "" {
-			bottom = append(bottom, telego.InlineKeyboardButton{Text: "↩️ 返回搜索结果", CallbackData: backCallback})
+			bottom = append(bottom, telego.InlineKeyboardButton{Text: tr(ctx, "pl_back_to_search"), CallbackData: backCallback})
 		}
-		bottom = append(bottom, telego.InlineKeyboardButton{Text: "❌ 关闭", CallbackData: closeCB})
+		bottom = append(bottom, telego.InlineKeyboardButton{Text: tr(ctx, "pl_episode_close"), CallbackData: closeCB})
 		rows = append(rows, bottom)
 	}
 	return strings.Join(textLines, "\n"), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func buildEpisodeHeaderLines(episodes []platform.Episode) []string {
+func buildEpisodeHeaderLines(ctx context.Context, episodes []platform.Episode) []string {
 	lines := make([]string, 0, 8)
 	if len(episodes) == 0 {
 		return lines
@@ -475,17 +475,17 @@ func buildEpisodeHeaderLines(episodes []platform.Episode) []string {
 		if strings.TrimSpace(first.VideoURL) != "" {
 			titleText = fmt.Sprintf("[%s](%s)", titleText, strings.TrimSpace(first.VideoURL))
 		}
-		lines = append(lines, "标题: "+titleText)
+		lines = append(lines, tr(ctx, "pl_title")+": "+titleText)
 	}
 	if up := strings.TrimSpace(first.CreatorName); up != "" {
 		upText := mdV2Replacer.Replace(up)
 		if strings.TrimSpace(first.CreatorURL) != "" {
 			upText = fmt.Sprintf("[%s](%s)", upText, strings.TrimSpace(first.CreatorURL))
 		}
-		lines = append(lines, "UP主: "+upText)
+		lines = append(lines, tr(ctx, "pl_uploader")+": "+upText)
 	}
 	if desc := strings.TrimSpace(first.Description); desc != "" {
-		if quote := formatExpandableQuote(mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
+		if quote := formatExpandableQuote(ctx, mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
 			lines = append(lines, "", quote)
 		}
 	}
@@ -616,7 +616,7 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 			return
 		}
 		backCallback := getEpisodeSearchBackCallback(msg.Chat.ID, msg.MessageID)
-		text, keyboard := buildEpisodePickerPage(platformName, trackID, qualityValue, requesterID, episodes, page, backCallback)
+		text, keyboard := buildEpisodePickerPage(ctx, platformName, trackID, qualityValue, requesterID, episodes, page, backCallback)
 		if text == "" || keyboard == nil {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_episode_load_failed"), ShowAlert: true})
 			return
@@ -772,7 +772,7 @@ func buildInlineEpisodePickerPage(ctx context.Context, platformName, trackID, qu
 	visible := episodes[start:end]
 	textLines := make([]string, 0, len(visible)+8)
 	textLines = append(textLines, fmt.Sprintf("%s *%s* %s", platformEmoji(nil, platformName), mdV2Replacer.Replace(platformDisplayName(nil, platformName)), tr(ctx, "cb_episodes_label")), "")
-	textLines = append(textLines, buildEpisodeHeaderLines(episodes)...)
+	textLines = append(textLines, buildEpisodeHeaderLines(ctx, episodes)...)
 	textLines = append(textLines, tr(ctx, "cb_page_of", map[string]any{"Page": page, "Total": totalPages}), "")
 	for _, ep := range visible {
 		displayIndex := ep.Index

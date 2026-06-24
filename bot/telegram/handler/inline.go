@@ -122,7 +122,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 		return
 	}
 	collectionType := detectCollectionType(collectionID, playlist.URL)
-	collectionLabel := collectionTypeLabel(collectionType)
+	collectionLabel := collectionTypeLabel(ctx, collectionType)
 	inlineMsgs := make([]telego.InlineQueryResult, 0, h.inlinePageSize()+3)
 	title := strings.TrimSpace(playlist.Title)
 	if title == "" {

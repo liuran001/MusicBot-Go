@@ -1,0 +1,38 @@
+# Chinese (Simplified) catalog shard — playlist handler + episode picker (pl_ domain).
+# zh = EXACT original strings from the handler source. PLAIN text; MarkdownV2
+# escaping happens at the output boundary.
+
+# --- collection type labels ---
+pl_collection_album = "专辑"
+pl_collection_playlist = "歌单"
+
+# --- fetch / empty / status ---
+pl_fetching_album = "正在获取专辑..."
+pl_album_empty = "专辑为空"
+pl_list_expired = "列表已过期，请重新发送链接"
+pl_processing = "处理中，请稍候"
+pl_already_on_page = "已是第 {{.Page}} 页"
+pl_load_failed = "{{.Label}}加载失败"
+pl_no_results = "未找到结果"
+
+# --- pagination / nav buttons ---
+pl_page_of = "第 {{.Page}}/{{.Total}} 页"
+pl_close = "关闭"
+pl_next_page = "下一页"
+pl_prev_page = "上一页"
+pl_home = "回到首页"
+
+# --- collection info labels ---
+pl_creator = "创建者"
+pl_track_count = "曲目数"
+pl_description = "简介"
+
+# --- episode (multi-part) picker ---
+pl_prev_page_arrow = "⬅️ 上一页"
+pl_next_page_arrow = "➡️ 下一页"
+pl_home_arrow = "🏠 回到主页"
+pl_last_page_arrow = "⏭️ 最后一页"
+pl_back_to_search = "↩️ 返回搜索结果"
+pl_episode_close = "❌ 关闭"
+pl_title = "标题"
+pl_uploader = "UP主"

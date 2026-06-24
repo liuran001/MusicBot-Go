@@ -1,0 +1,37 @@
+# English catalog shard — playlist handler + episode picker (pl_ domain).
+# PLAIN text; MarkdownV2 escaping happens at the output boundary.
+
+# --- collection type labels ---
+pl_collection_album = "Album"
+pl_collection_playlist = "Playlist"
+
+# --- fetch / empty / status ---
+pl_fetching_album = "Fetching album…"
+pl_album_empty = "The album has no tracks"
+pl_list_expired = "This list has expired, please send the link again"
+pl_processing = "Processing, please wait"
+pl_already_on_page = "Already on page {{.Page}}"
+pl_load_failed = "Failed to load {{.Label}}"
+pl_no_results = "No results found"
+
+# --- pagination / nav buttons ---
+pl_page_of = "Page {{.Page}}/{{.Total}}"
+pl_close = "Close"
+pl_next_page = "Next"
+pl_prev_page = "Previous"
+pl_home = "Back to first page"
+
+# --- collection info labels ---
+pl_creator = "Creator"
+pl_track_count = "Tracks"
+pl_description = "Description"
+
+# --- episode (multi-part) picker ---
+pl_prev_page_arrow = "⬅️ Previous"
+pl_next_page_arrow = "➡️ Next"
+pl_home_arrow = "🏠 Home"
+pl_last_page_arrow = "⏭️ Last page"
+pl_back_to_search = "↩️ Back to search results"
+pl_episode_close = "❌ Close"
+pl_title = "Title"
+pl_uploader = "Uploader"

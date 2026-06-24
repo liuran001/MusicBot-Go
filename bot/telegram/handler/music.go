@@ -711,7 +711,7 @@ func (h *MusicHandler) tryPresentDirectEpisodes(ctx context.Context, b *telego.B
 	if message.From != nil {
 		requesterID = message.From.ID
 	}
-	text, keyboard := buildEpisodePickerPage(platformName, baseTrackID, qualityValue, requesterID, episodes, 1, "")
+	text, keyboard := buildEpisodePickerPage(ctx, platformName, baseTrackID, qualityValue, requesterID, episodes, 1, "")
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false, nil
 	}

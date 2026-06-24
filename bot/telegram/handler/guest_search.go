@@ -186,10 +186,10 @@ func (h *GuestModeHandler) renderGuestSearchPage(ctx context.Context, state *sea
 		// formatPlaylistInfo). No keyword line, no "点击数字" hint duplication.
 		collectionLabel := strings.TrimSpace(state.collectionLabel)
 		if collectionLabel == "" {
-			collectionLabel = collectionTypeLabel(collectionTypePlaylist)
+			collectionLabel = collectionTypeLabel(ctx, collectionTypePlaylist)
 		}
 		bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmojiText, mdV2Replacer.Replace(displayName), collectionLabel))
-		bld.WriteString(formatPlaylistInfo(state.playlist, collectionLabel))
+		bld.WriteString(formatPlaylistInfo(ctx, state.playlist, collectionLabel))
 	} else {
 		bld.WriteString(fmt.Sprintf("%s *%s* %s\n\\* %s\n\n", platformEmojiText, mdV2Replacer.Replace(displayName), trMd(ctx, "guest_search_results"), trMd(ctx, "guest_pick_number_hint")))
 		if strings.TrimSpace(state.keyword) != "" {
