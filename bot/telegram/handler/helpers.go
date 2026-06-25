@@ -669,7 +669,7 @@ func isTelegramFileIDInvalid(err error) bool {
 		strings.Contains(errText, "wrong remote file identifier")
 }
 
-func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
+func buildMusicCaption(ctx context.Context, manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
 	if songInfo == nil {
 		return ""
 	}
@@ -691,7 +691,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	if infoLine != "" {
 		infoLine += "\n"
 	}
-	tags := strings.Join(formatInfoTags(manager, songInfo.Platform, songInfo.Quality, songInfo.FileExt), " ")
+	tags := strings.Join(formatInfoTags(ctx, manager, songInfo.Platform, songInfo.Quality, songInfo.FileExt), " ")
 
 	if strings.TrimSpace(songInfo.TrackURL) != "" {
 		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(songInfo.TrackURL), songNameText)
@@ -717,7 +717,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	}
 	albumLine := ""
 	if strings.TrimSpace(songInfo.SongAlbum) != "" {
-		albumLine = fmt.Sprintf("专辑: %s\n", albumHTML)
+		albumLine = fmt.Sprintf("%s%s\n", tr(ctx, "album_label"), albumHTML)
 	}
 
 	return fmt.Sprintf("<b>「%s」- %s</b>\n%s<blockquote>%s%s\n</blockquote>via @%s",
@@ -1404,9 +1404,9 @@ func parseInlineCollectionResultID(resultID string) (platformName, collectionID,
 	return platformName, collectionID, qualityValue, true
 }
 
-func formatInfoTags(manager platform.Manager, platformName, quality, fileExt string) []string {
+func formatInfoTags(ctx context.Context, manager platform.Manager, platformName, quality, fileExt string) []string {
 	tags := []string{"#" + platformTag(manager, platformName)}
-	if qt := qualityTag(quality); qt != "" {
+	if qt := qualityTag(ctx, quality); qt != "" {
 		tags = append(tags, "#"+qt)
 	}
 	if strings.TrimSpace(fileExt) != "" {
@@ -1415,17 +1415,18 @@ func formatInfoTags(manager platform.Manager, platformName, quality, fileExt str
 	return tags
 }
 
-// qualityTag maps a quality value to its hashtag label. Hi-Res uses "HiRes"
-// (no hyphen) because Telegram terminates a hashtag at "-". Returns "" for
-// empty/unknown quality so no tag is emitted.
-func qualityTag(quality string) string {
+// qualityTag maps a quality value to its localized hashtag label. Hi-Res uses
+// "HiRes" (no hyphen) because Telegram terminates a hashtag at "-". Catalog
+// values are single tokens (no spaces) so they stay valid hashtags. Returns ""
+// for empty/unknown quality so no tag is emitted.
+func qualityTag(ctx context.Context, quality string) string {
 	switch strings.TrimSpace(strings.ToLower(quality)) {
 	case "standard":
-		return "标准音质"
+		return tr(ctx, "quality_tag_standard")
 	case "high":
-		return "高品质"
+		return tr(ctx, "quality_tag_high")
 	case "lossless":
-		return "无损"
+		return tr(ctx, "quality_tag_lossless")
 	case "hires":
 		return "HiRes"
 	default:

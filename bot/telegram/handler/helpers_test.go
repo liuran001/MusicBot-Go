@@ -89,7 +89,7 @@ func TestBuildMusicCaption(t *testing.T) {
 		MusicSize:   1024,
 		BitRate:     320000,
 	}
-	caption := buildMusicCaption(nil, info, "botname")
+	caption := buildMusicCaption(zhCtx(), nil, info, "botname")
 	if caption == "" {
 		t.Fatalf("expected caption")
 	}
@@ -115,7 +115,7 @@ func TestQualityTag(t *testing.T) {
 		{"unknown", ""},
 	}
 	for _, tt := range tests {
-		if got := qualityTag(tt.quality); got != tt.want {
+		if got := qualityTag(zhCtx(), tt.quality); got != tt.want {
 			t.Fatalf("qualityTag(%q)=%q want=%q", tt.quality, got, tt.want)
 		}
 	}
@@ -130,7 +130,7 @@ func TestBuildMusicCaptionHidesAlbumLineWhenEmpty(t *testing.T) {
 		MusicSize:   1024,
 		BitRate:     320000,
 	}
-	caption := buildMusicCaption(nil, info, "botname")
+	caption := buildMusicCaption(zhCtx(), nil, info, "botname")
 	if strings.Contains(caption, "专辑:") {
 		t.Fatalf("expected caption to hide album line when album is empty, got %q", caption)
 	}
@@ -148,7 +148,7 @@ func TestBuildMusicCaptionEscapesHTMLAndKeepsLinks(t *testing.T) {
 		MusicSize:       1024,
 		BitRate:         320000,
 	}
-	caption := buildMusicCaption(nil, info, "botname")
+	caption := buildMusicCaption(zhCtx(), nil, info, "botname")
 	if !strings.Contains(caption, `<a href="https://track.example/?a=1&amp;b=2">Song &lt;Test&gt;</a>`) {
 		t.Fatalf("expected escaped track link, got %q", caption)
 	}

@@ -110,7 +110,7 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 	sb.WriteString(fmt.Sprintf("🎧 %s：%s %s\n", tr(ctx, "set_quality_label"), qualityEmoji, h.getQualityDisplayName(ctx, qualityValue)))
 
 	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
-	lyricSummary := lyricFormatDisplayName(lyricFormat)
+	lyricSummary := lyricFormatDisplayName(ctx, lyricFormat)
 	if lyricFormatSupportsSideTracks(lyricFormat) {
 		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, lyricFormat)
 		var extras []string
@@ -248,7 +248,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 
 	lyricFormat := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	rows = append(rows, []telego.InlineKeyboardButton{{
-		Text:         fmt.Sprintf("🎤 %s：%s", tr(ctx, "set_lyric_label"), lyricFormatDisplayName(lyricFormat)),
+		Text:         fmt.Sprintf("🎤 %s：%s", tr(ctx, "set_lyric_label"), lyricFormatDisplayName(ctx, lyricFormat)),
 		CallbackData: "settings lyricmenu",
 	}})
 	for _, def := range h.sortedPluginSettingDefinitions() {
@@ -361,10 +361,7 @@ func (h *SettingsHandler) buildLyricFormatMenuKeyboard(ctx context.Context, chat
 	for _, row := range settingsLyricFormatRows {
 		buttons := make([]telego.InlineKeyboardButton, 0, len(row))
 		for _, format := range row {
-			label := lyricFormatButtonLabels[format]
-			if label == "" {
-				label = strings.ToUpper(format)
-			}
+			label := lyricFormatButtonLabel(ctx, format)
 			if format == current {
 				label = "✅ " + label
 			}
@@ -401,7 +398,7 @@ func (h *SettingsHandler) buildLyricFormatMenuText(ctx context.Context, chatType
 	current := h.resolveDefaultLyricFormat(chatType, settings, groupSettings)
 	var sb strings.Builder
 	sb.WriteString("🎤 " + tr(ctx, "set_lyric_menu_title") + "\n\n")
-	sb.WriteString(fmt.Sprintf("%s：%s\n", tr(ctx, "set_lyric_menu_current"), lyricFormatDisplayName(current)))
+	sb.WriteString(fmt.Sprintf("%s：%s\n", tr(ctx, "set_lyric_menu_current"), lyricFormatDisplayName(ctx, current)))
 	if lyricFormatSupportsSideTracks(current) {
 		includeTranslation, includeRoma := h.resolveDefaultLyricFlags(chatType, settings, groupSettings, current)
 		sb.WriteString(fmt.Sprintf("%s：%s ｜ %s：%s\n", tr(ctx, "set_label_translation"), enabledText(ctx, includeTranslation), tr(ctx, "set_label_roma"), enabledText(ctx, includeRoma)))
@@ -881,12 +878,12 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 			if groupSettings != nil && groupSettings.DefaultLyricFormat != resolved {
 				groupSettings.DefaultLyricFormat = resolved
 				changed = true
-				responseText = "✅ " + tr(ctx, "set_resp_lyricfmt_set", map[string]any{"Name": lyricFormatDisplayName(resolved)})
+				responseText = "✅ " + tr(ctx, "set_resp_lyricfmt_set", map[string]any{"Name": lyricFormatDisplayName(ctx, resolved)})
 			}
 		} else if settings != nil && settings.DefaultLyricFormat != resolved {
 			settings.DefaultLyricFormat = resolved
 			changed = true
-			responseText = "✅ " + tr(ctx, "set_resp_lyricfmt_set", map[string]any{"Name": lyricFormatDisplayName(resolved)})
+			responseText = "✅ " + tr(ctx, "set_resp_lyricfmt_set", map[string]any{"Name": lyricFormatDisplayName(ctx, resolved)})
 		}
 	case "lyrictrans", "lyricroma":
 		if settingValue != "on" && settingValue != "off" {

@@ -67,6 +67,9 @@ err_playlist_not_found = "プレイリストが見つかりません"
 
 # --- music info ---
 album_label = "アルバム: "
+quality_tag_standard = "標準音質"
+quality_tag_high = "高音質"
+quality_tag_lossless = "ロスレス"
 
 # --- bot command menu (setMyCommands) ---
 cmd_help = "使い方"
@@ -100,6 +103,8 @@ help_quality_label = "音質"
 help_platform_label = "プラットフォーム"
 help_supported_platforms = "対応プラットフォーム"
 help_section_examples = "💡 例"
+help_example_music = "米津玄師"
+help_example_search = "Lemon qq"
 help_section_admin = "🛠 管理者コマンド"
 help_arg_track = "曲名|リンク|ID"
 help_arg_keyword = "キーワード"

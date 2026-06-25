@@ -1041,7 +1041,7 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 		ID:             buildInlineCachedResultID(platformName, trackID, qualityValue),
 		DocumentFileID: info.FileID,
 		Title:          fmt.Sprintf("%s - %s", songInfo.SongArtists, songInfo.SongName),
-		Caption:        buildMusicCaption(h.PlatformManager, &songInfo, h.BotName),
+		Caption:        buildMusicCaption(ctx, h.PlatformManager, &songInfo, h.BotName),
 		ParseMode:      telego.ModeHTML,
 		ReplyMarkup:    keyboard,
 		Description:    songInfo.SongAlbum,

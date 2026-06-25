@@ -26,3 +26,8 @@ lyr_save_default = "💾 デフォルト歌詞フォーマットとして保存"
 
 # --- default lyric file/display name ---
 lyr_default_name = "歌詞"
+
+# --- lyric format display-name descriptors (shared with settings) ---
+lyr_fmt_wordbyword = "単語ごと"
+lyr_fmt_subtitle = "字幕"
+lyr_fmt_plaintext = "プレーンテキスト"

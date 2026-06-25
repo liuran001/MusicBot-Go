@@ -86,6 +86,10 @@ err_playlist_not_found = "Playlist not found"
 
 # --- music info ---
 album_label = "Album: "
+# Quality hashtags in the audio caption (single tokens — no spaces, hashtag-safe).
+quality_tag_standard = "Standard"
+quality_tag_high = "HiFi"
+quality_tag_lossless = "Lossless"
 
 # --- help / about / status (authored WITH markdown, rendered via T not Tmd) ---
 help_intro = "Send a song name, link, or ID to search and download music."
@@ -103,6 +107,9 @@ help_quality_label = "Quality"
 help_platform_label = "Platform"
 help_supported_platforms = "Supported platforms"
 help_section_examples = "💡 Examples"
+# Illustrative example arguments shown in the /help examples block.
+help_example_music = "Jay Chou"
+help_example_search = "Take My Hand qq"
 help_section_admin = "🛠 Admin commands"
 help_arg_track = "name|link|ID"
 help_arg_keyword = "keyword"

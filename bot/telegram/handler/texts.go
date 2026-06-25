@@ -58,9 +58,9 @@ func buildHelpText(ctx context.Context, manager platform.Manager, isAdmin bool, 
 		esc("help_platform_label") + "：\n" + aliasText + "\n" +
 		"\n" + esc("help_supported_platforms") + "：" + platformText + "\n" +
 		"\n*💡 " + esc("help_section_examples") + "*\n" +
-		"`/music 周杰伦`\n" +
+		"`/music " + tr(ctx, "help_example_music") + "`\n" +
 		"`/music https://music.163.com/song/1859603835`\n" +
-		"`/search 起风了 qq`"
+		"`/search " + tr(ctx, "help_example_search") + "`"
 	adminText := buildAdminHelp(adminCommands)
 	if isAdmin && adminText != "" {
 		text += "\n\n*🛠 " + esc("help_section_admin") + "*\n" + adminText

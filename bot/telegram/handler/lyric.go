@@ -791,7 +791,7 @@ func buildLRCFromTimestamped(lines []platform.LyricLine) string {
 func buildLyricCaption(ctx context.Context, payload lyricpkg.Payload, content string, state lyricRenderState) string {
 	format := lyricpkg.NormalizeFormat(state.format)
 	preview := strings.TrimSpace(lyricPreviewText(payload, content, format))
-	label := lyricFormatDisplayNameForPayload(format, payload)
+	label := lyricFormatDisplayNameForPayload(ctx, format, payload)
 	header := tr(ctx, "lyr_caption_format", map[string]any{"Format": html.EscapeString(label)})
 	if extras := lyricCaptionToggleSuffix(ctx, payload, format, state); extras != "" {
 		header += extras
@@ -820,10 +820,13 @@ func buildLyricCaption(ctx context.Context, payload lyricpkg.Payload, content st
 // "逐词" wording when the song carries no actual word-by-word timing (e.g. a
 // yrc/ttml request that falls back to line-level lyrics). The format itself is
 // unchanged — only the human-facing label reflects what was really produced.
-func lyricFormatDisplayNameForPayload(format string, payload lyricpkg.Payload) string {
-	name := lyricFormatDisplayName(format)
-	if strings.Contains(name, "逐词") && !lyricpkg.HasWordTiming(payload) {
-		name = strings.TrimSpace(strings.ReplaceAll(name, "逐词", ""))
+func lyricFormatDisplayNameForPayload(ctx context.Context, format string, payload lyricpkg.Payload) string {
+	name := lyricFormatDisplayName(ctx, format)
+	// Strip the word-by-word descriptor when the payload has no actual word
+	// timing. The descriptor is localized, so match the resolved term.
+	wbw := tr(ctx, "lyr_fmt_wordbyword")
+	if wbw != "" && strings.Contains(name, wbw) && !lyricpkg.HasWordTiming(payload) {
+		name = strings.TrimSpace(strings.ReplaceAll(name, wbw, ""))
 	}
 	return name
 }
@@ -877,38 +880,40 @@ func lyricPreviewText(payload lyricpkg.Payload, content, format string) string {
 	}
 }
 
-func lyricFormatDisplayName(format string) string {
+func lyricFormatDisplayName(ctx context.Context, format string) string {
+	wbw := tr(ctx, "lyr_fmt_wordbyword")
+	sub := tr(ctx, "lyr_fmt_subtitle")
 	switch format {
 	case "lrc":
 		return "LRC"
 	case "yrc":
-		return "YRC 逐词"
+		return "YRC " + wbw
 	case "qrc":
-		return "QRC 逐词"
+		return "QRC " + wbw
 	case "lys":
 		return "Lyricify Syllable"
 	case "krc":
-		return "KRC 逐词"
+		return "KRC " + wbw
 	case "elrc":
-		return "Enhanced LRC 逐词"
+		return "Enhanced LRC " + wbw
 	case "spl":
-		return "SPL 逐词"
+		return "SPL " + wbw
 	case "ass":
-		return "ASS 字幕"
+		return "ASS " + sub
 	case "lqe":
 		return "Lyricify Quick Export"
 	case "ttml":
-		return "TTML 逐词"
+		return "TTML " + wbw
 	case "amjson":
 		return "Apple Music JSON"
 	case "srt":
-		return "SRT 字幕"
+		return "SRT " + sub
 	case "txt":
-		return "纯文本"
+		return tr(ctx, "lyr_fmt_plaintext")
 	case "trans":
-		return "翻译"
+		return tr(ctx, "lyr_trans")
 	case "roma":
-		return "罗马音"
+		return tr(ctx, "lyr_roma")
 	default:
 		return strings.ToUpper(format)
 	}

@@ -2024,7 +2024,7 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		_ = b.SendChatAction(uploadCtx, &telego.SendChatActionParams{ChatID: telego.ChatID{ID: message.Chat.ID}, MessageThreadID: threadID, Action: telego.ChatActionUploadDocument})
 	}
 
-	caption := buildMusicCaption(h.PlatformManager, songInfo, h.BotName)
+	caption := buildMusicCaption(ctx, h.PlatformManager, songInfo, h.BotName)
 	params := &telego.SendAudioParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,
@@ -2576,7 +2576,7 @@ func (h *MusicHandler) prepareInlineSong(
 		return nil, err
 	}
 	defer file.Close()
-	caption := buildMusicCaption(h.PlatformManager, &songInfo, h.BotName)
+	caption := buildMusicCaption(ctx, h.PlatformManager, &songInfo, h.BotName)
 	params := &telego.SendAudioParams{
 		ChatID:    telego.ChatID{ID: uploadChatID},
 		Audio:     telego.InputFile{File: file},

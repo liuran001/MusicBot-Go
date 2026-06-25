@@ -441,7 +441,7 @@ func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *tele
 		return
 	}
 
-	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_generating", map[string]any{"Format": lyricFormatDisplayName(format)}))
+	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_generating", map[string]any{"Format": lyricFormatDisplayName(ctx, format)}))
 
 	lyrics, err := plat.GetLyrics(ctx, payload.trackID)
 	if err != nil || lyrics == nil {
@@ -564,7 +564,7 @@ func (h *LyricCallbackHandler) handleSaveDefault(ctx context.Context, b *telego.
 	// The chosen format is now the default, so the save button disappears.
 	state.defaultFormat = format
 	h.replaceKeyboard(ctx, b, chatID, messageID, payload.platformName, payload.trackID, state, payload.requesterID)
-	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_saved_default", map[string]any{"Format": lyricFormatDisplayName(format)}))
+	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_saved_default", map[string]any{"Format": lyricFormatDisplayName(ctx, format)}))
 }
 
 // resolveDefaultLyricFormat resolves the per-scope default lyric format for a

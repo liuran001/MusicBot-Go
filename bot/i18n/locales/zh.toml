@@ -68,6 +68,9 @@ err_playlist_not_found = "未找到歌单"
 
 # --- music info text ---
 album_label = "专辑: "
+quality_tag_standard = "标准音质"
+quality_tag_high = "高品质"
+quality_tag_lossless = "无损"
 
 # --- bot command menu (setMyCommands) ---
 cmd_help = "使用说明"
@@ -102,6 +105,8 @@ help_quality_label = "音质"
 help_platform_label = "平台"
 help_supported_platforms = "支持平台"
 help_section_examples = "💡 示例"
+help_example_music = "周杰伦"
+help_example_search = "起风了 qq"
 help_section_admin = "🛠 管理员命令"
 help_arg_track = "歌名|链接|ID"
 help_arg_keyword = "关键词"

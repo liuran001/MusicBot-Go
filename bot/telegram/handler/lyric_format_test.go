@@ -196,8 +196,8 @@ func TestLyricFlagsRoundTrip(t *testing.T) {
 }
 
 func TestLyricFormatDisplayName(t *testing.T) {
-	if lyricFormatDisplayName("yrc") != "YRC 逐词" {
-		t.Errorf("unexpected display name for yrc: %q", lyricFormatDisplayName("yrc"))
+	if lyricFormatDisplayName(zhCtx(), "yrc") != "YRC 逐词" {
+		t.Errorf("unexpected display name for yrc: %q", lyricFormatDisplayName(zhCtx(), "yrc"))
 	}
 }
 
@@ -205,12 +205,12 @@ func TestLyricFormatDisplayNameForPayloadDropsWordLabel(t *testing.T) {
 	// A yrc request on a song that only has line-level lyrics falls back to LRC
 	// content — the label must not claim "逐词".
 	lineOnly := lyricpkg.Payload{Lyric: "[00:01.00]Hello\n[00:03.00]World"}
-	if got := lyricFormatDisplayNameForPayload("yrc", lineOnly); strings.Contains(got, "逐词") {
+	if got := lyricFormatDisplayNameForPayload(zhCtx(), "yrc", lineOnly); strings.Contains(got, "逐词") {
 		t.Errorf("line-only payload should drop 逐词, got %q", got)
 	}
 	// With a real word-by-word track the 逐词 wording stays.
 	word := lyricpkg.Payload{RawYRC: "[1000,500](1000,500,0)Hello"}
-	if got := lyricFormatDisplayNameForPayload("yrc", word); !strings.Contains(got, "逐词") {
+	if got := lyricFormatDisplayNameForPayload(zhCtx(), "yrc", word); !strings.Contains(got, "逐词") {
 		t.Errorf("word payload should keep 逐词, got %q", got)
 	}
 }

@@ -26,3 +26,8 @@ lyr_save_default = "💾 Save as default lyric format"
 
 # --- default lyric file/display name ---
 lyr_default_name = "Lyrics"
+
+# --- lyric format display-name descriptors (shared with settings) ---
+lyr_fmt_wordbyword = "word-by-word"
+lyr_fmt_subtitle = "subtitle"
+lyr_fmt_plaintext = "plain text"

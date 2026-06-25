@@ -123,7 +123,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			media := &telego.InputMediaAudio{
 				Type:      telego.MediaTypeAudio,
 				Media:     telego.InputFile{FileID: songInfo.FileID},
-				Caption:   buildMusicCaption(music.PlatformManager, songInfo, music.BotName),
+				Caption:   buildMusicCaption(ctx, music.PlatformManager, songInfo, music.BotName),
 				ParseMode: telego.ModeHTML,
 				Title:     songInfo.SongName,
 				Performer: songInfo.SongArtists,
