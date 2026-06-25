@@ -44,7 +44,7 @@ func buildSongBottomKeyboard(ctx context.Context, repo botpkg.SongRepository, op
 	var rows [][]telego.InlineKeyboardButton
 
 	// Row 1: send-to-chat (switch inline query).
-	if fwd := buildForwardKeyboard(opts.trackURL, opts.platformName, opts.trackID); fwd != nil && len(fwd.InlineKeyboard) > 0 {
+	if fwd := buildForwardKeyboard(ctx, opts.trackURL, opts.platformName, opts.trackID); fwd != nil && len(fwd.InlineKeyboard) > 0 {
 		rows = append(rows, fwd.InlineKeyboard[0])
 	}
 

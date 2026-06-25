@@ -166,7 +166,7 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 			state.totalTracks = len(state.tracks)
 		}
 		token := h.CollectionChosen.storeInlineCollectionState(state)
-		if keyboard := buildInlineCollectionOpenKeyboard(token, query.From.ID); keyboard != nil {
+		if keyboard := buildInlineCollectionOpenKeyboard(ctx, token, query.From.ID); keyboard != nil {
 			collectionArticle.ReplyMarkup = keyboard
 		}
 	}
@@ -279,7 +279,7 @@ func (h *InlineSearchHandler) buildInlineRandomCard(ctx context.Context, id int6
 		Title:               tr(ctx, "cb_random_one"),
 		Description:         tr(ctx, "cb_random_card_desc"),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
-		ReplyMarkup:         buildInlineRandomSendKeyboard(requesterID),
+		ReplyMarkup:         buildInlineRandomSendKeyboard(ctx, requesterID),
 	}
 }
 
@@ -474,7 +474,7 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 		Title:               fallbackString(title, trackID),
 		Description:         inlineSubtitle(ctx, album, artists),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
-		ReplyMarkup:         buildInlineSendKeyboard(platformName, trackID, qualityValue, query.From.ID),
+		ReplyMarkup:         buildInlineSendKeyboard(ctx, platformName, trackID, qualityValue, query.From.ID),
 		ThumbnailURL:        thumbnailURL,
 		ThumbnailWidth:      150,
 		ThumbnailHeight:     150,
@@ -638,7 +638,7 @@ func buildInlineTrackArticle(ctx context.Context, h *InlineSearchHandler, platfo
 		Title:               fallbackString(strings.TrimSpace(track.Title), track.ID),
 		Description:         inlineSubtitle(ctx, trackAlbumLabel(track.Album), inlineArtistsLabel(track.Artists)),
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
-		ReplyMarkup:         buildInlineSendKeyboard(platformName, track.ID, qualityValue, requesterID),
+		ReplyMarkup:         buildInlineSendKeyboard(ctx, platformName, track.ID, qualityValue, requesterID),
 		ThumbnailURL:        thumbnailURL,
 		ThumbnailWidth:      150,
 		ThumbnailHeight:     150,
@@ -670,7 +670,7 @@ func buildInlineFavoriteCard(ctx context.Context, fav *botpkg.Favorite, qualityV
 		Title:               "⭐ " + title,
 		Description:         desc,
 		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
-		ReplyMarkup:         buildInlineSendKeyboard(fav.Platform, fav.TrackID, qualityValue, requesterID),
+		ReplyMarkup:         buildInlineSendKeyboard(ctx, fav.Platform, fav.TrackID, qualityValue, requesterID),
 	}
 }
 
@@ -968,7 +968,7 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 			Title:               fmt.Sprintf("%d. %s", displayIndex, title),
 			Description:         strings.TrimSpace(first.CreatorName),
 			InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "wait_for_down")},
-			ReplyMarkup:         buildInlineSendKeyboard(platformName, explicitTrackID, qualityValue, query.From.ID),
+			ReplyMarkup:         buildInlineSendKeyboard(ctx, platformName, explicitTrackID, qualityValue, query.From.ID),
 		})
 	}
 

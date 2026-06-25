@@ -744,27 +744,27 @@ func buildForwardQuery(trackURL, platformName, trackID string) string {
 	return trackID
 }
 
-func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.InlineKeyboardMarkup {
+func buildForwardKeyboard(ctx context.Context, trackURL, platformName, trackID string) *telego.InlineKeyboardMarkup {
 	query := buildForwardQuery(trackURL, platformName, trackID)
 	if query == "" {
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{
-		{{Text: sendMeTo, SwitchInlineQuery: &query}},
+		{{Text: tr(ctx, "send_me_to"), SwitchInlineQuery: &query}},
 	}}
 }
 
-func buildInlineSendKeyboard(platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
+func buildInlineSendKeyboard(ctx context.Context, platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
 	callbackData := buildInlineSendCallbackData(platformName, trackID, qualityValue, requesterID)
 	if callbackData == "" {
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: inlineTapToSend, CallbackData: callbackData},
+		{Text: tr(ctx, "inline_tap_to_send"), CallbackData: callbackData},
 	}}}
 }
 
-func buildInlineCollectionOpenKeyboard(token string, requesterID int64) *telego.InlineKeyboardMarkup {
+func buildInlineCollectionOpenKeyboard(ctx context.Context, token string, requesterID int64) *telego.InlineKeyboardMarkup {
 	token = strings.TrimSpace(token)
 	if token == "" || requesterID == 0 || !isInlineStartToken(token) {
 		return nil
@@ -774,11 +774,11 @@ func buildInlineCollectionOpenKeyboard(token string, requesterID int64) *telego.
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: "如果没反应点此刷新", CallbackData: callbackData},
+		{Text: tr(ctx, "inline_tap_to_send"), CallbackData: callbackData},
 	}}}
 }
 
-func buildInlineRandomSendKeyboard(requesterID int64) *telego.InlineKeyboardMarkup {
+func buildInlineRandomSendKeyboard(ctx context.Context, requesterID int64) *telego.InlineKeyboardMarkup {
 	if requesterID == 0 {
 		return nil
 	}
@@ -787,7 +787,7 @@ func buildInlineRandomSendKeyboard(requesterID int64) *telego.InlineKeyboardMark
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: inlineTapToSend, CallbackData: callbackData},
+		{Text: tr(ctx, "inline_tap_to_send"), CallbackData: callbackData},
 	}}}
 }
 
