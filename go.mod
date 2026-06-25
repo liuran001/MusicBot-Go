@@ -3,7 +3,9 @@ module github.com/liuran001/MusicBot-Go
 go 1.26.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/Eyevinn/mp4ff v0.48.0
+	github.com/devgianlu/go-librespot v0.7.4
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-flac/go-flac v1.0.0
 	github.com/guohuiyuan/music-lib v1.0.6-0.20260308165809-ea321c84b16a
@@ -11,22 +13,27 @@ require (
 	github.com/iyear/gowidevine v0.1.3
 	github.com/mymmrac/telego v1.10.0
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
+	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/traefik/yaegi v0.16.1
 	go.senan.xyz/taglib v0.11.1
+	golang.org/x/oauth2 v0.34.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
-	google.golang.org/protobuf v1.36.2
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/ini.v1 v1.67.1
 	gorm.io/gorm v1.31.1
 )
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
-	github.com/nicksnyder/go-i18n/v2 v2.6.1 // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/devgianlu/shannon v0.0.0-20230613115856-82ec90b7fa7e // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
 )
 
 require (
@@ -69,7 +76,7 @@ require (
 	golang.org/x/arch v0.23.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/text v0.34.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.67.7 // indirect

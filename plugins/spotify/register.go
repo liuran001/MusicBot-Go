@@ -2,11 +2,15 @@ package spotify
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/config"
+	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	platformplugins "github.com/liuran001/MusicBot-Go/bot/platform/plugins"
+	"github.com/liuran001/MusicBot-Go/plugins/spotify/native"
 	"github.com/liuran001/MusicBot-Go/plugins/youtubemusic"
 )
 
@@ -49,5 +53,31 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 	}
 	resolver := youtubemusic.NewPlatform(ytClient)
 
-	return &platformplugins.Contribution{Platform: NewPlatform(client, resolver)}, nil
+	plat := NewPlatform(client, resolver)
+
+	// Build the native (real Spotify audio) source. It is proxy-aware and
+	// persists its reusable login credentials to a state file so the one-time
+	// OAuth login survives restarts. When the operator has not logged in yet the
+	// source reports unavailable and downloads transparently use the YTM
+	// delegate, so the plugin still works out of the box.
+	nativeHTTP, err := httpproxy.NewHTTPClient(cfg.ResolveAPIProxyConfig(platformName), timeout)
+	if err != nil {
+		return nil, err
+	}
+	statePath := strings.TrimSpace(cfg.GetPluginString(platformName, "credentials_path"))
+	if statePath == "" {
+		cacheDir := strings.TrimSpace(cfg.GetString("CacheDir"))
+		if cacheDir == "" {
+			cacheDir = "./cache"
+		}
+		statePath = filepath.Join(cacheDir, "spotify-credentials.json")
+	}
+	nativeClient := native.NewClient(native.ClientOptions{
+		StatePath:  statePath,
+		Logger:     logger,
+		HTTPClient: nativeHTTP,
+	})
+	plat.WithNativeSource(newNativeSource(nativeClient))
+
+	return &platformplugins.Contribution{Platform: plat}, nil
 }

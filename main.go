@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"github.com/liuran001/MusicBot-Go/bot/app"
+	"github.com/liuran001/MusicBot-Go/bot/config"
+	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	_ "github.com/liuran001/MusicBot-Go/plugins/all"
+	"github.com/liuran001/MusicBot-Go/plugins/spotify"
 )
 
 // configTemplate is the example config compiled into the binary. When the
@@ -53,6 +56,8 @@ func ensureConfig(path string) (created bool, err error) {
 
 func main() {
 	configPath := flag.String("c", "config.ini", "配置文件")
+	spotifyLogin := flag.Bool("spotify-login", false, "运行一次性 Spotify 授权登录（获取原生音频下载所需的长期凭据），完成后退出")
+	spotifyLoginPort := flag.Int("spotify-login-port", 0, "Spotify 授权回调监听端口（0 为随机，远程服务器可固定后做端口转发）")
 	flag.Parse()
 
 	if created, err := ensureConfig(*configPath); err != nil {
@@ -65,6 +70,14 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if *spotifyLogin {
+		if err := runSpotifyLogin(ctx, *configPath, *spotifyLoginPort); err != nil {
+			fmt.Fprintf(os.Stderr, "Spotify 登录失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	buildInfo := app.BuildInfo{
 		RuntimeVer: runtime.Version(),
@@ -103,4 +116,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Shutdown error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runSpotifyLogin performs the one-time interactive Spotify OAuth login and
+// persists the long-lived credentials needed for native (real) Spotify audio
+// downloads. It loads config + logger directly (without starting the full bot)
+// so the operator can run it once on a machine with a browser.
+func runSpotifyLogin(ctx context.Context, configPath string, callbackPort int) error {
+	conf, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed loading config: %w", err)
+	}
+	logger, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), false)
+	if err != nil {
+		logger, _ = logpkg.New("info", "text", false)
+	}
+	return spotify.RunLogin(ctx, conf, logger, callbackPort, nil)
 }

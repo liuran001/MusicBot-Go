@@ -18,10 +18,10 @@ type spotifyImage struct {
 }
 
 type spotifyArtist struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
 	ExternalURLs map[string]string `json:"external_urls"`
-	Images     []spotifyImage    `json:"images"`
+	Images       []spotifyImage    `json:"images"`
 }
 
 type spotifyAlbum struct {

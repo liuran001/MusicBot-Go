@@ -7,13 +7,19 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
-// SpotifyPlatform implements platform.Platform. Spotify is a METADATA + SEARCH
-// source; audio is delegated to an audioResolver (YouTube Music) because the
-// Spotify API does not serve full audio. When no resolver is configured,
-// downloads degrade to ErrUnavailable while search/metadata keep working.
+// SpotifyPlatform implements platform.Platform. Metadata + search always come
+// from the Spotify Web API. Audio is resolved in two tiers:
+//
+//  1. native — real Spotify audio (decrypted Ogg Vorbis) via the embedded
+//     librespot path, when the operator has completed the one-time login.
+//  2. resolver — a YouTube Music delegate used as a fallback when native is
+//     unavailable, not authenticated, or the track is DRM/region-blocked.
+//
+// Either tier may be nil. SupportsDownload is true when at least one is wired.
 type SpotifyPlatform struct {
 	client   *Client
 	resolver audioResolver
+	native   directAudioSource
 }
 
 // NewPlatform builds a Spotify platform. resolver may be nil (downloads then
@@ -22,13 +28,25 @@ func NewPlatform(client *Client, resolver audioResolver) *SpotifyPlatform {
 	return &SpotifyPlatform{client: client, resolver: resolver}
 }
 
+// WithNativeSource attaches the native (real Spotify audio) source. Returns the
+// platform for chaining. A nil source leaves the platform delegate-only.
+func (p *SpotifyPlatform) WithNativeSource(src directAudioSource) *SpotifyPlatform {
+	if p != nil {
+		p.native = src
+	}
+	return p
+}
+
 func (p *SpotifyPlatform) Name() string { return platformName }
 
-// SupportsDownload reports true only when an audio resolver is wired, so the
-// router/UI won't offer downloads that can't be fulfilled.
-func (p *SpotifyPlatform) SupportsDownload() bool { return p != nil && p.resolver != nil }
-func (p *SpotifyPlatform) SupportsSearch() bool   { return true }
-func (p *SpotifyPlatform) SupportsLyrics() bool   { return false }
+// SupportsDownload reports true when either a native source or an audio
+// resolver is wired, so the router/UI won't offer downloads that can't be
+// fulfilled.
+func (p *SpotifyPlatform) SupportsDownload() bool {
+	return p != nil && (p.native != nil || p.resolver != nil)
+}
+func (p *SpotifyPlatform) SupportsSearch() bool      { return true }
+func (p *SpotifyPlatform) SupportsLyrics() bool      { return false }
 func (p *SpotifyPlatform) SupportsRecognition() bool { return false }
 
 func (p *SpotifyPlatform) Capabilities() platform.Capabilities {
@@ -44,16 +62,37 @@ func (p *SpotifyPlatform) Capabilities() platform.Capabilities {
 // Metadata exposes display/alias info (optional MetadataProvider interface).
 func (p *SpotifyPlatform) Metadata() platform.Meta { return metadata() }
 
-// GetDownloadInfo resolves audio by matching this Spotify track to a YouTube
-// Music recording (ISRC first, then title+artist+duration) and returning that
-// platform's stream info.
+// GetDownloadInfo resolves audio in two tiers:
+//
+//  1. native — real Spotify audio (decrypted Ogg Vorbis) when the native
+//     source is wired and authenticated. This is the authentic Spotify stream.
+//  2. resolver — a YouTube Music delegate, matched by ISRC then
+//     title+artist+duration, used when native is unavailable for this track
+//     (not authenticated, DRM/region-blocked, or no Ogg Vorbis tier).
+//
+// The native tier is tried first; any native failure transparently falls back
+// to the resolver so a download never just dies when an alternative exists.
 func (p *SpotifyPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	if p == nil || p.client == nil {
 		return nil, platform.NewUnavailableError(platformName, "track", trackID)
 	}
-	if p.resolver == nil {
+	if p.native == nil && p.resolver == nil {
 		return nil, platform.NewUnavailableError(platformName, "download", trackID)
 	}
+
+	// Tier 1: native Spotify audio.
+	if p.native != nil {
+		info, err := p.native.BuildDownloadInfo(ctx, trackID, quality)
+		if err == nil {
+			return info, nil
+		}
+		// Native failed; fall through to the resolver if one is available.
+		if p.resolver == nil {
+			return nil, err
+		}
+	}
+
+	// Tier 2: YouTube Music delegate.
 	track, err := p.client.GetTrack(ctx, trackID)
 	if err != nil {
 		return nil, err
