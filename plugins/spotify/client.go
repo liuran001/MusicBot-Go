@@ -241,6 +241,48 @@ func (c *Client) GetAlbum(ctx context.Context, albumID string) (*platform.Album,
 	return &album, nil
 }
 
+// GetAlbumAsPlaylist fetches an album and returns it as a Playlist with its
+// track list populated. Used when an album link is browsed through the
+// collection (playlist) UI, where platform.Album (which has no Tracks field)
+// would otherwise lose the track list.
+func (c *Client) GetAlbumAsPlaylist(ctx context.Context, albumID string) (*platform.Playlist, error) {
+	q := url.Values{}
+	q.Set("market", c.market)
+	var a spotifyAlbum
+	if err := c.apiGet(ctx, "/albums/"+url.PathEscape(albumID), q, &a); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(a.ID) == "" {
+		return nil, platform.ErrNotFound
+	}
+	creator := ""
+	if len(a.Artists) > 0 {
+		creator = a.Artists[0].Name
+	}
+	pl := &platform.Playlist{
+		ID:         "album:" + a.ID,
+		Platform:   platformName,
+		Title:      a.Name,
+		CoverURL:   firstImage(a.Images),
+		Creator:    creator,
+		TrackCount: a.TotalTracks,
+		URL:        a.ExternalURLs["spotify"],
+	}
+	cover := firstImage(a.Images)
+	for _, t := range a.Tracks.Items {
+		if strings.TrimSpace(t.ID) == "" {
+			continue
+		}
+		track := convertTrack(t)
+		// Album-tracks endpoint omits per-track album art; backfill from the album.
+		if track.CoverURL == "" {
+			track.CoverURL = cover
+		}
+		pl.Tracks = append(pl.Tracks, track)
+	}
+	return pl, nil
+}
+
 // GetPlaylist fetches playlist metadata and its tracks.
 func (c *Client) GetPlaylist(ctx context.Context, playlistID string) (*platform.Playlist, error) {
 	q := url.Values{}

@@ -39,9 +39,9 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return nil, err
 	}
 
-	// Build a YouTube Music delegate for audio. It shares Spotify's plugin
-	// section's proxy override is independent; the delegate reads its own
-	// ytmusic cookie/timeout if present, else sensible defaults.
+	// Build a YouTube Music delegate for audio. It reads the youtubemusic
+	// plugin section's own cookie / API-proxy config (independent of Spotify's),
+	// so the delegate behaves like the standalone youtubemusic plugin.
 	ytCookie := cfg.GetPluginString("youtubemusic", "cookie")
 	ytClient := youtubemusic.NewClient(ytCookie, timeout, logger)
 	if err := ytClient.SetAPIProxy(cfg.ResolveAPIProxyConfig("youtubemusic")); err != nil {

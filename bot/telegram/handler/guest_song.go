@@ -57,7 +57,7 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 }
 
 func (h *GuestModeHandler) answerAndRunGuestTrack(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID string, userID int64, userName, platformName, trackID, qualityOverride string) {
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, waitForDown)
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "wait_for_down"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -139,7 +139,7 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 }
 
 func (h *GuestModeHandler) answerAndRenderGuestSearch(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID, keyword, requestedPlatform, qualityOverride string) {
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, searching)
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "searching"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -225,7 +225,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 			state.setUnavailable(platformName, true)
 		}
 		token := h.guestSearchStore().store(state)
-		text := noResults
+		text := tr(ctx, "no_results")
 		if state.platform != "" {
 			text = tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(h.PlatformManager, state.platform)})
 		}

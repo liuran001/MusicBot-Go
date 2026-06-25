@@ -105,33 +105,9 @@ func (p *SpotifyPlatform) GetPlaylist(ctx context.Context, playlistID string) (*
 	}
 	kind, id := decodeCollectionID(playlistID)
 	if kind == "album" {
-		album, err := p.client.GetAlbum(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		return albumAsPlaylist(album), nil
+		return p.client.GetAlbumAsPlaylist(ctx, id)
 	}
 	return p.client.GetPlaylist(ctx, id)
-}
-
-// albumAsPlaylist adapts an Album into a Playlist view for the collection UI.
-func albumAsPlaylist(album *platform.Album) *platform.Playlist {
-	if album == nil {
-		return nil
-	}
-	creator := ""
-	if len(album.Artists) > 0 {
-		creator = album.Artists[0].Name
-	}
-	return &platform.Playlist{
-		ID:         "album:" + album.ID,
-		Platform:   platformName,
-		Title:      album.Title,
-		CoverURL:   album.CoverURL,
-		Creator:    creator,
-		TrackCount: album.TrackCount,
-		URL:        album.URL,
-	}
 }
 
 // --- optional matcher interfaces ---

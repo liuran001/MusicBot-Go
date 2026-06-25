@@ -223,7 +223,7 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, requesterID) {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
-				Text:            callbackDenied,
+				Text:            tr(ctx, "callback_denied"),
 				ShowAlert:       true,
 			})
 			return

@@ -145,12 +145,12 @@ func TestFormatLyricsError(t *testing.T) {
 		{
 			name:    "other error",
 			err:     errors.New("random error"),
-			wantStr: getLrcFailed,
+			wantStr: "未找到歌词，可能是纯音乐或平台暂不支持",
 		},
 		{
 			name:    "nil error",
 			err:     nil,
-			wantStr: getLrcFailed,
+			wantStr: "未找到歌词，可能是纯音乐或平台暂不支持",
 		},
 	}
 

@@ -1,6 +1,7 @@
 package youtubemusic
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -114,21 +115,42 @@ func trackFromListItem(item map[string]any) (platform.Track, bool) {
 	}, true
 }
 
-// findVideoID recursively searches a node for the first "videoId" string.
+// findVideoID extracts the track's video ID from a search list item. It prefers
+// the canonical playlistItemData.videoId location, then falls back to a
+// DETERMINISTIC recursive search (Go randomizes map iteration, so a naive walk
+// could return different IDs across runs for an item that nests several).
 func findVideoID(node any) string {
+	if m := asMap(node); m != nil {
+		if pid := asMap(m["playlistItemData"]); pid != nil {
+			if id, ok := pid["videoId"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+	return findVideoIDDeep(node)
+}
+
+// findVideoIDDeep is the deterministic recursive fallback: it checks a direct
+// "videoId" key, then descends into child maps in sorted key order.
+func findVideoIDDeep(node any) string {
 	switch n := node.(type) {
 	case map[string]any:
 		if id, ok := n["videoId"].(string); ok && id != "" {
 			return id
 		}
-		for _, v := range n {
-			if id := findVideoID(v); id != "" {
+		keys := make([]string, 0, len(n))
+		for k := range n {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if id := findVideoIDDeep(n[k]); id != "" {
 				return id
 			}
 		}
 	case []any:
 		for _, v := range n {
-			if id := findVideoID(v); id != "" {
+			if id := findVideoIDDeep(v); id != "" {
 				return id
 			}
 		}

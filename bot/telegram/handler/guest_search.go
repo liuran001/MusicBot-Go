@@ -139,7 +139,7 @@ func (h *GuestModeHandler) guestSearchLimit(platformName string) int {
 
 func (h *GuestModeHandler) renderGuestSearchPage(ctx context.Context, state *searchState, token string, page int) (string, *telego.InlineKeyboardMarkup) {
 	if h == nil || state == nil {
-		return noResults, nil
+		return tr(ctx, "no_results"), nil
 	}
 	tracks, _ := state.getTracks(state.platform)
 	if page < 1 {
@@ -349,7 +349,7 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 		return
 	}
 	if query.From.ID != requesterID {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_denied"), ShowAlert: true})
 		return
 	}
 
@@ -453,7 +453,7 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 				text := tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(h.Guest.PlatformManager, state.platform)})
 				_, keyboard := h.Guest.renderGuestSearchPage(ctx, state, token, 1)
 				_ = h.Guest.editGuestInlineText(ctx, b, query.InlineMessageID, text, keyboard, "")
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: noResults})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "no_results")})
 				return
 			}
 			state.setTracks(state.platform, tracks)
