@@ -1,0 +1,28 @@
+# English catalog shard — lyric handlers (lyr_ domain).
+# en = faithful English. PLAIN text; MarkdownV2 escaping happens at the output
+# boundary.
+
+# --- lyric fetch errors ---
+lyr_err_track_or_lyric_not_found = "Song or lyrics not found"
+lyr_err_lyric_unavailable = "Lyrics are unavailable for this song"
+lyr_no_lyric_info = "No lyrics available"
+lyr_lyric_truncated = "...(lyrics too long, truncated)"
+
+# --- document caption ---
+lyr_caption_format = "Current lyric format: {{.Format}}"
+lyr_caption_includes = " · incl. {{.Items}}"
+
+# --- side-track names (buttons + caption) ---
+lyr_trans = "Translation"
+lyr_roma = "Romaji"
+
+# --- format-switch keyboard ---
+lyr_change_format = "🎼 Change lyric format"
+lyr_toggle_trans_on = "Translation: On"
+lyr_toggle_trans_off = "Translation: Off"
+lyr_toggle_roma_on = "Romaji: On"
+lyr_toggle_roma_off = "Romaji: Off"
+lyr_save_default = "💾 Save as default lyric format"
+
+# --- default lyric file/display name ---
+lyr_default_name = "Lyrics"

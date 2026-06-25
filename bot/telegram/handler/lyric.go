@@ -45,7 +45,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	if args == "" && message.ReplyToMessage == nil {
 		params := &telego.SendMessageParams{
 			ChatID:          telego.ChatID{ID: message.Chat.ID},
-			Text:            inputLyricContent,
+			Text:            tr(ctx, "input_lyric_content"),
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {
@@ -71,7 +71,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 
 	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
-		Text:            fetchingLyric,
+		Text:            tr(ctx, "fetching_lyric"),
 		ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 	}
 	var msgResult *telego.Message
@@ -86,7 +86,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	}
 
 	if h.PlatformManager == nil {
-		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: getLrcFailed}
+		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: tr(ctx, "get_lrc_failed")}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
@@ -114,7 +114,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		platformName, trackID, found = h.searchFirstTrackForLyric(ctx, message, args)
 	}
 	if !found {
-		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: noResults}
+		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: tr(ctx, "no_results")}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
@@ -125,7 +125,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: getLrcFailed}
+		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: tr(ctx, "get_lrc_failed")}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
@@ -135,7 +135,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	}
 
 	if !plat.SupportsLyrics() {
-		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: "此平台不支持获取歌词"}
+		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: tr(ctx, "guest_platform_no_lyrics")}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
@@ -146,7 +146,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 
 	lyrics, err := plat.GetLyrics(ctx, trackID)
 	if err != nil {
-		errText := h.formatLyricsError(err)
+		errText := h.formatLyricsError(ctx, err)
 		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: errText}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
@@ -316,22 +316,22 @@ func isKnownLyricFormat(token string) bool {
 	return lyricFormatAliases[strings.ToLower(strings.TrimSpace(token))]
 }
 
-func (h *LyricHandler) formatLyricsError(err error) string {
+func (h *LyricHandler) formatLyricsError(ctx context.Context, err error) string {
 	if err == nil {
-		return getLrcFailed
+		return tr(ctx, "get_lrc_failed")
 	}
 
 	if errors.Is(err, platform.ErrNotFound) {
-		return "未找到歌曲或歌词"
+		return tr(ctx, "lyr_err_track_or_lyric_not_found")
 	}
 	if errors.Is(err, platform.ErrUnavailable) {
-		return "此歌曲无法获取歌词"
+		return tr(ctx, "lyr_err_lyric_unavailable")
 	}
 	if errors.Is(err, platform.ErrUnsupported) {
-		return "此平台不支持获取歌词"
+		return tr(ctx, "guest_platform_no_lyrics")
 	}
 
-	return getLrcFailed
+	return tr(ctx, "get_lrc_failed")
 }
 
 // SendTrackLyrics fetches and sends a track's lyrics as a document to chatID,
@@ -345,12 +345,12 @@ func (h *LyricHandler) SendTrackLyrics(ctx context.Context, b *telego.Bot, chatI
 	}
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil || !plat.SupportsLyrics() {
-		sendText(ctx, b, chatID, replyToMessageID, "此平台不支持获取歌词")
+		sendText(ctx, b, chatID, replyToMessageID, tr(ctx, "guest_platform_no_lyrics"))
 		return
 	}
 	lyrics, err := plat.GetLyrics(ctx, trackID)
 	if err != nil || lyrics == nil {
-		sendText(ctx, b, chatID, replyToMessageID, getLrcFailed)
+		sendText(ctx, b, chatID, replyToMessageID, tr(ctx, "get_lrc_failed"))
 		return
 	}
 	baseName := h.buildLyricBaseName(ctx, plat, trackID)
@@ -451,7 +451,7 @@ type lyricRenderedDoc struct {
 // renderLyricDocument converts the lyrics per the render state and writes a temp
 // file, returning everything needed to send or edit the document message. The
 // caller owns filePath and must os.Remove it. ok is false if writing failed.
-func (h *LyricHandler) renderLyricDocument(lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) (lyricRenderedDoc, bool) {
+func (h *LyricHandler) renderLyricDocument(ctx context.Context, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) (lyricRenderedDoc, bool) {
 	payload := lyricPayloadFrom(lyrics, platformName)
 	resolved := lyricpkg.NormalizeFormat(state.format)
 
@@ -469,7 +469,7 @@ func (h *LyricHandler) renderLyricDocument(lyrics *platform.Lyrics, baseName, pl
 		content = lyricpkg.Convert(payload, "lrc", opts)
 	}
 	if strings.TrimSpace(content) == "" {
-		content = "暂无歌词信息\n"
+		content = tr(ctx, "lyr_no_lyric_info") + "\n"
 	}
 
 	fileName := buildLyricFileNameForFormat(baseName, resolved)
@@ -481,8 +481,8 @@ func (h *LyricHandler) renderLyricDocument(lyrics *platform.Lyrics, baseName, pl
 	return lyricRenderedDoc{
 		filePath: filePath,
 		fileName: fileName,
-		caption:  buildLyricCaption(payload, content, state),
-		keyboard: buildLyricFormatKeyboard(platformName, trackID, state, requesterID),
+		caption:  buildLyricCaption(ctx, payload, content, state),
+		keyboard: buildLyricFormatKeyboard(ctx, platformName, trackID, state, requesterID),
 	}, true
 }
 
@@ -490,7 +490,7 @@ func (h *LyricHandler) renderLyricDocument(lyrics *platform.Lyrics, baseName, pl
 // file with a caption showing the current format/toggles, and attaches the
 // format + translation/roma toggle keyboard.
 func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
-	doc, ok := h.renderLyricDocument(lyrics, baseName, platformName, trackID, state, requesterID)
+	doc, ok := h.renderLyricDocument(ctx, lyrics, baseName, platformName, trackID, state, requesterID)
 	if !ok {
 		h.sendLyricFallbackError(ctx, b, chatID, replyToMessageID)
 		return
@@ -541,7 +541,7 @@ func (h *LyricHandler) sendLyricDocumentState(ctx context.Context, b *telego.Bot
 // "message is not modified", it deletes the old document and sends a fresh one
 // so the user always ends up seeing the requested format.
 func (h *LyricHandler) editLyricDocumentState(ctx context.Context, b *telego.Bot, chatID int64, messageID, fallbackReplyToID int, lyrics *platform.Lyrics, baseName, platformName, trackID string, state lyricRenderState, requesterID int64) {
-	doc, ok := h.renderLyricDocument(lyrics, baseName, platformName, trackID, state, requesterID)
+	doc, ok := h.renderLyricDocument(ctx, lyrics, baseName, platformName, trackID, state, requesterID)
 	if !ok {
 		h.sendLyricFallbackError(ctx, b, chatID, fallbackReplyToID)
 		return
@@ -601,7 +601,7 @@ func (h *LyricHandler) uploadLyricDocumentForInline(ctx context.Context, b *tele
 	if h.InlineUploadChatID == 0 {
 		return "", "", nil, false
 	}
-	doc, rendered := h.renderLyricDocument(lyrics, baseName, platformName, trackID, state, requesterID)
+	doc, rendered := h.renderLyricDocument(ctx, lyrics, baseName, platformName, trackID, state, requesterID)
 	if !rendered {
 		return "", "", nil, false
 	}
@@ -694,11 +694,11 @@ func (h *LyricHandler) editInlineLyricPlainText(ctx context.Context, b *telego.B
 		content = strings.TrimSpace(lyrics.Plain)
 	}
 	if content == "" {
-		content = "暂无歌词信息"
+		content = tr(ctx, "lyr_no_lyric_info")
 	}
 	if len([]rune(content)) > 3800 {
 		r := []rune(content)
-		content = string(r[:3800]) + "\n...(歌词过长已截断)"
+		content = string(r[:3800]) + "\n" + tr(ctx, "lyr_lyric_truncated")
 	}
 	h.editInlineLyricError(ctx, b, inlineMessageID, content)
 }
@@ -734,7 +734,7 @@ func lyricFormatDefaultTranslation(format string) bool {
 func (h *LyricHandler) sendLyricFallbackError(ctx context.Context, b *telego.Bot, chatID int64, replyToMessageID int) {
 	sendFallback := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: chatID},
-		Text:            getLrcFailed,
+		Text:            tr(ctx, "get_lrc_failed"),
 		ReplyParameters: &telego.ReplyParameters{MessageID: replyToMessageID},
 	}
 	if h.RateLimiter != nil {
@@ -788,12 +788,12 @@ func buildLRCFromTimestamped(lines []platform.LyricLine) string {
 // line naming the current format and active translation/roma toggles. For
 // structured/markup formats the raw output is unreadable, so it previews the
 // plain-text lyric instead.
-func buildLyricCaption(payload lyricpkg.Payload, content string, state lyricRenderState) string {
+func buildLyricCaption(ctx context.Context, payload lyricpkg.Payload, content string, state lyricRenderState) string {
 	format := lyricpkg.NormalizeFormat(state.format)
 	preview := strings.TrimSpace(lyricPreviewText(payload, content, format))
 	label := lyricFormatDisplayNameForPayload(format, payload)
-	header := fmt.Sprintf("当前歌词格式: %s", html.EscapeString(label))
-	if extras := lyricCaptionToggleSuffix(payload, format, state); extras != "" {
+	header := tr(ctx, "lyr_caption_format", map[string]any{"Format": html.EscapeString(label)})
+	if extras := lyricCaptionToggleSuffix(ctx, payload, format, state); extras != "" {
 		header += extras
 	}
 	if preview == "" {
@@ -832,21 +832,21 @@ func lyricFormatDisplayNameForPayload(format string, payload lyricpkg.Payload) s
 // side-tracks, only for formats that support them and when the track actually
 // has that content. A toggle being on but the song lacking the data adds
 // nothing — the caption never claims content that isn't in the file.
-func lyricCaptionToggleSuffix(payload lyricpkg.Payload, format string, state lyricRenderState) string {
+func lyricCaptionToggleSuffix(ctx context.Context, payload lyricpkg.Payload, format string, state lyricRenderState) string {
 	if !lyricFormatSupportsSideTracks(format) {
 		return ""
 	}
 	var parts []string
 	if state.includeTranslation && lyricPayloadHasTranslation(payload) {
-		parts = append(parts, "翻译")
+		parts = append(parts, tr(ctx, "lyr_trans"))
 	}
 	if state.includeRoma && lyricPayloadHasRoma(payload) {
-		parts = append(parts, "罗马音")
+		parts = append(parts, tr(ctx, "lyr_roma"))
 	}
 	if len(parts) == 0 {
 		return ""
 	}
-	return " · 含" + strings.Join(parts, "/")
+	return tr(ctx, "lyr_caption_includes", map[string]any{"Items": strings.Join(parts, "/")})
 }
 
 // lyricPayloadHasTranslation reports whether the payload yields any actual
@@ -940,7 +940,7 @@ func lyricFileExt(fileName string) string {
 // buildLyricBaseName resolves the "artist - title" stem (without extension) for
 // the lyric file, falling back to "歌词".
 func (h *LyricHandler) buildLyricBaseName(ctx context.Context, plat platform.Platform, trackID string) string {
-	const defaultName = "歌词"
+	defaultName := tr(ctx, "lyr_default_name")
 	if plat == nil || strings.TrimSpace(trackID) == "" {
 		return defaultName
 	}
