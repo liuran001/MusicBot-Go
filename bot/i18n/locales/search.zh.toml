@@ -1,0 +1,22 @@
+# Search handler (srch_*) — 中文（原文）。
+# Values are the EXACT original strings replaced in code.
+
+# --- search result page (MarkdownV2) ---
+srch_results = "搜索结果"
+srch_pick_number_hint = "点击最下方数字选择对应歌曲"
+srch_keyword_label = "关键词: "
+srch_page_indicator = "第 {{.Page}}/{{.Total}} 页"
+srch_fallback_switched = "⚠️ 默认平台搜索失败，已切换到{{.Name}}\n\n"
+
+# --- search buttons / toasts ---
+srch_nav_prev = "⬅️ 上一页"
+srch_nav_next = "➡️ 下一页"
+srch_nav_home = "🏠 回到主页"
+srch_filter_on = "开"
+srch_filter_off = "关"
+srch_close = "❌ 关闭"
+srch_expired = "搜索结果已过期，请重新搜索"
+srch_processing = "处理中，请稍候"
+srch_search_failed_retry = "搜索失败，请稍后重试"
+srch_no_results_platform = "未找到结果（{{.Platform}}）"
+srch_page_toast = "已是第 {{.Page}} 页"

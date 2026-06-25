@@ -1,0 +1,21 @@
+# Search handler (srch_*) — English.
+
+# --- search result page (MarkdownV2) ---
+srch_results = "search results"
+srch_pick_number_hint = "Tap a number below to pick a track"
+srch_keyword_label = "Keyword: "
+srch_page_indicator = "Page {{.Page}}/{{.Total}}"
+srch_fallback_switched = "⚠️ Default platform search failed, switched to {{.Name}}\n\n"
+
+# --- search buttons / toasts ---
+srch_nav_prev = "⬅️ Previous"
+srch_nav_next = "➡️ Next"
+srch_nav_home = "🏠 Home"
+srch_filter_on = "On"
+srch_filter_off = "Off"
+srch_close = "❌ Close"
+srch_expired = "Search results expired, please search again"
+srch_processing = "Processing, please wait"
+srch_search_failed_retry = "Search failed, please try again later"
+srch_no_results_platform = "No results ({{.Platform}})"
+srch_page_toast = "Already on page {{.Page}}"
