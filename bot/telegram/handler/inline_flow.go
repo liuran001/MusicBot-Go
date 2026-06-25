@@ -184,7 +184,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			}
 		}
 		clearInlineReplyMarkup()
-		setInlineText(waitForDown, nil)
+		setInlineText(tr(ctx, "wait_for_down"), nil)
 		songInfo, err := music.prepareInlineSongWithTimeout(ctx, b, userID, userName, platformName, trackID, qualityOverride, progress)
 		if err != nil {
 			if music.Logger != nil {
