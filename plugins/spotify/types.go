@@ -1,9 +1,9 @@
 package spotify
 
-// Spotify Web API response types. We bind only the fields the bot needs. Audio
-// is NOT available from Spotify (the API serves metadata + 30s previews only),
-// so there is deliberately no streaming/format type here — downloads are
-// delegated to an audio-capable platform (YouTube Music) via ISRC/title match.
+// Spotify Web API response types. We bind only the fields the bot needs. The
+// Web API serves metadata + search only (no full audio); the actual audio is
+// fetched and decrypted via the embedded librespot path in the native/
+// subpackage, so there is deliberately no streaming/format type here.
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`

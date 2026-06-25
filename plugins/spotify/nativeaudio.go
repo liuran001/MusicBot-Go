@@ -19,8 +19,8 @@ type directAudioSource interface {
 	// Available reports whether native audio is usable (operator has logged in).
 	Available() bool
 	// BuildDownloadInfo resolves a Spotify track to a DownloadInfo whose
-	// Downloader streams decrypted Ogg Vorbis to disk. It returns a sentinel
-	// error the caller can treat as "fall back to the delegate".
+	// Downloader streams decrypted Ogg Vorbis to disk. It returns an error when
+	// native audio is unavailable (not logged in, DRM-locked, region-blocked).
 	BuildDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error)
 }
 
@@ -55,8 +55,8 @@ func qualityToBitrate(q platform.Quality) int {
 
 // BuildDownloadInfo resolves the track to a decrypted Ogg Vorbis stream and
 // wraps it in a DownloadInfo. The actual network fetch + decrypt happens lazily
-// inside the Downloader closure so a failure there (DRM, restriction) can still
-// fall back to the delegate at download time.
+// inside the Downloader closure, so a failure there (DRM, restriction) surfaces
+// as a download error rather than substituting another platform's audio.
 func (n *nativeSource) BuildDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	if !n.Available() {
 		return nil, native.ErrNotAuthenticated
