@@ -77,9 +77,9 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		return false
 	}
 	collectionType := detectCollectionType(playlistID, "")
-	fetchingText := fetchingPlaylist
+	fetchingText := tr(ctx, "fetching_playlist")
 	if collectionType == collectionTypeAlbum {
-		fetchingText = "正在获取专辑..."
+		fetchingText = tr(ctx, "pl_fetching_album")
 	}
 
 	threadID := message.MessageThreadID
@@ -101,12 +101,12 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		return true
 	}
 	if h.PlatformManager == nil {
-		h.editPlaylistMessage(ctx, b, msgResult, noResults, nil)
+		h.editPlaylistMessage(ctx, b, msgResult, tr(ctx, "no_results"), nil)
 		return true
 	}
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		h.editPlaylistMessage(ctx, b, msgResult, noResults, nil)
+		h.editPlaylistMessage(ctx, b, msgResult, tr(ctx, "no_results"), nil)
 		return true
 	}
 
@@ -117,15 +117,15 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		return true
 	}
 	if playlist == nil {
-		h.editPlaylistMessage(ctx, b, msgResult, noResults, nil)
+		h.editPlaylistMessage(ctx, b, msgResult, tr(ctx, "no_results"), nil)
 		return true
 	}
 	collectionType = detectCollectionType(playlistID, playlist.URL)
-	collectionLabel := collectionTypeLabel(collectionType)
+	collectionLabel := collectionTypeLabel(ctx, collectionType)
 	if len(playlist.Tracks) == 0 {
-		emptyText := playlistEmpty
+		emptyText := tr(ctx, "playlist_empty")
 		if collectionType == collectionTypeAlbum {
-			emptyText = "专辑为空"
+			emptyText = tr(ctx, "pl_album_empty")
 		}
 		h.editPlaylistMessage(ctx, b, msgResult, emptyText, nil)
 		return true
@@ -157,8 +157,8 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	platformEmoji := platformEmoji(h.PlatformManager, platformName)
 	displayName := platformDisplayName(h.PlatformManager, platformName)
 	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji, mdV2Replacer.Replace(displayName), collectionLabel)
-	textHeader += formatPlaylistInfo(playlist, collectionLabel)
-	pageText, keyboard := h.buildPlaylistPage(pageTracks, effectiveTotal, pageOffset, platformName, qualityValue, requesterID, msgResult.MessageID, 1)
+	textHeader += formatPlaylistInfo(ctx, playlist, collectionLabel)
+	pageText, keyboard := h.buildPlaylistPage(ctx, pageTracks, effectiveTotal, pageOffset, platformName, qualityValue, requesterID, msgResult.MessageID, 1)
 	combinedText := textHeader + pageText
 	h.editPlaylistMessage(ctx, b, msgResult, combinedText, keyboard)
 
@@ -233,7 +233,7 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	if !ok {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 			CallbackQueryID: query.ID,
-			Text:            "列表已过期，请重新发送链接",
+			Text:            tr(ctx, "pl_list_expired"),
 		})
 		return
 	}
@@ -244,12 +244,12 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	plGuardKey := fmt.Sprintf("playlist:%d:%d", msg.Chat.ID, msg.MessageID)
 	releasePlGuard, acquired := tryAcquireCallbackInFlight(plGuardKey, 8*time.Second)
 	if !acquired {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "pl_processing")})
 		return
 	}
 	defer releasePlGuard()
 	collectionType := detectCollectionType(state.collection, state.playlist.URL)
-	collectionLabel := collectionTypeLabel(collectionType)
+	collectionLabel := collectionTypeLabel(ctx, collectionType)
 	if action == "close" {
 		deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
 		if h.RateLimiter != nil {
@@ -267,7 +267,7 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		page = 1
 	}
 	if state.currentPage == page {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", page)})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "pl_already_on_page", map[string]any{"Page": page})})
 		return
 	}
 	totalTracks := state.totalTracks
@@ -285,17 +285,17 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	if state.lazy {
 		plat := h.Playlist.PlatformManager.Get(state.platform)
 		if plat == nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: collectionLabel + "加载失败"})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "pl_load_failed", map[string]any{"Label": collectionLabel})})
 			return
 		}
 		var err error
 		pageTracks, pageOffset, err = h.Playlist.getCachedPage(ctx, plat, state, page)
 		if err != nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: collectionLabel + "加载失败"})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "pl_load_failed", map[string]any{"Label": collectionLabel})})
 			return
 		}
 		if len(pageTracks) == 0 {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "未找到结果"})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "pl_no_results")})
 			return
 		}
 	} else {
@@ -304,8 +304,8 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 
 	manager := h.Playlist.PlatformManager
 	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)), collectionLabel)
-	textHeader += formatPlaylistInfo(&state.playlist, collectionLabel)
-	pageText, keyboard := h.Playlist.buildPlaylistPage(pageTracks, effectiveTotal, pageOffset, state.platform, state.quality, state.requesterID, messageID, page)
+	textHeader += formatPlaylistInfo(ctx, &state.playlist, collectionLabel)
+	pageText, keyboard := h.Playlist.buildPlaylistPage(ctx, pageTracks, effectiveTotal, pageOffset, state.platform, state.quality, state.requesterID, messageID, page)
 	text := textHeader + pageText
 	params := &telego.EditMessageTextParams{
 		ChatID:             telego.ChatID{ID: msg.Chat.ID},
@@ -328,9 +328,9 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 }
 
-func (h *PlaylistHandler) buildPlaylistPage(tracks []platform.Track, totalTracks, _ int, platformName, qualityValue string, requesterID int64, messageID int, page int) (string, *telego.InlineKeyboardMarkup) {
+func (h *PlaylistHandler) buildPlaylistPage(ctx context.Context, tracks []platform.Track, totalTracks, _ int, platformName, qualityValue string, requesterID int64, messageID int, page int) (string, *telego.InlineKeyboardMarkup) {
 	if len(tracks) == 0 {
-		return noResults, nil
+		return tr(ctx, "no_results"), nil
 	}
 	if totalTracks <= 0 {
 		totalTracks = len(tracks)
@@ -345,7 +345,7 @@ func (h *PlaylistHandler) buildPlaylistPage(tracks []platform.Track, totalTracks
 	}
 	var textMessage strings.Builder
 	if pageCount > 1 {
-		textMessage.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, pageCount))
+		textMessage.WriteString(tr(ctx, "pl_page_of", map[string]any{"Page": page, "Total": pageCount}) + "\n\n")
 	} else {
 		textMessage.WriteString("\n")
 	}
@@ -385,22 +385,22 @@ func (h *PlaylistHandler) buildPlaylistPage(tracks []platform.Track, totalTracks
 	if pageCount > 1 {
 		navRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page == 1 {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "关闭", CallbackData: fmt.Sprintf("playlist %d close %d", messageID, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page+1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_close"), CallbackData: fmt.Sprintf("playlist %d close %d", messageID, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_next_page"), CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
 		} else if page == pageCount {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page-1, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "回到首页", CallbackData: fmt.Sprintf("playlist %d home %d", messageID, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_prev_page"), CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page-1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_home"), CallbackData: fmt.Sprintf("playlist %d home %d", messageID, requesterID)})
 			rows = append(rows, navRow)
 		} else {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page-1, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page+1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_prev_page"), CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page-1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "pl_next_page"), CallbackData: fmt.Sprintf("playlist %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
-			homeRow := []telego.InlineKeyboardButton{{Text: "回到首页", CallbackData: fmt.Sprintf("playlist %d home %d", messageID, requesterID)}}
+			homeRow := []telego.InlineKeyboardButton{{Text: tr(ctx, "pl_home"), CallbackData: fmt.Sprintf("playlist %d home %d", messageID, requesterID)}}
 			rows = append(rows, homeRow)
 		}
 	} else if page == 1 {
-		rows = append(rows, []telego.InlineKeyboardButton{{Text: "关闭", CallbackData: fmt.Sprintf("playlist %d close %d", messageID, requesterID)}})
+		rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "pl_close"), CallbackData: fmt.Sprintf("playlist %d close %d", messageID, requesterID)}})
 	}
 	keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 	return textMessage.String(), keyboard
@@ -633,13 +633,13 @@ func (h *PlaylistHandler) refreshChunkAtOffset(ctx context.Context, plat platfor
 	return nil
 }
 
-func formatPlaylistInfo(playlist *platform.Playlist, collectionLabel string) string {
+func formatPlaylistInfo(ctx context.Context, playlist *platform.Playlist, collectionLabel string) string {
 	if playlist == nil {
 		return ""
 	}
 	collectionLabel = strings.TrimSpace(collectionLabel)
 	if collectionLabel == "" {
-		collectionLabel = collectionTypeLabel(collectionTypePlaylist)
+		collectionLabel = collectionTypeLabel(ctx, collectionTypePlaylist)
 	}
 	var builder strings.Builder
 	if title := strings.TrimSpace(playlist.Title); title != "" {
@@ -651,17 +651,17 @@ func formatPlaylistInfo(playlist *platform.Playlist, collectionLabel string) str
 		}
 	}
 	if creator := strings.TrimSpace(playlist.Creator); creator != "" {
-		builder.WriteString(fmt.Sprintf("创建者: %s\n", mdV2Replacer.Replace(creator)))
+		builder.WriteString(fmt.Sprintf("%s: %s\n", tr(ctx, "pl_creator"), mdV2Replacer.Replace(creator)))
 	}
 	trackCount := playlist.TrackCount
 	if trackCount <= 0 {
 		trackCount = len(playlist.Tracks)
 	}
 	if trackCount > 0 {
-		builder.WriteString(fmt.Sprintf("曲目数: %d\n", trackCount))
+		builder.WriteString(fmt.Sprintf("%s: %d\n", tr(ctx, "pl_track_count"), trackCount))
 	}
 	if desc := strings.TrimSpace(playlist.Description); desc != "" {
-		if quote := formatExpandableQuote(mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
+		if quote := formatExpandableQuote(ctx, mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
 			builder.WriteString(quote)
 			builder.WriteString("\n")
 		}
@@ -685,25 +685,32 @@ func detectCollectionType(rawID, collectionURL string) string {
 	return collectionTypePlaylist
 }
 
-func collectionTypeLabel(collectionType string) string {
+// collectionTypeFromID returns the language-neutral collection type CODE
+// (collectionTypeAlbum / collectionTypePlaylist) for a raw collection ID. Use it
+// for sentinel comparisons; use collectionTypeLabel for user-facing display text.
+func collectionTypeFromID(collectionID string) string {
+	return detectCollectionType(collectionID, "")
+}
+
+func collectionTypeLabel(ctx context.Context, collectionType string) string {
 	if strings.EqualFold(strings.TrimSpace(collectionType), collectionTypeAlbum) {
-		return "专辑"
+		return tr(ctx, "pl_collection_album")
 	}
-	return "歌单"
+	return tr(ctx, "pl_collection_playlist")
 }
 
-func collectionTypeLabelFromID(collectionID string) string {
-	return collectionTypeLabel(detectCollectionType(collectionID, ""))
+func collectionTypeLabelFromID(ctx context.Context, collectionID string) string {
+	return collectionTypeLabel(ctx, detectCollectionType(collectionID, ""))
 }
 
-func formatExpandableQuote(content string) string {
+func formatExpandableQuote(ctx context.Context, content string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return ""
 	}
 	lines := strings.Split(content, "\n")
 	quoted := make([]string, 0, len(lines)+1)
-	quoted = append(quoted, ">简介")
+	quoted = append(quoted, ">"+tr(ctx, "pl_description"))
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {

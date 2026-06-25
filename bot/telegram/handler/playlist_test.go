@@ -30,7 +30,7 @@ func TestDetectCollectionType(t *testing.T) {
 }
 
 func TestFormatExpandableQuote(t *testing.T) {
-	quote := formatExpandableQuote("第一行\n第二行")
+	quote := formatExpandableQuote(zhCtx(), "第一行\n第二行")
 	if !strings.HasPrefix(quote, ">简介\n") {
 		t.Fatalf("quote should start with intro line, got %q", quote)
 	}
@@ -40,7 +40,7 @@ func TestFormatExpandableQuote(t *testing.T) {
 }
 
 func TestFormatPlaylistInfoUsesCollectionLabelAndQuote(t *testing.T) {
-	info := formatPlaylistInfo(&platform.Playlist{
+	info := formatPlaylistInfo(zhCtx(), &platform.Playlist{
 		Title:       "测试专辑",
 		Description: "这是第一行\n这是第二行",
 		TrackCount:  12,

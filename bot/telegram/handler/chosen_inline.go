@@ -151,7 +151,7 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		return
 	}
 	loadingText := tr(ctx, "fetching_playlist")
-	if collectionTypeLabelFromID(collectionID) == "专辑" {
+	if collectionTypeFromID(collectionID) == collectionTypeAlbum {
 		loadingText = tr(ctx, "cb_fetching_album")
 	}
 	setInlineText := func(text string) {
@@ -184,7 +184,7 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		requesterID:     chosen.From.ID,
 		tracks:          playlist.Tracks,
 		totalTracks:     playlist.TrackCount,
-		collectionLabel: collectionTypeLabel(detectCollectionType(collectionID, playlist.URL)),
+		collectionLabel: collectionTypeLabel(ctx, detectCollectionType(collectionID, playlist.URL)),
 		title:           strings.TrimSpace(playlist.Title),
 		url:             strings.TrimSpace(playlist.URL),
 		creator:         strings.TrimSpace(playlist.Creator),
@@ -301,7 +301,7 @@ func (h *ChosenInlineMusicHandler) ensureInlineCollectionChunk(ctx context.Conte
 		state.description = desc
 	}
 	if strings.TrimSpace(state.collectionLabel) == "" {
-		state.collectionLabel = collectionTypeLabel(detectCollectionType(state.collectionID, playlist.URL))
+		state.collectionLabel = collectionTypeLabel(ctx, detectCollectionType(state.collectionID, playlist.URL))
 	}
 	state.cacheOffset = chunkOffset
 	state.updatedAt = time.Now()
@@ -437,7 +437,7 @@ func renderInlineCollectionInfo(ctx context.Context, state *inlineCollectionStat
 		bld.WriteString(tr(ctx, "cb_track_total", map[string]any{"Count": state.totalTracks}) + "\n")
 	}
 	if desc := strings.TrimSpace(state.description); desc != "" {
-		if quote := formatExpandableQuote(mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
+		if quote := formatExpandableQuote(ctx, mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
 			bld.WriteString(quote)
 			bld.WriteString("\n")
 		}

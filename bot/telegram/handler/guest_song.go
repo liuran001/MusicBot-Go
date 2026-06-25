@@ -114,7 +114,7 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 	}
 
 	collectionType := detectCollectionType(playlistID, playlist.URL)
-	collectionLabel := collectionTypeLabel(collectionType)
+	collectionLabel := collectionTypeLabel(ctx, collectionType)
 
 	state := &searchState{
 		keyword:          title,
