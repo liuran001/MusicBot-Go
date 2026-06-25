@@ -61,14 +61,14 @@ func buildHelpText(ctx context.Context, manager platform.Manager, isAdmin bool, 
 		"`/music " + tr(ctx, "help_example_music") + "`\n" +
 		"`/music https://music.163.com/song/1859603835`\n" +
 		"`/search " + tr(ctx, "help_example_search") + "`"
-	adminText := buildAdminHelp(adminCommands)
+	adminText := buildAdminHelp(ctx, adminCommands)
 	if isAdmin && adminText != "" {
 		text += "\n\n*🛠 " + esc("help_section_admin") + "*\n" + adminText
 	}
 	return text
 }
 
-func buildAdminHelp(adminCommands []admincmd.Command) string {
+func buildAdminHelp(ctx context.Context, adminCommands []admincmd.Command) string {
 	if len(adminCommands) == 0 {
 		return ""
 	}
@@ -88,7 +88,15 @@ func buildAdminHelp(adminCommands []admincmd.Command) string {
 	lines := make([]string, 0, len(items))
 	for _, cmd := range items {
 		name := mdV2Replacer.Replace(cmd.Name)
-		desc := mdV2Replacer.Replace(strings.TrimSpace(cmd.Description))
+		// Prefer a localized description keyed by command name; fall back to the
+		// command's own Description (which is already localized for commands built
+		// with a request context, e.g. reload/rmcache).
+		description := strings.TrimSpace(cmd.Description)
+		key := "help_admincmd_" + strings.TrimSpace(cmd.Name)
+		if localized := tr(ctx, key); localized != key {
+			description = localized
+		}
+		desc := mdV2Replacer.Replace(description)
 		if desc == "" {
 			lines = append(lines, "`/"+name+"`")
 			continue

@@ -149,3 +149,9 @@ about_no_plugins = "なし"
 # --- admin help command descriptions (music.go inline) ---
 help_admin_reload = "設定とプラグインを再読み込み"
 help_admin_rmcache = "キャッシュを削除（/rmcache <プラットフォーム>|all）"
+
+# --- admin command descriptions (rendered in /help via buildAdminHelp, keyed by command name) ---
+help_admincmd_login = "統合アカウントログイン（qr/cookie/sign/check/renew/auto/help）"
+help_admincmd_checkck = "プラグインの Cookie 有効性を確認"
+help_admincmd_renewck = "Cookie を手動更新（/renewck <platform>、空欄で全て）"
+help_admincmd_wl = "ホワイトリスト管理 (add/del/list)"

@@ -151,3 +151,9 @@ about_no_plugins = "无"
 # --- admin help command descriptions (music.go inline) ---
 help_admin_reload = "重载配置与插件"
 help_admin_rmcache = "清除缓存（/rmcache <平台>|all）"
+
+# --- admin command descriptions (rendered in /help via buildAdminHelp, keyed by command name) ---
+help_admincmd_login = "统一账号登录（qr/cookie/sign/check/renew/auto/help）"
+help_admincmd_checkck = "检查插件 Cookie 有效性"
+help_admincmd_renewck = "手动续期 Cookie（/renewck <platform>，留空续全部）"
+help_admincmd_wl = "白名单管理 (add/del/list)"

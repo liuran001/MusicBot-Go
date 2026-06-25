@@ -154,3 +154,9 @@ about_no_plugins = "None"
 # --- admin help command descriptions (music.go inline) ---
 help_admin_reload = "Reload config and plugins"
 help_admin_rmcache = "Clear cache (/rmcache <platform>|all)"
+
+# --- admin command descriptions (rendered in /help via buildAdminHelp, keyed by command name) ---
+help_admincmd_login = "Unified account login (qr/cookie/sign/check/renew/auto/help)"
+help_admincmd_checkck = "Check plugin cookie validity"
+help_admincmd_renewck = "Manually renew cookies (/renewck <platform>, empty = all)"
+help_admincmd_wl = "Whitelist management (add/del/list)"
