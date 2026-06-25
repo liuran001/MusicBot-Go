@@ -140,3 +140,7 @@ status_field_source = "ソース"
 help_default_platforms = "NetEase Cloud Music, QQ Music"
 
 about_no_plugins = "なし"
+
+# --- admin help command descriptions (music.go inline) ---
+help_admin_reload = "設定とプラグインを再読み込み"
+help_admin_rmcache = "キャッシュを削除（/rmcache <プラットフォーム>|all）"

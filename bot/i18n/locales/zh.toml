@@ -142,3 +142,7 @@ status_field_source = "来源"
 help_default_platforms = "网易云音乐, QQ音乐"
 
 about_no_plugins = "无"
+
+# --- admin help command descriptions (music.go inline) ---
+help_admin_reload = "重载配置与插件"
+help_admin_rmcache = "清除缓存（/rmcache <平台>|all）"
