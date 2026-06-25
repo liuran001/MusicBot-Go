@@ -30,7 +30,7 @@ func (h *RmCacheHandler) Handle(ctx context.Context, b *telego.Bot, update *tele
 	if args == "" {
 		params := &telego.SendMessageParams{
 			ChatID:          telego.ChatID{ID: message.Chat.ID},
-			Text:            inputIDorKeyword,
+			Text:            tr(ctx, "input_id_or_keyword"),
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {

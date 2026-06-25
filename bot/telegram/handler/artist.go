@@ -52,12 +52,12 @@ func (h *ArtistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *te
 		return false
 	}
 	if h.PlatformManager == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, noResults)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
 		return true
 	}
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, noResults)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
 		return true
 	}
 
@@ -67,7 +67,7 @@ func (h *ArtistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *te
 		return true
 	}
 	if artist == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, noResults)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
 		return true
 	}
 
@@ -104,7 +104,7 @@ func (h *ArtistHandler) fetchArtist(ctx context.Context, plat platform.Platform,
 
 func formatArtistMessage(ctx context.Context, manager platform.Manager, platformName string, artist *platform.Artist, trackCount int) string {
 	if artist == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	name := strings.TrimSpace(artist.Name)
 	if name == "" {
@@ -129,7 +129,7 @@ func formatArtistMessage(ctx context.Context, manager platform.Manager, platform
 
 func userVisibleArtistError(ctx context.Context, err error) string {
 	if err == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	if errors.Is(err, platform.ErrNotFound) {
 		return tr(ctx, "guest_artist_not_found")
@@ -140,5 +140,5 @@ func userVisibleArtistError(ctx context.Context, err error) string {
 	if errors.Is(err, platform.ErrUnavailable) {
 		return tr(ctx, "guest_artist_unavailable")
 	}
-	return noResults
+	return tr(ctx, "no_results")
 }
