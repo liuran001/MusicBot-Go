@@ -44,25 +44,6 @@ func getRawAuth(ctx context.Context, hc *http.Client, url string, auth WebAuth) 
 	return b, resp.StatusCode, nil
 }
 
-// postRawAuth performs a POST with Bearer + client-token, raw body in/out.
-func postRawAuth(ctx context.Context, hc *http.Client, url string, auth WebAuth, body []byte) (int, []byte, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	webHeaders(req, auth.Bearer)
-	if auth.ClientToken != "" {
-		req.Header.Set("Client-Token", auth.ClientToken)
-	}
-	// votify sends the session-default application/json even for the raw-protobuf
-	// license challenge; match that (the body is still raw challenge bytes).
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return resp.StatusCode, b, nil
-}
-
 // wvFile is a resolved MP4 (Widevine CENC / AAC) audio file for a track.
 type wvFile struct {
 	FileID  string // 40-hex file id
