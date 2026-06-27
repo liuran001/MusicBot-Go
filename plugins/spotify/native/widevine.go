@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 
 	widevine "github.com/iyear/gowidevine"
 	"github.com/iyear/gowidevine/widevinepb"
+	"google.golang.org/protobuf/proto"
 )
 
 // (spclientHost is declared in verify.go)
@@ -20,20 +23,34 @@ import (
 // wvFile is a resolved MP4 (Widevine CENC / AAC) audio file for a track.
 type wvFile struct {
 	FileID  string // 40-hex file id
-	Bitrate int    // bits per second (128000 / 256000)
-	CDNURL  string // optional: CDN url straight from the manifest (may be empty)
+	Format  string // storage-resolve format id: "11"=MP4_256, "10"=MP4_128
+	Bitrate int    // bits per second, derived from Format for selection/labeling
+}
+
+// mp4FormatBitrate maps Spotify's MP4 storage-resolve format id to its nominal
+// AAC bitrate. "11"=MP4_256, "10"=MP4_128 (verified against votify constants).
+func mp4FormatBitrate(format string) int {
+	switch format {
+	case "11":
+		return 256000
+	case "10":
+		return 128000
+	default:
+		return 0
+	}
 }
 
 // trackPlaybackResp models the track-playback media manifest. Spotify returns
 // the MP4 (Widevine) file ids here in 2026; the old JSON metadata `file[]`
-// array no longer carries them for web-token clients.
+// array no longer carries them for web-token clients. Each entry carries the
+// storage-resolve format id ("10"/"11") in its `format` field.
 type trackPlaybackResp struct {
 	Media []struct {
 		Item struct {
 			Manifest struct {
 				FileIDsMP4 []struct {
-					FileID  string `json:"file_id"`
-					Bitrate int    `json:"bitrate"`
+					FileID string `json:"file_id"`
+					Format string `json:"format"`
 				} `json:"file_ids_mp4"`
 			} `json:"manifest"`
 		} `json:"item"`
@@ -63,7 +80,11 @@ func resolveMP4Files(ctx context.Context, hc *http.Client, token, trackID string
 				continue
 			}
 			seen[f.FileID] = true
-			files = append(files, wvFile{FileID: f.FileID, Bitrate: f.Bitrate})
+			files = append(files, wvFile{
+				FileID:  f.FileID,
+				Format:  f.Format,
+				Bitrate: mp4FormatBitrate(f.Format),
+			})
 		}
 	}
 	if len(files) == 0 {
@@ -89,37 +110,32 @@ func selectMP4(files []wvFile, preferredBitrate int) wvFile {
 	return best
 }
 
-// storageResolveMP4 resolves an MP4 file_id to a CDN URL. Spotify's MP4 audio
-// uses the same storage-resolve v2 service as OGG; the format number for MP4 is
-// not in the public proto enum, so we try the documented descriptors in order.
-func storageResolveMP4(ctx context.Context, hc *http.Client, token, fileID string) (string, error) {
-	// Format numbers to try for MP4 audio. Spotify's storage-resolve path embeds
-	// a numeric format; MP4_256/MP4_128 aren't in the open proto enum, so we try
-	// the known-working descriptors. Most web clients use the generic resolver.
-	var lastErr error
-	for _, fmtNum := range []string{"10", "11", "12", "9"} {
-		srURL := fmt.Sprintf("%s/storage-resolve/v2/files/audio/interactive/%s/%s?version=10000000&product=9&platform=39&alt=json",
-			spclientHost, fmtNum, fileID)
-		raw, status, err := getRaw(ctx, hc, srURL, token)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if status != 200 {
-			lastErr = fmt.Errorf("storage-resolve[%s] HTTP %d: %s", fmtNum, status, snippet(raw))
-			continue
-		}
-		var sr struct {
-			Result string   `json:"result"`
-			CDNURL []string `json:"cdnurl"`
-		}
-		if json.Unmarshal(raw, &sr) != nil || len(sr.CDNURL) == 0 {
-			lastErr = fmt.Errorf("storage-resolve[%s] no cdn urls (result=%s)", fmtNum, sr.Result)
-			continue
-		}
-		return sr.CDNURL[0], nil
+// storageResolveMP4 resolves an MP4 file_id to a CDN URL via storage-resolve v2.
+// The format id ("11"=MP4_256, "10"=MP4_128) comes straight from the
+// track-playback manifest entry, so it matches the file_id exactly (verified
+// against votify's FORMAT_ID_MAP). The version/product/platform query params
+// mirror the web player's call.
+func storageResolveMP4(ctx context.Context, hc *http.Client, token, fileID, format string) (string, error) {
+	if format == "" {
+		return "", fmt.Errorf("storage-resolve: empty format id for file %s", fileID)
 	}
-	return "", fmt.Errorf("storage-resolve failed for all format numbers: %w", lastErr)
+	srURL := fmt.Sprintf("%s/storage-resolve/v2/files/audio/interactive/%s/%s?version=1000000&product=9&platform=39&alt=json",
+		spclientHost, format, fileID)
+	raw, status, err := getRaw(ctx, hc, srURL, token)
+	if err != nil {
+		return "", fmt.Errorf("storage-resolve request: %w", err)
+	}
+	if status != 200 {
+		return "", fmt.Errorf("storage-resolve[%s] HTTP %d: %s", format, status, snippet(raw))
+	}
+	var sr struct {
+		Result string   `json:"result"`
+		CDNURL []string `json:"cdnurl"`
+	}
+	if json.Unmarshal(raw, &sr) != nil || len(sr.CDNURL) == 0 {
+		return "", fmt.Errorf("storage-resolve[%s] no cdn urls (result=%s)", format, sr.Result)
+	}
+	return sr.CDNURL[0], nil
 }
 
 // fetchPSSH gets the Widevine PSSH box (base64) for an MP4 file from the public
@@ -140,6 +156,47 @@ func fetchPSSH(ctx context.Context, hc *http.Client, fileID string) ([]byte, err
 		return nil, fmt.Errorf("decode pssh: %w", err)
 	}
 	return b, nil
+}
+
+// buildPSSHFromFileID constructs a Widevine PSSH box locally from the file id,
+// mirroring votify's _get_pssh: key_id = first 16 bytes of the file id,
+// content_id = the full file id, scheme = 'cenc'. This is the fallback when the
+// seektable CDN has no pssh for a file.
+func buildPSSHFromFileID(fileID string) ([]byte, error) {
+	raw, err := hex.DecodeString(fileID)
+	if err != nil || len(raw) < 16 {
+		return nil, fmt.Errorf("bad file id for pssh: %q", fileID)
+	}
+	data := &widevinepb.WidevinePsshData{
+		Algorithm:        widevinepb.WidevinePsshData_AESCTR.Enum(),
+		KeyIds:           [][]byte{raw[:16]},
+		Provider:         strPtr("spotify"),
+		ContentId:        raw,
+		ProtectionScheme: u32Ptr(0x63656e63), // 'cenc'
+	}
+	inner, err := proto.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pssh data: %w", err)
+	}
+	// Wrap in a full PSSH box: size|'pssh'|version+flags|systemid|datasize|data
+	var buf bytes.Buffer
+	boxLen := 32 + len(inner)
+	_ = binary.Write(&buf, binary.BigEndian, uint32(boxLen))
+	buf.WriteString("pssh")
+	_ = binary.Write(&buf, binary.BigEndian, uint32(0)) // version 0 + flags
+	buf.Write(widevineSystemID)
+	_ = binary.Write(&buf, binary.BigEndian, uint32(len(inner)))
+	buf.Write(inner)
+	return buf.Bytes(), nil
+}
+
+func strPtr(s string) *string { return &s }
+func u32Ptr(v uint32) *uint32 { return &v }
+
+// widevineSystemID is the Widevine DRM system ID.
+var widevineSystemID = []byte{
+	0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce,
+	0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
 }
 
 // acquireContentKey runs the Widevine flow against Spotify's license server and
@@ -237,19 +294,27 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, token string, dev
 	add("selected file_id=%s bitrate=%d", file.FileID, file.Bitrate)
 
 	// 2) Resolve the CDN URL for the encrypted MP4.
-	cdnURL, err := storageResolveMP4(ctx, hc, token, file.FileID)
+	cdnURL, err := storageResolveMP4(ctx, hc, token, file.FileID, file.Format)
 	if err != nil {
 		return res, err
 	}
 	res.CDNURL = cdnURL
 	add("storage-resolve ok: host=%s", hostOf(cdnURL))
 
-	// 3) Fetch the PSSH (Widevine init data) from the seektable CDN.
+	// 3) Obtain the PSSH (Widevine init data). Prefer the seektable CDN; if it
+	// has none for this file, build it locally from the file id (votify's
+	// approach), so a missing seektable entry doesn't block the download.
 	psshBytes, err := fetchPSSH(ctx, hc, file.FileID)
 	if err != nil {
-		return res, err
+		built, berr := buildPSSHFromFileID(file.FileID)
+		if berr != nil {
+			return res, fmt.Errorf("seektable failed (%v) and local pssh build failed: %w", err, berr)
+		}
+		psshBytes = built
+		add("seektable unavailable (%v); built pssh locally: %d bytes", err, len(psshBytes))
+	} else {
+		add("seektable ok: pssh %d bytes", len(psshBytes))
 	}
-	add("seektable ok: pssh %d bytes", len(psshBytes))
 
 	// 4) Run the Widevine license flow to get the CONTENT key.
 	keys, err := acquireContentKey(ctx, hc, token, device, psshBytes)
