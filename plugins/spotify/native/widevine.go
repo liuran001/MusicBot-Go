@@ -20,6 +20,47 @@ import (
 
 // (spclientHost is declared in verify.go)
 
+// WebAuth carries the two credentials every spclient call needs: the Bearer
+// access token and the client-token. Both come from the web-player token flow.
+type WebAuth struct {
+	Bearer      string
+	ClientToken string
+}
+
+// getRawAuth performs a GET with Bearer + client-token + web-player headers,
+// returning the raw body and status without treating non-200 as an error.
+func getRawAuth(ctx context.Context, hc *http.Client, url string, auth WebAuth) ([]byte, int, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	webHeaders(req, auth.Bearer)
+	if auth.ClientToken != "" {
+		req.Header.Set("Client-Token", auth.ClientToken)
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	return b, resp.StatusCode, nil
+}
+
+// postRawAuth performs a POST with Bearer + client-token, raw body in/out.
+func postRawAuth(ctx context.Context, hc *http.Client, url string, auth WebAuth, body []byte) (int, []byte, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	webHeaders(req, auth.Bearer)
+	if auth.ClientToken != "" {
+		req.Header.Set("Client-Token", auth.ClientToken)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, b, nil
+}
+
 // wvFile is a resolved MP4 (Widevine CENC / AAC) audio file for a track.
 type wvFile struct {
 	FileID  string // 40-hex file id
@@ -59,9 +100,9 @@ type trackPlaybackResp struct {
 
 // resolveMP4Files returns the available MP4/Widevine audio files for a track,
 // highest bitrate first. It uses the track-playback media manifest.
-func resolveMP4Files(ctx context.Context, hc *http.Client, token, trackID string) ([]wvFile, error) {
+func resolveMP4Files(ctx context.Context, hc *http.Client, auth WebAuth, trackID string) ([]wvFile, error) {
 	tpURL := fmt.Sprintf("%s/track-playback/v1/media/spotify:track:%s?manifestFileFormat=file_ids_mp4", spclientHost, trackID)
-	raw, status, err := getRaw(ctx, hc, tpURL, token)
+	raw, status, err := getRawAuth(ctx, hc, tpURL, auth)
 	if err != nil {
 		return nil, fmt.Errorf("track-playback request: %w", err)
 	}
@@ -115,13 +156,13 @@ func selectMP4(files []wvFile, preferredBitrate int) wvFile {
 // track-playback manifest entry, so it matches the file_id exactly (verified
 // against votify's FORMAT_ID_MAP). The version/product/platform query params
 // mirror the web player's call.
-func storageResolveMP4(ctx context.Context, hc *http.Client, token, fileID, format string) (string, error) {
+func storageResolveMP4(ctx context.Context, hc *http.Client, auth WebAuth, fileID, format string) (string, error) {
 	if format == "" {
 		return "", fmt.Errorf("storage-resolve: empty format id for file %s", fileID)
 	}
-	srURL := fmt.Sprintf("%s/storage-resolve/v2/files/audio/interactive/%s/%s?version=1000000&product=9&platform=39&alt=json",
+	srURL := fmt.Sprintf("%s/storage-resolve/v2/files/audio/interactive/%s/%s?version=10000000&product=9&platform=39&alt=json",
 		spclientHost, format, fileID)
-	raw, status, err := getRaw(ctx, hc, srURL, token)
+	raw, status, err := getRawAuth(ctx, hc, srURL, auth)
 	if err != nil {
 		return "", fmt.Errorf("storage-resolve request: %w", err)
 	}
@@ -159,26 +200,23 @@ func fetchPSSH(ctx context.Context, hc *http.Client, fileID string) ([]byte, err
 }
 
 // buildPSSHFromFileID constructs a Widevine PSSH box locally from the file id,
-// mirroring votify's _get_pssh: key_id = first 16 bytes of the file id,
-// content_id = the full file id, scheme = 'cenc'. This is the fallback when the
-// seektable CDN has no pssh for a file.
+// as a fallback when the seektable CDN has no pssh. It uses the same minimal
+// WidevinePsshData shape proven by the applemusic plugin (key_id + algorithm),
+// which is sufficient for the license challenge — the key id is what matters.
+// key_id = first 16 bytes of the file id.
 func buildPSSHFromFileID(fileID string) ([]byte, error) {
 	raw, err := hex.DecodeString(fileID)
 	if err != nil || len(raw) < 16 {
 		return nil, fmt.Errorf("bad file id for pssh: %q", fileID)
 	}
-	data := &widevinepb.WidevinePsshData{
-		Algorithm:        widevinepb.WidevinePsshData_AESCTR.Enum(),
-		KeyIds:           [][]byte{raw[:16]},
-		Provider:         strPtr("spotify"),
-		ContentId:        raw,
-		ProtectionScheme: u32Ptr(0x63656e63), // 'cenc'
-	}
-	inner, err := proto.Marshal(data)
+	inner, err := proto.Marshal(&widevinepb.WidevinePsshData{
+		KeyIds:    [][]byte{raw[:16]},
+		Algorithm: widevinepb.WidevinePsshData_AESCTR.Enum(),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal pssh data: %w", err)
 	}
-	// Wrap in a full PSSH box: size|'pssh'|version+flags|systemid|datasize|data
+	// Wrap in a full version-0 PSSH box: size|'pssh'|version+flags|systemid|datasize|data
 	var buf bytes.Buffer
 	boxLen := 32 + len(inner)
 	_ = binary.Write(&buf, binary.BigEndian, uint32(boxLen))
@@ -190,9 +228,6 @@ func buildPSSHFromFileID(fileID string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func strPtr(s string) *string { return &s }
-func u32Ptr(v uint32) *uint32 { return &v }
-
 // widevineSystemID is the Widevine DRM system ID.
 var widevineSystemID = []byte{
 	0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce,
@@ -201,7 +236,7 @@ var widevineSystemID = []byte{
 
 // acquireContentKey runs the Widevine flow against Spotify's license server and
 // returns the CONTENT keys for the given PSSH.
-func acquireContentKey(ctx context.Context, hc *http.Client, token string, device *widevine.Device, psshBytes []byte) ([]*widevine.Key, error) {
+func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, psshBytes []byte) ([]*widevine.Key, error) {
 	pssh, err := widevine.NewPSSH(psshBytes)
 	if err != nil {
 		return nil, fmt.Errorf("parse pssh: %w", err)
@@ -212,7 +247,7 @@ func acquireContentKey(ctx context.Context, hc *http.Client, token string, devic
 		return nil, fmt.Errorf("license challenge: %w", err)
 	}
 	licURL := fmt.Sprintf("%s/widevine-license/v1/audio/license", spclientHost)
-	status, body, err := postRaw(ctx, hc, licURL, token, challenge)
+	status, body, err := postRawAuth(ctx, hc, licURL, auth, challenge)
 	if err != nil {
 		return nil, fmt.Errorf("license post: %w", err)
 	}
@@ -270,7 +305,7 @@ type WidevineResult struct {
 //
 // preferredBitrate selects the tier in kbps (0 = highest, typically 256). The
 // step trace is populated for diagnostics regardless of success.
-func DownloadWidevineMP4(ctx context.Context, hc *http.Client, token string, device *widevine.Device, trackID string, preferredBitrate int) (*WidevineResult, error) {
+func DownloadWidevineMP4(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, trackID string, preferredBitrate int) (*WidevineResult, error) {
 	res := &WidevineResult{}
 	add := func(f string, a ...any) { res.Steps = append(res.Steps, fmt.Sprintf(f, a...)) }
 
@@ -279,7 +314,7 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, token string, dev
 	}
 
 	// 1) Resolve MP4 file ids from the track-playback manifest.
-	files, err := resolveMP4Files(ctx, hc, token, trackID)
+	files, err := resolveMP4Files(ctx, hc, auth, trackID)
 	if err != nil {
 		return res, err
 	}
@@ -294,7 +329,7 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, token string, dev
 	add("selected file_id=%s bitrate=%d", file.FileID, file.Bitrate)
 
 	// 2) Resolve the CDN URL for the encrypted MP4.
-	cdnURL, err := storageResolveMP4(ctx, hc, token, file.FileID, file.Format)
+	cdnURL, err := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
 	if err != nil {
 		return res, err
 	}
@@ -317,7 +352,7 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, token string, dev
 	}
 
 	// 4) Run the Widevine license flow to get the CONTENT key.
-	keys, err := acquireContentKey(ctx, hc, token, device, psshBytes)
+	keys, err := acquireContentKey(ctx, hc, auth, device, psshBytes)
 	if err != nil {
 		return res, err
 	}

@@ -14,7 +14,7 @@ import (
 // web-player + Widevine path (decrypted AAC/MP4). It is the 2026-viable route:
 // the old librespot OGG/Shannon path is increasingly refused (playplay DRM), so
 // this client uses an sp_dc cookie to mint a web-player token, resolves the MP4
-// (Widevine CENC) file, runs the Widevine license flow with an embedded L3
+// (Widevine CENC) file, runs the Widevine license flow with the operator's L3
 // device, and decrypts in pure Go (no CGo, no ffmpeg subprocess).
 //
 // It is safe for concurrent use; the web token is cached and refreshed under a
@@ -26,6 +26,7 @@ type WidevineClient struct {
 
 	mu          sync.Mutex
 	token       string
+	clientToken string
 	tokenExpiry time.Time
 }
 
@@ -36,14 +37,13 @@ type WidevineOptions struct {
 	// HTTPClient is the proxy-aware client for all Spotify traffic. A nil client
 	// uses a default 30s-timeout client.
 	HTTPClient *http.Client
-	// Device overrides the Widevine L3 device. A nil device uses the built-in
-	// shared L3 credentials.
+	// Device is the Widevine L3 device used to decrypt audio. Required for
+	// downloads — there is no embedded default (the operator supplies a .wvd).
 	Device *widevine.Device
 }
 
 // NewWidevineClient builds a WidevineClient. It does not touch the network until
-// the first Download. A device-load failure for the built-in credentials is
-// surfaced lazily on Download.
+// the first Download. A missing device surfaces as an error on Download.
 func NewWidevineClient(opts WidevineOptions) *WidevineClient {
 	hc := opts.HTTPClient
 	if hc == nil {
@@ -61,37 +61,33 @@ func (c *WidevineClient) Configured() bool {
 	return c != nil && c.spDC != ""
 }
 
-// ensureToken returns a valid web-player token, refreshing it when within 60s of
-// expiry. Callers must hold c.mu.
-func (c *WidevineClient) ensureToken(ctx context.Context) (string, error) {
+// ensureToken returns a valid web-player auth (Bearer + client-token),
+// refreshing when within 60s of expiry. Callers must hold c.mu.
+func (c *WidevineClient) ensureToken(ctx context.Context) (WebAuth, error) {
 	if c.token != "" && time.Now().Before(c.tokenExpiry.Add(-60*time.Second)) {
-		return c.token, nil
+		return WebAuth{Bearer: c.token, ClientToken: c.clientToken}, nil
 	}
 	wt, err := WebTokenFromCookie(ctx, c.httpClient, c.spDC)
 	if err != nil {
-		return "", err
+		return WebAuth{}, err
 	}
 	c.token = wt.AccessToken
+	c.clientToken = wt.ClientToken
 	if wt.ExpiresAtMs > 0 {
 		c.tokenExpiry = time.UnixMilli(wt.ExpiresAtMs)
 	} else {
 		c.tokenExpiry = time.Now().Add(30 * time.Minute)
 	}
-	return c.token, nil
+	return WebAuth{Bearer: c.token, ClientToken: c.clientToken}, nil
 }
 
-// ensureDevice returns the Widevine device, loading the built-in one on first
-// use. Callers must hold c.mu.
+// ensureDevice returns the Widevine device. It must have been supplied at
+// construction (from the operator's wvd_path); there is no embedded default.
 func (c *WidevineClient) ensureDevice() (*widevine.Device, error) {
-	if c.device != nil {
-		return c.device, nil
+	if c.device == nil {
+		return nil, fmt.Errorf("native: no Widevine device — set [plugins.spotify] wvd_path to a .wvd file")
 	}
-	dev, err := BuiltinWidevineDevice()
-	if err != nil {
-		return nil, err
-	}
-	c.device = dev
-	return dev, nil
+	return c.device, nil
 }
 
 // Download resolves a Spotify track id to decrypted, playable MP4 (AAC) bytes.
@@ -102,7 +98,7 @@ func (c *WidevineClient) Download(ctx context.Context, trackID string, preferred
 		return nil, ErrNotAuthenticated
 	}
 	c.mu.Lock()
-	token, err := c.ensureToken(ctx)
+	auth, err := c.ensureToken(ctx)
 	if err != nil {
 		c.mu.Unlock()
 		return nil, err
@@ -114,7 +110,7 @@ func (c *WidevineClient) Download(ctx context.Context, trackID string, preferred
 	}
 	c.mu.Unlock()
 
-	res, err := DownloadWidevineMP4(ctx, c.httpClient, token, device, trackID, preferredBitrate)
+	res, err := DownloadWidevineMP4(ctx, c.httpClient, auth, device, trackID, preferredBitrate)
 	if err != nil {
 		// Drop the token so a stale-token failure self-heals next call.
 		c.mu.Lock()

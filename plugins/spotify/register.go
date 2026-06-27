@@ -2,7 +2,6 @@ package spotify
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -23,9 +22,10 @@ func init() {
 
 // buildContribution constructs the Spotify platform. Metadata and search come
 // from the Web API (Client Credentials flow). Audio is REAL Spotify audio:
-// decrypted Ogg Vorbis fetched via the embedded librespot path, gated behind a
-// one-time OAuth login (run `-spotify-login`). There is no cross-platform
-// fallback — a track that can't be served natively fails with a clear error.
+// decrypted AAC/MP4 via the web-player + Widevine path, which needs an sp_dc
+// cookie and an operator-supplied Widevine L3 device (.wvd). There is no
+// cross-platform fallback — a track that can't be served natively fails with a
+// clear error.
 func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplugins.Contribution, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config required")
@@ -57,17 +57,15 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return nil, err
 	}
 	spDC := strings.TrimSpace(cfg.GetPluginString(platformName, "sp_dc"))
-	// Optional operator-supplied Widevine L3 device (.wvd). Empty = built-in.
+	// Widevine L3 device (.wvd) — required to decrypt Spotify AAC. No key is
+	// embedded; the operator supplies their own device file.
 	wvDevicePath := strings.TrimSpace(cfg.GetPluginString(platformName, "wvd_path"))
 	var wvDevice *widevine.Device
 	if wvDevicePath != "" {
-		if f, oerr := os.Open(wvDevicePath); oerr == nil {
-			if dev, derr := widevine.NewDevice(widevine.FromWVD(f)); derr == nil {
-				wvDevice = dev
-			} else if logger != nil {
-				logger.Warn("spotify: failed loading wvd, using built-in", "error", derr)
-			}
-			_ = f.Close()
+		if dev, derr := native.LoadWVDeviceFile(wvDevicePath); derr == nil {
+			wvDevice = dev
+		} else if logger != nil {
+			logger.Warn("spotify: failed loading wvd device", "path", wvDevicePath, "error", derr)
 		}
 	}
 	nativeClient := native.NewWidevineClient(native.WidevineOptions{

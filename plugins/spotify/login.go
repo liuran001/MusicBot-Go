@@ -204,16 +204,9 @@ func RunVerifyCookie(ctx context.Context, cfg *config.Config, logger *logpkg.Log
 		}
 		statePath = filepath.Join(cacheDir, "spotify-credentials.json")
 	}
-	client := native.NewClient(native.ClientOptions{
-		StatePath:  statePath,
-		Logger:     logger,
-		HTTPClient: nativeHTTP,
-	})
 	if trackID == "" {
 		trackID = "003vvx7Niy0yvhvHt4a68B"
 	}
-
-	_ = client // reserved for future credential persistence
 
 	fmt.Println("用 sp_dc cookie 换取 web-player token…")
 	wt, err := native.WebTokenFromCookie(ctx, nativeHTTP, spDC)
@@ -227,11 +220,12 @@ func RunVerifyCookie(ctx context.Context, cfg *config.Config, logger *logpkg.Log
 	}
 
 	fmt.Println("\n=== 完整 Widevine AAC 链路 ===")
-	device, derr := native.BuiltinWidevineDevice()
+	wvdPath := strings.TrimSpace(cfg.GetPluginString(platformName, "wvd_path"))
+	device, derr := native.LoadWVDeviceFile(wvdPath)
 	if derr != nil {
-		return fmt.Errorf("加载内置 Widevine L3 device 失败: %w", derr)
+		return fmt.Errorf("加载 Widevine L3 device 失败（请在 [plugins.spotify] 配置 wvd_path）: %w", derr)
 	}
-	wv, err := native.DownloadWidevineMP4(ctx, nativeHTTP, wt.AccessToken, device, trackID, 0)
+	wv, err := native.DownloadWidevineMP4(ctx, nativeHTTP, native.WebAuth{Bearer: wt.AccessToken, ClientToken: wt.ClientToken}, device, trackID, 0)
 	if wv != nil {
 		for _, s := range wv.Steps {
 			fmt.Println("  •", s)

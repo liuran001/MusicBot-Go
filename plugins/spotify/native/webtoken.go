@@ -95,6 +95,8 @@ func generateTOTP(secret []byte, serverTimeMs int64) string {
 // WebTokenResult carries the web-player token plus a diagnostic trace.
 type WebTokenResult struct {
 	AccessToken string
+	ClientID    string
+	ClientToken string
 	ExpiresAtMs int64
 	Steps       []string
 }
@@ -150,6 +152,7 @@ func WebTokenFromCookie(ctx context.Context, hc *http.Client, spDC string) (*Web
 	}
 	var tj struct {
 		AccessToken                      string `json:"accessToken"`
+		ClientID                         string `json:"clientId"`
 		IsAnonymous                      bool   `json:"isAnonymous"`
 		AccessTokenExpirationTimestampMs int64  `json:"accessTokenExpirationTimestampMs"`
 	}
@@ -161,8 +164,54 @@ func WebTokenFromCookie(ctx context.Context, hc *http.Client, spDC string) (*Web
 	}
 	add("web token ok (len=%d, anonymous=%v)", len(tj.AccessToken), tj.IsAnonymous)
 	res.AccessToken = tj.AccessToken
+	res.ClientID = tj.ClientID
 	res.ExpiresAtMs = tj.AccessTokenExpirationTimestampMs
+
+	// Fetch a client-token: spclient calls (track-playback, storage-resolve,
+	// widevine-license) require it in addition to the Bearer token.
+	if tj.ClientID != "" {
+		if ct, cterr := fetchWebClientToken(ctx, hc, tj.ClientID); cterr == nil {
+			res.ClientToken = ct
+			add("client-token ok (len=%d)", len(ct))
+		} else {
+			add("client-token fetch failed (continuing without): %v", cterr)
+		}
+	}
 	return res, nil
+}
+
+// fetchWebClientToken obtains a client-token for spclient calls. The web player
+// POSTs the client id + version to clienttoken.spotify.com and reads back a
+// granted token. Spotify accepts a JSON request/response for the web client.
+func fetchWebClientToken(ctx context.Context, hc *http.Client, clientID string) (string, error) {
+	body := fmt.Sprintf(`{"client_data":{"client_version":%q,"client_id":%q,"js_sdk_data":{}}}`, webAppVersion, clientID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://clienttoken.spotify.com/v1/clienttoken", strings.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", webUA)
+	req.Header.Set("Origin", "https://open.spotify.com")
+	req.Header.Set("Referer", "https://open.spotify.com/")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("clienttoken HTTP %d: %s", resp.StatusCode, snippet(b))
+	}
+	var ctr struct {
+		GrantedToken struct {
+			Token string `json:"token"`
+		} `json:"granted_token"`
+	}
+	if json.Unmarshal(b, &ctr) != nil || ctr.GrantedToken.Token == "" {
+		return "", fmt.Errorf("clienttoken parse failed: %s", snippet(b))
+	}
+	return ctr.GrantedToken.Token, nil
 }
 
 func cookieHeaders(req *http.Request, spDC string) {
