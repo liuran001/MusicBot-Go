@@ -19,7 +19,7 @@ fetching_lyric = "歌詞を取得中…"
 no_results = "結果が見つかりません。別のキーワードをお試しください"
 playlist_empty = "プレイリストに曲がありません"
 get_lrc_failed = "歌詞が見つかりません。インストゥルメンタルか非対応の可能性があります"
-callback_success = "Success"
+callback_success = "成功しました"
 callback_denied = "リクエストした本人または管理者のみ操作できます"
 
 # --- usage prompts ---

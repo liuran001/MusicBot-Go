@@ -20,7 +20,7 @@ fetching_lyric = "正在获取歌词…"
 no_results = "没有找到结果，换个关键词试试"
 playlist_empty = "歌单里没有歌曲"
 get_lrc_failed = "未找到歌词，可能是纯音乐或平台暂不支持"
-callback_success = "Success"
+callback_success = "成功"
 callback_denied = "仅发起人或管理员可操作"
 
 # --- usage prompts ---
