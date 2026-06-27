@@ -126,6 +126,14 @@ func connect(ctx context.Context, log librespot.Logger, deviceID string, httpCli
 // Username returns the authenticated account username.
 func (s *session) Username() string { return s.ap.Username() }
 
+// AccessToken returns the current login5 bearer token used for spclient calls.
+// Exposed so the Widevine (web-stream) path can authenticate against the same
+// spclient endpoints (storage-resolve, widevine-license) with this session's
+// token.
+func (s *session) AccessToken(ctx context.Context) (string, error) {
+	return s.sp.GetAccessToken(ctx, false)
+}
+
 // StoredCredentials returns the reusable (non-expiring) credential blob, used
 // to persist the login so future starts skip the OAuth flow.
 func (s *session) StoredCredentials() []byte { return s.ap.StoredCredentials() }

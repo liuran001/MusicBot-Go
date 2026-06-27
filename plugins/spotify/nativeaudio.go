@@ -3,7 +3,6 @@ package spotify
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -24,30 +23,33 @@ type directAudioSource interface {
 	BuildDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error)
 }
 
-// nativeSource adapts a *native.Client to directAudioSource.
+// nativeSource adapts a *native.WidevineClient to directAudioSource. Audio is
+// real Spotify audio: decrypted AAC/MP4 via the web-player + Widevine path
+// (the 2026-viable route; the old librespot OGG/Shannon path is DRM-refused).
 type nativeSource struct {
-	client *native.Client
+	client *native.WidevineClient
 }
 
-// newNativeSource wraps a native.Client. A nil client yields a source that
-// always reports unavailable.
-func newNativeSource(client *native.Client) *nativeSource {
+// newNativeSource wraps a native.WidevineClient. A nil client yields a source
+// that always reports unavailable.
+func newNativeSource(client *native.WidevineClient) *nativeSource {
 	return &nativeSource{client: client}
 }
 
 func (n *nativeSource) Available() bool {
-	return n != nil && n.client != nil && n.client.Authenticated()
+	return n != nil && n.client != nil && n.client.Configured()
 }
 
-// qualityToBitrate maps the unified quality tiers onto the Ogg Vorbis bitrate
-// tiers Spotify offers via this path. Lossless/Hi-Res are not attainable
-// (FLAC needs the proprietary playplay key), so they map to the 320 ceiling.
+// qualityToBitrate maps the unified quality tiers onto the AAC bitrate tiers
+// Spotify serves via the Widevine path. The ceiling is AAC 256k (MP4_256) —
+// lossless/Hi-Res are not attainable here (FLAC/OGG are playplay-gated), so
+// every tier at or above High maps to the 256k ceiling.
 func qualityToBitrate(q platform.Quality) int {
 	switch q {
 	case platform.QualityStandard:
-		return 160
+		return 128
 	case platform.QualityHigh, platform.QualityLossless, platform.QualityHiRes:
-		return 320
+		return 256
 	default:
 		return 0 // highest available
 	}
@@ -65,33 +67,25 @@ func (n *nativeSource) BuildDownloadInfo(ctx context.Context, trackID string, qu
 	bitrate := qualityToBitrate(quality)
 
 	downloadFn := func(ctx context.Context, info *platform.DownloadInfo, destPath string, progress func(written, total int64)) (int64, error) {
-		stream, err := n.client.Download(ctx, trackID, bitrate)
+		// The whole Widevine chain (web token -> manifest -> storage-resolve ->
+		// license -> CENC decrypt) runs here, lazily, so a DRM/region failure
+		// surfaces as a download error rather than at info-build time.
+		wv, err := n.client.Download(ctx, trackID, bitrate)
 		if err != nil {
 			return 0, err
 		}
-		defer stream.Close()
 
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 			return 0, err
 		}
-		f, err := os.Create(destPath)
-		if err != nil {
+		if err := os.WriteFile(destPath, wv.MP4, 0o644); err != nil {
 			return 0, err
 		}
-
-		total := stream.Size()
-		written, copyErr := copyWithProgress(f, stream, total, progress)
-		if cerr := f.Close(); cerr != nil && copyErr == nil {
-			copyErr = cerr
-		}
-		if copyErr != nil {
-			_ = os.Remove(destPath)
-			return 0, copyErr
-		}
+		n := int64(len(wv.MP4))
 		if progress != nil {
-			progress(written, written)
+			progress(n, n)
 		}
-		return written, nil
+		return n, nil
 	}
 
 	// URL is a non-fetchable sentinel: the download service rejects an empty
@@ -99,38 +93,9 @@ func (n *nativeSource) BuildDownloadInfo(ctx context.Context, trackID string, qu
 	// set. We encode the track so logs are meaningful.
 	return &platform.DownloadInfo{
 		URL:        fmt.Sprintf("spotify-native:track:%s", trackID),
-		Format:     "ogg",
+		Format:     "m4a",
 		Bitrate:    bitrate,
 		Quality:    quality,
 		Downloader: downloadFn,
 	}, nil
-}
-
-// copyWithProgress copies src→dst, reporting progress periodically. total may be
-// 0 when unknown.
-func copyWithProgress(dst io.Writer, src io.Reader, total int64, progress func(written, total int64)) (int64, error) {
-	buf := make([]byte, 64*1024)
-	var written int64
-	for {
-		nr, rerr := src.Read(buf)
-		if nr > 0 {
-			nw, werr := dst.Write(buf[:nr])
-			written += int64(nw)
-			if werr != nil {
-				return written, werr
-			}
-			if nw < nr {
-				return written, io.ErrShortWrite
-			}
-			if progress != nil {
-				progress(written, total)
-			}
-		}
-		if rerr != nil {
-			if rerr == io.EOF {
-				return written, nil
-			}
-			return written, rerr
-		}
-	}
 }

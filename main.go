@@ -58,6 +58,9 @@ func main() {
 	configPath := flag.String("c", "config.ini", "配置文件")
 	spotifyLogin := flag.Bool("spotify-login", false, "运行一次性 Spotify 授权登录（获取原生音频下载所需的长期凭据），完成后退出")
 	spotifyLoginPort := flag.Int("spotify-login-port", 0, "Spotify 授权回调监听端口（0 为随机，远程服务器可固定后做端口转发）")
+	spotifyVerify := flag.Bool("spotify-verify", false, "探测 AAC+Widevine 链路是否可用（诊断用）。先不带 code 运行获取授权链接，授权后用 -spotify-code 粘贴回来")
+	spotifyCode := flag.String("spotify-code", "", "授权后从回调地址里复制的 code（配合 -spotify-verify 使用）")
+	spotifyCookie := flag.String("spotify-cookie", "", "用 sp_dc cookie 探测 Widevine 链路（诊断用，从浏览器登录 open.spotify.com 后复制 sp_dc）")
 	flag.Parse()
 
 	if created, err := ensureConfig(*configPath); err != nil {
@@ -70,6 +73,22 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if *spotifyCookie != "" {
+		if err := runSpotifyVerifyCookie(ctx, *configPath, *spotifyCookie); err != nil {
+			fmt.Fprintf(os.Stderr, "Spotify Widevine (cookie) 探测失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *spotifyVerify {
+		if err := runSpotifyVerify(ctx, *configPath, *spotifyCode); err != nil {
+			fmt.Fprintf(os.Stderr, "Spotify Widevine 探测失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *spotifyLogin {
 		if err := runSpotifyLogin(ctx, *configPath, *spotifyLoginPort); err != nil {
@@ -132,4 +151,33 @@ func runSpotifyLogin(ctx context.Context, configPath string, callbackPort int) e
 		logger, _ = logpkg.New("info", "text", false)
 	}
 	return spotify.RunLogin(ctx, conf, logger, callbackPort, nil)
+}
+
+// runSpotifyVerify logs in via the paste-the-code OAuth flow (if needed) and
+// probes the AAC+Widevine web-stream chain to determine whether this account's
+// token can sign Widevine licenses.
+func runSpotifyVerify(ctx context.Context, configPath string, code string) error {
+	conf, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed loading config: %w", err)
+	}
+	logger, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), false)
+	if err != nil {
+		logger, _ = logpkg.New("info", "text", false)
+	}
+	return spotify.RunVerifyManual(ctx, conf, logger, code, "")
+}
+
+// runSpotifyVerifyCookie probes the AAC+Widevine chain using an sp_dc cookie
+// (the web-player token path, which can see streaming file ids).
+func runSpotifyVerifyCookie(ctx context.Context, configPath, spDC string) error {
+	conf, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed loading config: %w", err)
+	}
+	logger, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), false)
+	if err != nil {
+		logger, _ = logpkg.New("info", "text", false)
+	}
+	return spotify.RunVerifyCookie(ctx, conf, logger, spDC, "")
 }

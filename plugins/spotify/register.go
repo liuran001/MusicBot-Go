@@ -2,9 +2,11 @@ package spotify
 
 import (
 	"fmt"
-	"path/filepath"
+	"os"
 	"strings"
 	"time"
+
+	widevine "github.com/iyear/gowidevine"
 
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
@@ -44,27 +46,34 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 
 	plat := NewPlatform(client)
 
-	// Build the native (real Spotify audio) source. It is proxy-aware and
-	// persists its reusable login credentials to a state file so the one-time
-	// OAuth login survives restarts. Until the operator logs in the source
-	// reports unavailable and downloads fail with a clear "not authenticated"
-	// error (no silent substitution of another platform's audio).
+	// Build the native (real Spotify audio) source: decrypted AAC/MP4 via the
+	// web-player + Widevine path. It needs an sp_dc cookie (a logged-in
+	// open.spotify.com web session) to mint web-player tokens. Without the
+	// cookie the source reports unavailable and downloads fail with a clear
+	// "not authenticated" error (no silent substitution of another platform's
+	// audio). The HTTP client is proxy-aware.
 	nativeHTTP, err := httpproxy.NewHTTPClient(cfg.ResolveAPIProxyConfig(platformName), timeout)
 	if err != nil {
 		return nil, err
 	}
-	statePath := strings.TrimSpace(cfg.GetPluginString(platformName, "credentials_path"))
-	if statePath == "" {
-		cacheDir := strings.TrimSpace(cfg.GetString("CacheDir"))
-		if cacheDir == "" {
-			cacheDir = "./cache"
+	spDC := strings.TrimSpace(cfg.GetPluginString(platformName, "sp_dc"))
+	// Optional operator-supplied Widevine L3 device (.wvd). Empty = built-in.
+	wvDevicePath := strings.TrimSpace(cfg.GetPluginString(platformName, "wvd_path"))
+	var wvDevice *widevine.Device
+	if wvDevicePath != "" {
+		if f, oerr := os.Open(wvDevicePath); oerr == nil {
+			if dev, derr := widevine.NewDevice(widevine.FromWVD(f)); derr == nil {
+				wvDevice = dev
+			} else if logger != nil {
+				logger.Warn("spotify: failed loading wvd, using built-in", "error", derr)
+			}
+			_ = f.Close()
 		}
-		statePath = filepath.Join(cacheDir, "spotify-credentials.json")
 	}
-	nativeClient := native.NewClient(native.ClientOptions{
-		StatePath:  statePath,
-		Logger:     logger,
+	nativeClient := native.NewWidevineClient(native.WidevineOptions{
+		Cookie:     spDC,
 		HTTPClient: nativeHTTP,
+		Device:     wvDevice,
 	})
 	plat.WithNativeSource(newNativeSource(nativeClient))
 
