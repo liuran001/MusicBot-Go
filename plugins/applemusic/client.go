@@ -480,6 +480,24 @@ func (c *Client) GetLyricsTTML(ctx context.Context, trackID string) (string, err
 
 // --- Download ---
 
+// willUseWrapper reports whether a download at the given quality will take the
+// external FairPlay wrapper as its PRIMARY path. It mirrors the priority-1
+// routing condition in GetDownloadInfo (preferWrapper && hasWrapper): lossless,
+// Hi-Res and standard all prefer the wrapper when one is configured. The "high"
+// tier uses native AAC first and only falls back to the wrapper if native fails,
+// so it is intentionally excluded — gating every "high" request would
+// needlessly serialize the common native path.
+//
+// This is the source of truth for SerialDownloadGate.NeedsSerialDownload, so the
+// handler's gating decision stays in lock-step with the actual routing.
+func (c *Client) willUseWrapper(quality platform.Quality) bool {
+	if c == nil || strings.TrimSpace(c.wrapperHost) == "" {
+		return false
+	}
+	preferWrapper := quality >= platform.QualityLossless || quality == platform.QualityStandard
+	return preferWrapper
+}
+
 func (c *Client) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	// Fetch song details to confirm the track exists / is available.
 	reqURL := fmt.Sprintf("%s/v1/catalog/%s/songs/%s?include=albums,artists&extend=extendedAssetUrls&l=%s",

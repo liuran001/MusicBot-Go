@@ -35,6 +35,7 @@ type Router struct {
 	InlineCollectionCallback CallbackHandler
 	LyricCallback            CallbackHandler
 	FavoriteCallback         CallbackHandler
+	DownloadQueueCallback    CallbackHandler
 	Inline                   InlineHandler
 	ChosenInline             ChosenInlineHandler
 	PlatformManager          platform.Manager
@@ -265,6 +266,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	}
 	if r.GuestSearchCallback != nil {
 		bh.Handle(r.wrapCallback(r.GuestSearchCallback), callbackPrefix("guest "))
+	}
+	if r.DownloadQueueCallback != nil {
+		bh.Handle(r.wrapCallback(r.DownloadQueueCallback), callbackPrefix("dlq "))
 	}
 	bh.Handle(r.wrapInline(r.Inline), func(ctx context.Context, update telego.Update) bool {
 		return update.InlineQuery != nil

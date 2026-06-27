@@ -118,24 +118,29 @@ type MusicHandler struct {
 	// inlineMu protects inlineInFlight map only.
 	inlineMu       sync.Mutex
 	inlineInFlight map[string]*inlineProcessCall
-	// downloadQueueMu protects downloadQueue/downloadQueueText/downloadQueueSeq.
-	downloadQueueMu   sync.Mutex
-	downloadQueueSeq  int64
-	downloadQueue     []downloadQueueEntry
-	downloadQueueText map[int64]string
+	// downloadQueueMu protects downloadWaiting/downloadRunning accounting.
+	downloadQueueMu sync.Mutex
+	// downloadWaiting counts admitted tasks not yet holding a download slot
+	// (waiting for a global slot and/or a per-platform serial gate). It is the
+	// "total queue" surfaced to users and capped by DownloadQueueWaitLimit.
+	downloadWaiting int
+	// downloadRunning counts tasks actively holding a global download slot.
+	downloadRunning int
 
-	// DownloadQueueWaitLimit controls max waiting items in download queue.
-	// 0 or less means unlimited (legacy behavior).
+	// serialGateMu protects the serialGates map.
+	serialGateMu sync.Mutex
+	// serialGates holds one size-1 semaphore per platform that requires
+	// serialized downloads (platform.SerialDownloadGate), e.g. Apple Music's
+	// FairPlay wrapper which decrypts one track at a time. Lazily created.
+	serialGates map[string]chan struct{}
+
+	// DownloadQueueWaitLimit caps how many tasks may wait in the download queue
+	// at once; the next request beyond it is rejected with a "server busy" error.
+	// 0 or less means unlimited.
 	DownloadQueueWaitLimit int
 
 	EnableQueueObservability bool
 	PluginSettingDefinitions []botpkg.PluginSettingDefinition
-}
-
-type downloadQueueEntry struct {
-	id     int64
-	update func(text string)
-	loc    *i18n.Localizer
 }
 
 type uploadTask struct {
@@ -596,18 +601,16 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		status.Upsert(tr(ctx, "fetch_info"))
 	}
 
-	var queueStatusUpdater func(string)
-	if status.Message() != nil {
-		lastQueueText := status.Message().Text
-		queueStatusUpdater = func(text string) {
-			if text == lastQueueText {
-				return
-			}
-			lastQueueText = text
-			status.Edit(text)
+	// Show a single static "queued" notice (with a button to check live counts)
+	// the moment the task has to wait — not a per-change refresh, which would
+	// rewrite every waiter's message and risk Telegram's edit rate limit.
+	onQueued := func() {
+		if silent || status.Message() == nil {
+			return
 		}
+		status.EditWithMarkup(tr(ctx, "download_queued"), downloadQueueButton(ctx))
 	}
-	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, queueStatusUpdater)
+	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, platformName, trackID, quality, onQueued)
 	if err != nil {
 		sendFailed(err)
 		return err
@@ -2202,6 +2205,41 @@ func (s *statusSession) Edit(text string) {
 	s.msg = s.editLocked(text)
 }
 
+// EditWithMarkup edits the status text and attaches (or replaces) an inline
+// keyboard in a single call. Used for the "queued" notice so the live-count
+// button rides on the same message. Unlike Edit it is not throttled — it is
+// called at most once per task (the moment it starts waiting).
+func (s *statusSession) EditWithMarkup(text string, markup *telego.InlineKeyboardMarkup) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.msg == nil {
+		return
+	}
+	editParams := &telego.EditMessageTextParams{
+		ChatID:      telego.ChatID{ID: s.msg.Chat.ID},
+		MessageID:   s.msg.MessageID,
+		Text:        text,
+		ReplyMarkup: markup,
+	}
+	var edited *telego.Message
+	var err error
+	if s.rateLimiter != nil {
+		edited, err = telegram.EditMessageTextWithRetry(s.ctx, s.rateLimiter, s.bot, editParams)
+	} else {
+		edited, err = s.bot.EditMessageText(s.ctx, editParams)
+	}
+	if err == nil && edited != nil {
+		s.msg = edited
+	} else {
+		// Best effort: keep the local text in sync so later edits don't loop.
+		s.msg.Text = text
+	}
+	s.lastEditAt = time.Now()
+}
+
 func (s *statusSession) editLocked(text string) *telego.Message {
 	if s.msg == nil {
 		return nil
@@ -2498,7 +2536,15 @@ func (h *MusicHandler) prepareInlineSong(
 	songInfo.MusicSize = 0
 	songInfo.BitRate = info.Bitrate * 1000
 
-	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, progress)
+	// Inline placeholder: when the task has to wait, show the static "queued"
+	// text once (no live-count button — inline messages are edited via a
+	// different path and there is no per-chat status message to attach one to).
+	onQueued := func() {
+		if progress != nil {
+			progress(tr(ctx, "wait_for_down"))
+		}
+	}
+	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, platformName, trackID, quality, onQueued)
 	if err != nil {
 		call.err = err
 		return nil, err
@@ -2633,112 +2679,175 @@ func (h *MusicHandler) prepareInlineSongWithTimeout(
 	return h.prepareInlineSong(processCtx, b, userID, userName, platformName, trackID, qualityOverride, progress)
 }
 
-// acquireDownloadSlot acquires download limiter or enqueues wait-state updater when full.
-// Lock scope: downloadQueueMu is handled by enqueue/dequeue helpers.
-func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, update func(text string)) (func(), error) {
+// acquireDownloadSlot admits one download into the global concurrency pool.
+//
+// It enforces two limits in addition to the global slot count (h.Limiter):
+//
+//  1. A per-platform serial gate (platform.SerialDownloadGate). When a request
+//     will be served through a serialized external resource — Apple Music's
+//     FairPlay wrapper, which decrypts one track at a time over a single TCP
+//     session — only one such download runs at a time. The gate is acquired
+//     BEFORE the global slot so tasks blocked on it do not occupy global
+//     download concurrency while they wait.
+//  2. A total waiting-queue cap (DownloadQueueWaitLimit). A task that cannot
+//     start immediately becomes "waiting"; if that would exceed the cap, it is
+//     rejected with errDownloadQueueOverloaded ("server busy").
+//
+// onQueued is invoked at most once, only when the task actually has to wait, so
+// the caller can show a single static "queued" status (optionally with a live-
+// count button) instead of rewriting every waiter's message on each change —
+// the old per-enqueue refresh risked hitting Telegram's edit rate limit.
+//
+// The returned release func must be called exactly once; it frees the global
+// slot and the serial gate (when held) and is safe to call multiple times.
+func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, platformName, trackID string, quality platform.Quality, onQueued func()) (func(), error) {
 	if h == nil || h.Limiter == nil {
 		return func() {}, nil
 	}
-	select {
-	case h.Limiter <- struct{}{}:
-		return func() { <-h.Limiter }, nil
-	default:
+
+	gate := h.serialGateFor(platformName, trackID, quality) // nil unless serialized
+
+	// Fast path: try to grab the serial gate (if any) and a global slot without
+	// blocking. If both succeed the task starts immediately with no queue notice.
+	if gate != nil {
+		select {
+		case gate <- struct{}{}:
+			select {
+			case h.Limiter <- struct{}{}:
+				h.addRunning(1)
+				return h.releaseSlot(gate), nil
+			default:
+				<-gate // release the gate; fall through to the waiting path
+			}
+		default:
+		}
+	} else {
+		select {
+		case h.Limiter <- struct{}{}:
+			h.addRunning(1)
+			return h.releaseSlot(nil), nil
+		default:
+		}
 	}
 
-	entryID, ok := h.enqueueDownloadQueue(i18n.From(ctx), update)
-	if !ok {
+	// Slow path: become a waiting task, subject to the total queue cap.
+	if !h.enterWaiting() {
 		return nil, errDownloadQueueOverloaded
+	}
+	if onQueued != nil {
+		onQueued()
+	}
+
+	if gate != nil {
+		select {
+		case gate <- struct{}{}:
+		case <-ctx.Done():
+			h.leaveWaiting()
+			return nil, ctx.Err()
+		}
 	}
 	select {
 	case h.Limiter <- struct{}{}:
-		h.dequeueDownloadQueue(entryID)
-		return func() { <-h.Limiter }, nil
+		h.leaveWaiting()
+		h.addRunning(1)
+		return h.releaseSlot(gate), nil
 	case <-ctx.Done():
-		h.dequeueDownloadQueue(entryID)
+		if gate != nil {
+			<-gate
+		}
+		h.leaveWaiting()
 		return nil, ctx.Err()
 	}
 }
 
-func (h *MusicHandler) enqueueDownloadQueue(loc *i18n.Localizer, update func(text string)) (int64, bool) {
-	if h == nil {
-		return 0, false
+// serialGateFor returns the size-1 semaphore guarding a platform's serialized
+// download resource, or nil when this request need not be serialized. Gates are
+// created lazily and keyed by platform name.
+func (h *MusicHandler) serialGateFor(platformName, trackID string, quality platform.Quality) chan struct{} {
+	if h == nil || h.PlatformManager == nil {
+		return nil
 	}
+	name := strings.TrimSpace(platformName)
+	if name == "" {
+		return nil
+	}
+	plat := h.PlatformManager.Get(name)
+	if plat == nil {
+		return nil
+	}
+	gateProvider, ok := plat.(platform.SerialDownloadGate)
+	if !ok || !gateProvider.NeedsSerialDownload(trackID, quality) {
+		return nil
+	}
+	h.serialGateMu.Lock()
+	defer h.serialGateMu.Unlock()
+	if h.serialGates == nil {
+		h.serialGates = make(map[string]chan struct{})
+	}
+	gate, ok := h.serialGates[name]
+	if !ok {
+		gate = make(chan struct{}, 1)
+		h.serialGates[name] = gate
+	}
+	return gate
+}
+
+// enterWaiting admits a task into the waiting state unless the cap is reached.
+func (h *MusicHandler) enterWaiting() bool {
 	h.downloadQueueMu.Lock()
-	if h.DownloadQueueWaitLimit > 0 && len(h.downloadQueue) >= h.DownloadQueueWaitLimit {
+	defer h.downloadQueueMu.Unlock()
+	if h.DownloadQueueWaitLimit > 0 && h.downloadWaiting >= h.DownloadQueueWaitLimit {
 		if h.Logger != nil && h.EnableQueueObservability {
-			h.Logger.Warn("download queue overloaded", "queue_len", len(h.downloadQueue), "queue_wait_limit", h.DownloadQueueWaitLimit)
+			h.Logger.Warn("download queue overloaded", "waiting", h.downloadWaiting, "limit", h.DownloadQueueWaitLimit)
 		}
-		h.downloadQueueMu.Unlock()
-		return 0, false
+		return false
 	}
-	h.downloadQueueSeq++
-	entryID := h.downloadQueueSeq
-	h.downloadQueue = append(h.downloadQueue, downloadQueueEntry{id: entryID, update: update, loc: loc})
-	snapshot := append([]downloadQueueEntry(nil), h.downloadQueue...)
-	if h.Logger != nil && h.EnableQueueObservability {
-		h.Logger.Debug("download task enqueued", "queue_len", len(h.downloadQueue), "queue_wait_limit", h.DownloadQueueWaitLimit)
-	}
-	h.downloadQueueMu.Unlock()
-	h.refreshDownloadQueue(snapshot)
-	return entryID, true
+	h.downloadWaiting++
+	return true
 }
 
-func (h *MusicHandler) dequeueDownloadQueue(entryID int64) {
-	if h == nil || entryID == 0 {
-		return
-	}
+func (h *MusicHandler) leaveWaiting() {
 	h.downloadQueueMu.Lock()
-	filtered := h.downloadQueue[:0]
-	for _, entry := range h.downloadQueue {
-		if entry.id == entryID {
-			continue
-		}
-		filtered = append(filtered, entry)
+	if h.downloadWaiting > 0 {
+		h.downloadWaiting--
 	}
-	h.downloadQueue = filtered
-	if h.downloadQueueText != nil {
-		delete(h.downloadQueueText, entryID)
-	}
-	snapshot := append([]downloadQueueEntry(nil), h.downloadQueue...)
 	h.downloadQueueMu.Unlock()
-	h.refreshDownloadQueue(snapshot)
 }
 
-func (h *MusicHandler) refreshDownloadQueue(snapshot []downloadQueueEntry) {
-	if h == nil || len(snapshot) == 0 {
-		return
-	}
-	type queueUpdate struct {
-		update func(string)
-		text   string
-	}
-	updates := make([]queueUpdate, 0, len(snapshot))
-
+func (h *MusicHandler) addRunning(delta int) {
 	h.downloadQueueMu.Lock()
-	if h.downloadQueueText == nil {
-		h.downloadQueueText = make(map[int64]string, len(snapshot))
-	}
-	for idx, entry := range snapshot {
-		if entry.update == nil {
-			continue
-		}
-		ahead := idx
-		entryCtx := i18n.WithLocalizer(context.Background(), entry.loc)
-		text := tr(entryCtx, "wait_for_down")
-		if ahead > 0 {
-			text = text + "\n" + tr(entryCtx, "download_queue_ahead", map[string]any{"Count": ahead})
-		}
-		if h.downloadQueueText[entry.id] == text {
-			continue
-		}
-		h.downloadQueueText[entry.id] = text
-		updates = append(updates, queueUpdate{update: entry.update, text: text})
+	h.downloadRunning += delta
+	if h.downloadRunning < 0 {
+		h.downloadRunning = 0
 	}
 	h.downloadQueueMu.Unlock()
+}
 
-	for _, item := range updates {
-		item.update(item.text)
+// releaseSlot returns an idempotent func that frees the global slot, decrements
+// the running count, and releases the serial gate when one was held.
+func (h *MusicHandler) releaseSlot(gate chan struct{}) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-h.Limiter
+			h.addRunning(-1)
+			if gate != nil {
+				<-gate
+			}
+		})
 	}
+}
+
+// DownloadQueueStats reports the live download queue counters: how many tasks
+// are waiting for a slot/gate, how many are actively downloading, and the
+// configured waiting-queue cap (0 = unlimited). Used by the "view queue" button.
+func (h *MusicHandler) DownloadQueueStats() (waiting, running, limit int) {
+	if h == nil {
+		return 0, 0, 0
+	}
+	h.downloadQueueMu.Lock()
+	defer h.downloadQueueMu.Unlock()
+	return h.downloadWaiting, h.downloadRunning, h.DownloadQueueWaitLimit
 }
 
 func isInlineStartToken(value string) bool {

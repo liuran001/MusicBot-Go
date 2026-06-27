@@ -510,6 +510,7 @@ func (a *App) Start(ctx context.Context) error {
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
 		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()},
 		FavoriteCallback:         favoriteCallback,
+		DownloadQueueCallback:    &handler.DownloadQueueCallbackHandler{Music: musicHandler, RateLimiter: rateLimiter},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, Favorites: favoritesHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},

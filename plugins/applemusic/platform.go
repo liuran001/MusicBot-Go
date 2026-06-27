@@ -51,6 +51,18 @@ func (p *AppleMusicPlatform) GetDownloadInfo(ctx context.Context, trackID string
 	return p.client.GetDownloadInfo(ctx, trackID, quality)
 }
 
+// NeedsSerialDownload implements platform.SerialDownloadGate. It returns true
+// when the request will be served through the FairPlay wrapper, which decrypts
+// only one track at a time over a single TCP session; concurrent wrapper
+// downloads would corrupt each other. AAC-tier requests that stay on the native
+// path are not gated.
+func (p *AppleMusicPlatform) NeedsSerialDownload(trackID string, quality platform.Quality) bool {
+	if p == nil || p.client == nil {
+		return false
+	}
+	return p.client.willUseWrapper(quality)
+}
+
 func (p *AppleMusicPlatform) Search(ctx context.Context, query string, limit int) ([]platform.Track, error) {
 	if p == nil || p.client == nil {
 		return nil, platform.NewUnavailableError("applemusic", "search", query)

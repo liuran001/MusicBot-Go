@@ -48,10 +48,13 @@ Examples:
 downloading_named = "Downloading: {{.Title}}\nDownloaded: {{.WrittenMB}} MB"
 downloading_progress = "Downloading: {{.Title}}\nProgress: {{.Percent}}% ({{.WrittenMB}} MB / {{.TotalMB}} MB)"
 upload_queue_ahead = "In the send queue, {{.Count}} task(s) ahead"
-download_queue_ahead = "In the download queue, {{.Count}} task(s) ahead"
 
 # --- queue / download wait ---
 queue_overloaded = "Download queue is full, please try again later"
+download_queued = "Queued…"
+download_queue_button = "View queue"
+download_queue_status = "Downloading: {{.Running}}\nWaiting in queue: {{.Waiting}}"
+download_queue_status_limited = "Downloading: {{.Running}}\nWaiting in queue: {{.Waiting}} / {{.Limit}}"
 
 # --- bot command menu (setMyCommands) ---
 cmd_help = "How to use"

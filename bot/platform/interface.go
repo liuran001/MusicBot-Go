@@ -188,6 +188,23 @@ type SearchFilterProvider interface {
 	WithSearchFilter(ctx context.Context, enabled bool) context.Context
 }
 
+// SerialDownloadGate is an optional interface for platforms whose download for
+// certain requests must be serialized (only one running at a time) because of a
+// shared external resource. Apple Music's FairPlay wrapper is the motivating
+// case: it decrypts lossless/Atmos one track at a time over a single TCP
+// session, so concurrent wrapper downloads corrupt each other.
+//
+// When a platform reports NeedsSerialDownload == true for a request, the
+// download handler acquires a per-platform, size-1 gate BEFORE the global
+// download slot, so tasks blocked on the gate do not occupy global download
+// concurrency while they wait. The handler — not the platform — owns the gate
+// and its queueing, so this interface only declares intent.
+type SerialDownloadGate interface {
+	// NeedsSerialDownload reports whether a download of (trackID, quality) will
+	// use the serialized resource and therefore must pass through the gate.
+	NeedsSerialDownload(trackID string, quality Quality) bool
+}
+
 // Manager provides a registry for multiple platform implementations.
 // This allows the bot to work with multiple music platforms simultaneously.
 type Manager interface {
