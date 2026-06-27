@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
+	widevine "github.com/iyear/gowidevine"
+
 	"github.com/liuran001/MusicBot-Go/bot/config"
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
+	"github.com/liuran001/MusicBot-Go/plugins/applemusic"
 	"github.com/liuran001/MusicBot-Go/plugins/spotify/native"
 )
 
@@ -221,9 +224,20 @@ func RunVerifyCookie(ctx context.Context, cfg *config.Config, logger *logpkg.Log
 
 	fmt.Println("\n=== 完整 Widevine AAC 链路 ===")
 	wvdPath := strings.TrimSpace(cfg.GetPluginString(platformName, "wvd_path"))
-	device, derr := native.LoadWVDeviceFile(wvdPath)
-	if derr != nil {
-		return fmt.Errorf("加载 Widevine L3 device 失败（请在 [plugins.spotify] 配置 wvd_path）: %w", derr)
+	var device *widevine.Device
+	if wvdPath != "" {
+		d, derr := native.LoadWVDeviceFile(wvdPath)
+		if derr != nil {
+			return fmt.Errorf("加载 Widevine L3 device 失败: %w", derr)
+		}
+		device = d
+	} else {
+		// Reuse the Apple Music plugin's built-in public L3 device.
+		d, derr := applemusic.BuiltinL3Device()
+		if derr != nil {
+			return fmt.Errorf("加载内置 Widevine L3 device 失败: %w", derr)
+		}
+		device = d
 	}
 	wv, err := native.DownloadWidevineMP4(ctx, nativeHTTP, native.WebAuth{Bearer: wt.AccessToken, ClientToken: wt.ClientToken}, device, trackID, 0)
 	if wv != nil {

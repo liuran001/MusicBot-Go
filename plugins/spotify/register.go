@@ -11,6 +11,7 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	platformplugins "github.com/liuran001/MusicBot-Go/bot/platform/plugins"
+	"github.com/liuran001/MusicBot-Go/plugins/applemusic"
 	"github.com/liuran001/MusicBot-Go/plugins/spotify/native"
 )
 
@@ -57,15 +58,23 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		return nil, err
 	}
 	spDC := strings.TrimSpace(cfg.GetPluginString(platformName, "sp_dc"))
-	// Widevine L3 device (.wvd) — required to decrypt Spotify AAC. No key is
-	// embedded; the operator supplies their own device file.
+	// Widevine L3 device to decrypt Spotify AAC. Prefer an operator-supplied
+	// .wvd (wvd_path); otherwise reuse the Apple Music plugin's built-in public
+	// L3 device (no duplicate key embedded in this plugin).
 	wvDevicePath := strings.TrimSpace(cfg.GetPluginString(platformName, "wvd_path"))
 	var wvDevice *widevine.Device
 	if wvDevicePath != "" {
 		if dev, derr := native.LoadWVDeviceFile(wvDevicePath); derr == nil {
 			wvDevice = dev
 		} else if logger != nil {
-			logger.Warn("spotify: failed loading wvd device", "path", wvDevicePath, "error", derr)
+			logger.Warn("spotify: failed loading wvd device, falling back to built-in", "path", wvDevicePath, "error", derr)
+		}
+	}
+	if wvDevice == nil {
+		if dev, derr := applemusic.BuiltinL3Device(); derr == nil {
+			wvDevice = dev
+		} else if logger != nil {
+			logger.Warn("spotify: failed loading built-in L3 device", "error", derr)
 		}
 	}
 	nativeClient := native.NewWidevineClient(native.WidevineOptions{
