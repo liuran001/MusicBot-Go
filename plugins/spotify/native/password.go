@@ -94,6 +94,11 @@ func DownloadOGGWithCookie(ctx context.Context, baseLog bot.Logger, hc *http.Cli
 		}
 	}
 	add("username=%s", username)
+	// Best-effort account tier — explains an audio-key refusal (free accounts
+	// are denied keys on the legacy path).
+	if product := fetchProduct(ctx, hc, wt.AccessToken); product != "" {
+		add("account product=%s", product)
+	}
 
 	log := newLogAdapter(baseLog)
 	deviceID := newDeviceID()
@@ -155,6 +160,32 @@ func fetchWebUsername(ctx context.Context, hc *http.Client, token string) (strin
 		return "", fmt.Errorf("/v1/me parse failed: %s", snippet(b))
 	}
 	return me.ID, nil
+}
+
+// fetchProduct returns the account's product tier (free/premium) best-effort.
+func fetchProduct(ctx context.Context, hc *http.Client, token string) string {
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.spotify.com/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode != 200 {
+		return fmt.Sprintf("(unknown, /v1/me HTTP %d)", resp.StatusCode)
+	}
+	var me struct {
+		Product string `json:"product"`
+	}
+	if json.Unmarshal(b, &me) != nil {
+		return ""
+	}
+	return me.Product
 }
 
 // jwtSub decodes a JWT access token's payload and returns its `sub` claim
