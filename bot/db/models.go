@@ -151,6 +151,9 @@ type UserSettingsModel struct {
 	AutoDeleteList     bool   `gorm:"not null;default:false"`
 	AutoLinkDetect     bool   `gorm:"not null;default:true"`
 	DefaultLyricFormat string `gorm:"not null;default:'lrc'"`
+	// Language is the persisted UI-language override (2-letter ISO 639-1, e.g.
+	// "zh"/"en"/"ja"). Empty means "auto-detect from the Telegram client".
+	Language string `gorm:"not null;default:''"`
 	// Nullable side-track defaults: NULL means "unset" (use the per-format
 	// default); a non-NULL value is the user's explicit choice.
 	DefaultLyricIncludeTranslation *bool
@@ -170,6 +173,9 @@ type GroupSettingsModel struct {
 	AutoDeleteList     bool   `gorm:"not null;default:true"`
 	AutoLinkDetect     bool   `gorm:"not null;default:true"`
 	DefaultLyricFormat string `gorm:"not null;default:'lrc'"`
+	// Language is the persisted UI-language override (2-letter ISO 639-1, e.g.
+	// "zh"/"en"/"ja"). Empty means "auto-detect from the Telegram client".
+	Language string `gorm:"not null;default:''"`
 	// Nullable side-track defaults: NULL means "unset" (use the per-format
 	// default); a non-NULL value is the group's explicit choice.
 	DefaultLyricIncludeTranslation *bool

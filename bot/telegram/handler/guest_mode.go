@@ -91,7 +91,7 @@ func (h *GuestModeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 			h.Favorites.answerGuestList(ctx, b, message, guestQueryID)
 			return
 		}
-		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_input_song_or_link"))
 		return
 	}
 
@@ -272,7 +272,7 @@ func (h *GuestModeHandler) answerGuest(ctx context.Context, b *telego.Bot, guest
 // into a search menu or audio result.
 func (h *GuestModeHandler) answerGuestPlaceholder(ctx context.Context, b *telego.Bot, guestQueryID, title string) string {
 	if strings.TrimSpace(title) == "" {
-		title = waitForDown
+		title = tr(ctx, "wait_for_down")
 	}
 	article := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,

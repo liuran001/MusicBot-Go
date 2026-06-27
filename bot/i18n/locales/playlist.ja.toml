@@ -1,0 +1,37 @@
+# Japanese catalog shard — playlist handler + episode picker (pl_ domain).
+# PLAIN text; MarkdownV2 escaping happens at the output boundary.
+
+# --- collection type labels ---
+pl_collection_album = "アルバム"
+pl_collection_playlist = "プレイリスト"
+
+# --- fetch / empty / status ---
+pl_fetching_album = "アルバムを取得中…"
+pl_album_empty = "アルバムに曲がありません"
+pl_list_expired = "リストの有効期限が切れました。リンクをもう一度送信してください"
+pl_processing = "処理中です。しばらくお待ちください"
+pl_already_on_page = "すでに{{.Page}}ページ目です"
+pl_load_failed = "{{.Label}}の読み込みに失敗しました"
+pl_no_results = "結果が見つかりません"
+
+# --- pagination / nav buttons ---
+pl_page_of = "{{.Page}}/{{.Total}} ページ"
+pl_close = "閉じる"
+pl_next_page = "次へ"
+pl_prev_page = "前へ"
+pl_home = "最初のページへ"
+
+# --- collection info labels ---
+pl_creator = "作成者"
+pl_track_count = "曲数"
+pl_description = "概要"
+
+# --- episode (multi-part) picker ---
+pl_prev_page_arrow = "⬅️ 前へ"
+pl_next_page_arrow = "➡️ 次へ"
+pl_home_arrow = "🏠 ホーム"
+pl_last_page_arrow = "⏭️ 最後のページ"
+pl_back_to_search = "↩️ 検索結果に戻る"
+pl_episode_close = "❌ 閉じる"
+pl_title = "タイトル"
+pl_uploader = "投稿者"

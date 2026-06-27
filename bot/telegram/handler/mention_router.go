@@ -121,7 +121,7 @@ func (r *MentionRouter) Handle(ctx context.Context, b *telego.Bot, update *teleg
 			r.Favorites.sendListMessage(ctx, b, message.Chat.ID, message.MessageID, requesterID, groupChatID, isGroupChat, view)
 			return
 		}
-		sendText(ctx, b, message.Chat.ID, message.MessageID, inputContent)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "input_content"))
 		return
 	}
 
@@ -206,7 +206,7 @@ func (r *MentionRouter) isDirectDownload(ctx context.Context, content string) bo
 // reads the replied voice itself.
 func (r *MentionRouter) dispatchRecognize(ctx context.Context, b *telego.Bot, message *telego.Message) {
 	if r.Recognize == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, "识别服务未启动")
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "guest_recognize_service_unavailable"))
 		return
 	}
 	r.Recognize.Handle(ctx, b, &telego.Update{Message: message})
@@ -226,7 +226,7 @@ func (r *MentionRouter) dispatchLyric(ctx context.Context, b *telego.Bot, messag
 func (r *MentionRouter) dispatchSong(ctx context.Context, b *telego.Bot, message *telego.Message, content string) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, inputContent)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "input_content"))
 		return
 	}
 	if r.PlatformManager != nil {

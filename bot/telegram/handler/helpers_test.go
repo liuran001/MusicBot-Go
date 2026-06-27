@@ -89,7 +89,7 @@ func TestBuildMusicCaption(t *testing.T) {
 		MusicSize:   1024,
 		BitRate:     320000,
 	}
-	caption := buildMusicCaption(nil, info, "botname")
+	caption := buildMusicCaption(zhCtx(), nil, info, "botname")
 	if caption == "" {
 		t.Fatalf("expected caption")
 	}
@@ -115,7 +115,7 @@ func TestQualityTag(t *testing.T) {
 		{"unknown", ""},
 	}
 	for _, tt := range tests {
-		if got := qualityTag(tt.quality); got != tt.want {
+		if got := qualityTag(zhCtx(), tt.quality); got != tt.want {
 			t.Fatalf("qualityTag(%q)=%q want=%q", tt.quality, got, tt.want)
 		}
 	}
@@ -130,7 +130,7 @@ func TestBuildMusicCaptionHidesAlbumLineWhenEmpty(t *testing.T) {
 		MusicSize:   1024,
 		BitRate:     320000,
 	}
-	caption := buildMusicCaption(nil, info, "botname")
+	caption := buildMusicCaption(zhCtx(), nil, info, "botname")
 	if strings.Contains(caption, "专辑:") {
 		t.Fatalf("expected caption to hide album line when album is empty, got %q", caption)
 	}
@@ -148,7 +148,7 @@ func TestBuildMusicCaptionEscapesHTMLAndKeepsLinks(t *testing.T) {
 		MusicSize:       1024,
 		BitRate:         320000,
 	}
-	caption := buildMusicCaption(nil, info, "botname")
+	caption := buildMusicCaption(zhCtx(), nil, info, "botname")
 	if !strings.Contains(caption, `<a href="https://track.example/?a=1&amp;b=2">Song &lt;Test&gt;</a>`) {
 		t.Fatalf("expected escaped track link, got %q", caption)
 	}
@@ -284,7 +284,7 @@ func (p *refreshKugouTestPlatform) GetPlaylist(ctx context.Context, playlistID s
 }
 
 func TestBuildMusicInfoTextHideAlbumLineWhenEmpty(t *testing.T) {
-	text := buildMusicInfoText("Song", "", "mp3 1MB", "下载中...")
+	text := buildMusicInfoText(zhCtx(), "Song", "", "mp3 1MB", "下载中...")
 	if strings.Contains(text, "专辑:") {
 		t.Fatalf("expected status text to hide album line when album is empty, got %q", text)
 	}
@@ -294,7 +294,7 @@ func TestBuildMusicInfoTextHideAlbumLineWhenEmpty(t *testing.T) {
 }
 
 func TestBuildMusicInfoTextKeepAlbumLine(t *testing.T) {
-	text := buildMusicInfoText("Song", "Album", "mp3 1MB", "下载中...")
+	text := buildMusicInfoText(zhCtx(), "Song", "Album", "mp3 1MB", "下载中...")
 	if !strings.Contains(text, "专辑: Album") {
 		t.Fatalf("expected status text contains album line, got %q", text)
 	}
@@ -317,7 +317,7 @@ func TestUserVisibleDownloadErrorMappings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := userVisibleDownloadError(tt.err)
+			got := userVisibleDownloadError(zhCtx(), tt.err)
 			if got != tt.want {
 				t.Fatalf("unexpected message: got %q want %q", got, tt.want)
 			}
@@ -460,22 +460,18 @@ func TestUserVisibleSearchError(t *testing.T) {
 		want string
 	}{
 		{name: "unsupported", err: platform.ErrUnsupported, want: "此平台不支持搜索功能"},
-		{name: "rate limited", err: platform.ErrRateLimited, want: "请求过于频繁，请稍后再试"},
+		{name: "rate limited", err: platform.ErrRateLimited, want: "请求过于频繁，请稍后重试"},
 		{name: "unavailable", err: platform.ErrUnavailable, want: "搜索服务暂时不可用"},
-		{name: "default", err: errors.New("other"), want: noResults},
-		{name: "nil", err: nil, want: noResults},
+		{name: "default", err: errors.New("other"), want: "没有找到结果，换个关键词试试"},
+		{name: "nil", err: nil, want: "没有找到结果，换个关键词试试"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := userVisibleSearchError(tt.err, ""); got != tt.want {
+			if got := userVisibleSearchError(zhCtx(), tt.err); got != tt.want {
 				t.Fatalf("unexpected search error text: got %q want %q", got, tt.want)
 			}
 		})
-	}
-
-	if got := userVisibleSearchError(platform.ErrUnavailable, "自定义不可用"); got != "自定义不可用" {
-		t.Fatalf("expected custom unavailable text, got %q", got)
 	}
 }
 
@@ -486,16 +482,16 @@ func TestUserVisiblePlaylistError(t *testing.T) {
 		want string
 	}{
 		{name: "unsupported", err: platform.ErrUnsupported, want: "此平台不支持获取歌单"},
-		{name: "rate limited", err: platform.ErrRateLimited, want: "请求过于频繁，请稍后再试"},
+		{name: "rate limited", err: platform.ErrRateLimited, want: "请求过于频繁，请稍后重试"},
 		{name: "unavailable", err: platform.ErrUnavailable, want: "歌单服务暂时不可用"},
 		{name: "not found", err: platform.ErrNotFound, want: "未找到歌单"},
-		{name: "default", err: errors.New("other"), want: noResults},
-		{name: "nil", err: nil, want: noResults},
+		{name: "default", err: errors.New("other"), want: "没有找到结果，换个关键词试试"},
+		{name: "nil", err: nil, want: "没有找到结果，换个关键词试试"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := userVisiblePlaylistError(tt.err); got != tt.want {
+			if got := userVisiblePlaylistError(zhCtx(), tt.err); got != tt.want {
 				t.Fatalf("unexpected playlist error text: got %q want %q", got, tt.want)
 			}
 		})

@@ -13,6 +13,7 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/db"
 	"github.com/liuran001/MusicBot-Go/bot/download"
 	"github.com/liuran001/MusicBot-Go/bot/dynplugin"
+	"github.com/liuran001/MusicBot-Go/bot/i18n"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
 	logpkg "github.com/liuran001/MusicBot-Go/bot/logger"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
@@ -260,6 +261,13 @@ func initTelegramBot(conf *config.Config, log *logpkg.Logger) (*telegram.Bot, er
 
 // Start initializes background services. Telegram startup is added in later waves.
 func (a *App) Start(ctx context.Context) error {
+	// Load localization catalogs before any handler can render user-facing text.
+	// A failure here is non-fatal: the i18n layer degrades to echoing message IDs,
+	// so the bot still starts rather than crashing on a missing locale asset.
+	if _, err := i18n.Init(); err != nil && a.Logger != nil {
+		a.Logger.Warn("failed to init i18n catalogs", "error", err)
+	}
+
 	// Start recognition service first
 	if a.RecognizeService != nil {
 		if err := a.RecognizeService.Start(ctx); err != nil {
@@ -509,6 +517,7 @@ func (a *App) Start(ctx context.Context) error {
 		AdminCommands:            adminCommandNames,
 		Whitelist:                whitelist,
 		Logger:                   a.Logger,
+		Repo:                     a.DB,
 	}
 
 	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, telegram.LongPollingParams())
@@ -523,26 +532,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	router.Register(botHandler, botName)
 
-	commands := []telego.BotCommand{
-		{Command: "help", Description: "使用说明"},
-		{Command: "music", Description: "下载歌曲"},
-		{Command: "search", Description: "搜索歌曲"},
-		{Command: "lyric", Description: "获取歌词"},
-		{Command: "fav", Description: "收藏歌曲 / 查看收藏列表"},
-		{Command: "settings", Description: "默认平台、音质与歌词格式"},
-	}
-	if enableRecognize {
-		commands = append(commands, telego.BotCommand{Command: "recognize", Description: "听歌识曲"})
-	}
-	commands = append(commands,
-		telego.BotCommand{Command: "status", Description: "缓存与账号状态"},
-		telego.BotCommand{Command: "about", Description: "版本与插件信息"},
-	)
-	if err := a.Telegram.Client().SetMyCommands(ctx, &telego.SetMyCommandsParams{
-		Commands: commands,
-	}); err != nil && a.Logger != nil {
-		a.Logger.Warn("failed to set bot commands", "error", err)
-	}
+	a.registerLocalizedCommands(ctx, enableRecognize)
 
 	go func() {
 		if err := botHandler.Start(); err != nil && a.Logger != nil {
@@ -550,6 +540,102 @@ func (a *App) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// localizedCommandSpec describes one bot command whose description is resolved
+// from the i18n catalog per language.
+type localizedCommandSpec struct {
+	command    string
+	descKey    string
+	recognize  bool // only included when audio recognition is enabled
+}
+
+// botCommandSpecs is the menu shown in Telegram clients, in display order. The
+// description text is looked up per language via the i18n catalog.
+var botCommandSpecs = []localizedCommandSpec{
+	{command: "help", descKey: "cmd_help"},
+	{command: "music", descKey: "cmd_music"},
+	{command: "search", descKey: "cmd_search"},
+	{command: "lyric", descKey: "cmd_lyric"},
+	{command: "fav", descKey: "cmd_fav"},
+	{command: "settings", descKey: "cmd_settings"},
+	{command: "recognize", descKey: "cmd_recognize", recognize: true},
+	{command: "status", descKey: "cmd_status"},
+	{command: "about", descKey: "cmd_about"},
+}
+
+// registerLocalizedCommands publishes the command menu, bot name, and bot
+// descriptions to Telegram once per supported language. Telegram stores one
+// table per (scope, language_code) and serves each client the table matching
+// its UI language, falling back to the empty-language_code default table.
+//
+// We register the default table with the fallback language (English) so every
+// user sees a usable menu, then one table per remaining supported language. The
+// language_code Telegram accepts is a 2-letter ISO 639-1 code — exactly the
+// codes i18n.SupportedLanguages already uses.
+func (a *App) registerLocalizedCommands(ctx context.Context, enableRecognize bool) {
+	client := a.Telegram.Client()
+
+	buildCommands := func(loc *i18n.Localizer) []telego.BotCommand {
+		out := make([]telego.BotCommand, 0, len(botCommandSpecs))
+		for _, spec := range botCommandSpecs {
+			if spec.recognize && !enableRecognize {
+				continue
+			}
+			out = append(out, telego.BotCommand{
+				Command:     spec.command,
+				Description: loc.T(spec.descKey),
+			})
+		}
+		return out
+	}
+
+	// Apply one (scope=default) catalog per language. The fallback language is
+	// also written with an empty language_code so it becomes the default table.
+	apply := func(langCode string, loc *i18n.Localizer) {
+		params := &telego.SetMyCommandsParams{Commands: buildCommands(loc)}
+		if langCode != "" {
+			params.LanguageCode = langCode
+		}
+		if err := client.SetMyCommands(ctx, params); err != nil && a.Logger != nil {
+			a.Logger.Warn("failed to set bot commands", "lang", langCode, "error", err)
+		}
+
+		if name := loc.T("bot_name"); strings.TrimSpace(name) != "" && name != "bot_name" {
+			nameParams := &telego.SetMyNameParams{Name: name}
+			if langCode != "" {
+				nameParams.LanguageCode = langCode
+			}
+			if err := client.SetMyName(ctx, nameParams); err != nil && a.Logger != nil {
+				a.Logger.Debug("failed to set bot name", "lang", langCode, "error", err)
+			}
+		}
+		if desc := loc.T("bot_description"); desc != "" && desc != "bot_description" {
+			descParams := &telego.SetMyDescriptionParams{Description: desc}
+			if langCode != "" {
+				descParams.LanguageCode = langCode
+			}
+			if err := client.SetMyDescription(ctx, descParams); err != nil && a.Logger != nil {
+				a.Logger.Debug("failed to set bot description", "lang", langCode, "error", err)
+			}
+		}
+		if short := loc.T("bot_short_description"); short != "" && short != "bot_short_description" {
+			shortParams := &telego.SetMyShortDescriptionParams{ShortDescription: short}
+			if langCode != "" {
+				shortParams.LanguageCode = langCode
+			}
+			if err := client.SetMyShortDescription(ctx, shortParams); err != nil && a.Logger != nil {
+				a.Logger.Debug("failed to set bot short description", "lang", langCode, "error", err)
+			}
+		}
+	}
+
+	// Default table (empty language_code) uses the fallback language so users
+	// whose client language has no dedicated table still get a complete menu.
+	apply("", i18n.For(i18n.DefaultLanguage))
+	for _, lang := range i18n.SupportedLanguages {
+		apply(lang, i18n.For(lang))
+	}
 }
 
 func BuildWhitelistCommand(wl *handler.Whitelist) admincmd.Command {

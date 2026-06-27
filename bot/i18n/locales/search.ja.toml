@@ -1,0 +1,21 @@
+# Search handler (srch_*) — 日本語。
+
+# --- search result page (MarkdownV2) ---
+srch_results = "検索結果"
+srch_pick_number_hint = "下の番号をタップして曲を選択してください"
+srch_keyword_label = "キーワード: "
+srch_page_indicator = "{{.Page}}/{{.Total}} ページ"
+srch_fallback_switched = "⚠️ デフォルトプラットフォームでの検索に失敗したため、{{.Name}} に切り替えました\n\n"
+
+# --- search buttons / toasts ---
+srch_nav_prev = "⬅️ 前のページ"
+srch_nav_next = "➡️ 次のページ"
+srch_nav_home = "🏠 ホームに戻る"
+srch_filter_on = "オン"
+srch_filter_off = "オフ"
+srch_close = "❌ 閉じる"
+srch_expired = "検索結果の有効期限が切れました。もう一度検索してください"
+srch_processing = "処理中です。しばらくお待ちください"
+srch_search_failed_retry = "検索に失敗しました。しばらくしてからもう一度お試しください"
+srch_no_results_platform = "結果が見つかりません（{{.Platform}}）"
+srch_page_toast = "すでに {{.Page}} ページ目です"

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -16,23 +15,23 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 		return
 	}
 	if h.PlatformManager == nil {
-		h.answerGuest(ctx, b, guestQueryID, "服务不可用")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_service_unavailable"))
 		return
 	}
 	content = strings.TrimSpace(content)
 	if content == "" {
-		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_input_song_or_link"))
 		return
 	}
 	userID, userName := guestRequester(message)
 	if userID == 0 {
-		h.answerGuest(ctx, b, guestQueryID, "无法识别发起者")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_requester_unknown"))
 		return
 	}
 
 	baseText, requestedPlatform, qualityOverride := parseTrailingOptions(content, h.PlatformManager)
 	if strings.TrimSpace(baseText) == "" {
-		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_input_song_or_link"))
 		return
 	}
 	resolvedText := resolveShortLinkText(ctx, h.PlatformManager, baseText)
@@ -58,7 +57,7 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 }
 
 func (h *GuestModeHandler) answerAndRunGuestTrack(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID string, userID int64, userName, platformName, trackID, qualityOverride string) {
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, waitForDown)
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "wait_for_down"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -80,7 +79,7 @@ func guestChatContext(message *telego.Message) (int64, bool) {
 // selectable search-result list in guest mode, reusing the same pagination
 // infrastructure as keyword search.
 func (h *GuestModeHandler) handleGuestPlaylist(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID, platformName, playlistID string, userID int64, qualityOverride string) {
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, "正在加载歌单…")
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "guest_loading_playlist"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -89,17 +88,17 @@ func (h *GuestModeHandler) handleGuestPlaylist(ctx context.Context, b *telego.Bo
 
 func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *telego.Bot, message *telego.Message, inlineMessageID, platformName, playlistID string, userID int64, qualityOverride string) {
 	if h == nil || h.PlatformManager == nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "服务不可用", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_service_unavailable"), nil, "")
 		return
 	}
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "不支持的平台", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_unsupported_platform"), nil, "")
 		return
 	}
 	playlist, err := plat.GetPlaylist(ctx, playlistID)
 	if err != nil || playlist == nil || len(playlist.Tracks) == 0 {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "获取歌单失败或歌单为空", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_playlist_failed_or_empty"), nil, "")
 		return
 	}
 
@@ -111,11 +110,11 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 
 	title := strings.TrimSpace(playlist.Title)
 	if title == "" {
-		title = "歌单"
+		title = tr(ctx, "guest_playlist_default_title")
 	}
 
 	collectionType := detectCollectionType(playlistID, playlist.URL)
-	collectionLabel := collectionTypeLabel(collectionType)
+	collectionLabel := collectionTypeLabel(ctx, collectionType)
 
 	state := &searchState{
 		keyword:          title,
@@ -135,12 +134,12 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 	state.setTracks(platformName, playlist.Tracks)
 
 	token := h.guestSearchStore().store(state)
-	text, keyboard := h.renderGuestSearchPage(state, token, 1)
+	text, keyboard := h.renderGuestSearchPage(ctx, state, token, 1)
 	_ = h.editGuestInlineText(ctx, b, inlineMessageID, text, keyboard, telego.ModeMarkdownV2)
 }
 
 func (h *GuestModeHandler) answerAndRenderGuestSearch(ctx context.Context, b *telego.Bot, message *telego.Message, guestQueryID, keyword, requestedPlatform, qualityOverride string) {
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, searching)
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "searching"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -154,17 +153,17 @@ func (h *GuestModeHandler) answerAndRenderGuestSearch(ctx context.Context, b *te
 
 func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot, message *telego.Message, inlineMessageID, keyword, requestedPlatform, qualityOverride string) {
 	if h == nil || b == nil || message == nil || h.PlatformManager == nil || h.SearchHandler == nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "搜索服务不可用", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_search_service_unavailable"), nil, "")
 		return
 	}
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "请输入关键词", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_input_keyword"), nil, "")
 		return
 	}
 	userID, _ := guestRequester(message)
 	if userID == 0 {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "无法识别发起者", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_requester_unknown"), nil, "")
 		return
 	}
 
@@ -196,7 +195,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 	primaryPlatform := platformName
 	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.guestSearchLimit, true)
 	if err != nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, userVisibleSearchError(err, "搜索服务暂时不可用"), nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, userVisibleSearchError(ctx, err), nil, "")
 		return
 	}
 	qualityValue = resolvePlatformQualityValue(ctx, h.repo(), botpkg.PluginScopeUser, userID, platformName, qualityValue, strings.TrimSpace(qualityOverride) != "")
@@ -226,11 +225,11 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 			state.setUnavailable(platformName, true)
 		}
 		token := h.guestSearchStore().store(state)
-		text := noResults
+		text := tr(ctx, "no_results")
 		if state.platform != "" {
-			text = fmt.Sprintf("未找到结果（%s）", platformDisplayName(h.PlatformManager, state.platform))
+			text = tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(h.PlatformManager, state.platform)})
 		}
-		_, keyboard := h.renderGuestSearchPage(state, token, 1)
+		_, keyboard := h.renderGuestSearchPage(ctx, state, token, 1)
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, text, keyboard, "")
 		return
 	}
@@ -238,7 +237,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 	initialLimit := h.guestPageSize()
 	state.setHasMore(platformName, len(tracks) >= initialLimit && initialLimit < limit)
 	token := h.guestSearchStore().store(state)
-	text, keyboard := h.renderGuestSearchPage(state, token, 1)
+	text, keyboard := h.renderGuestSearchPage(ctx, state, token, 1)
 	_ = h.editGuestInlineText(ctx, b, inlineMessageID, text, keyboard, telego.ModeMarkdownV2)
 }
 
@@ -251,14 +250,14 @@ func (h *GuestModeHandler) handleGuestLyric(ctx context.Context, b *telego.Bot, 
 		keyword = repliedMessageQuery(message.ReplyToMessage)
 	}
 	if keyword == "" {
-		h.answerGuest(ctx, b, guestQueryID, "请输入歌曲名或链接")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_input_song_or_link"))
 		return
 	}
 	if h.LyricHandler == nil || h.LyricHandler.PlatformManager == nil {
-		h.answerGuest(ctx, b, guestQueryID, "歌词服务不可用")
+		h.answerGuest(ctx, b, guestQueryID, tr(ctx, "guest_lyric_service_unavailable"))
 		return
 	}
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, "正在获取歌词…")
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "guest_fetching_lyric"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -269,18 +268,18 @@ func (h *GuestModeHandler) fetchAndEditGuestLyric(ctx context.Context, b *telego
 	requesterID, _ := guestRequester(message)
 	platformName, trackID, ok := h.resolveGuestLyricTrack(ctx, message, keyword)
 	if !ok {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "未找到相关歌曲", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_song_not_found"), nil, "")
 		return
 	}
 	lh := h.LyricHandler
 	plat := lh.PlatformManager.Get(platformName)
 	if plat == nil || !plat.SupportsLyrics() {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "此平台不支持获取歌词", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_platform_no_lyrics"), nil, "")
 		return
 	}
 	lyrics, err := plat.GetLyrics(ctx, trackID)
 	if err != nil || lyrics == nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "获取歌词失败", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_get_lyric_failed"), nil, "")
 		return
 	}
 
@@ -348,7 +347,7 @@ func (h *GuestModeHandler) handleGuestRecognize(ctx context.Context, b *telego.B
 	if h == nil || b == nil || message == nil {
 		return
 	}
-	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, "正在识别…")
+	inlineMessageID := h.answerGuestPlaceholder(ctx, b, guestQueryID, tr(ctx, "guest_recognizing"))
 	if inlineMessageID == "" {
 		return
 	}
@@ -357,7 +356,7 @@ func (h *GuestModeHandler) handleGuestRecognize(ctx context.Context, b *telego.B
 
 func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot, message *telego.Message, inlineMessageID string) {
 	if h.RecognizeService == nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "识别服务未启动", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_recognize_service_unavailable"), nil, "")
 		return
 	}
 	voiceMessage := message.ReplyToMessage
@@ -365,7 +364,7 @@ func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot,
 		if message.Voice != nil {
 			voiceMessage = message
 		} else {
-			_ = h.editGuestInlineText(ctx, b, inlineMessageID, "请回复一条语音消息", nil, "")
+			_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_reply_voice_message"), nil, "")
 			return
 		}
 	}
@@ -375,17 +374,17 @@ func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot,
 	}
 	fileInfo, err := fileBot.GetFile(ctx, &telego.GetFileParams{FileID: voiceMessage.Voice.FileID})
 	if err != nil || fileInfo == nil || fileInfo.FilePath == "" {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "获取语音失败，请稍后重试", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_get_voice_failed"), nil, "")
 		return
 	}
 	if fileInfo.FileSize > 20*1024*1024 {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "语音过大，无法识别", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_voice_too_large"), nil, "")
 		return
 	}
-	_ = h.editGuestInlineText(ctx, b, inlineMessageID, "正在下载语音…", nil, "")
+	_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_downloading_voice"), nil, "")
 	audioData, err := downloadTelegramFile(ctx, fileBot, fileInfo.FilePath)
 	if err != nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "下载语音失败，请稍后重试", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_download_voice_failed"), nil, "")
 		return
 	}
 	cacheDir := strings.TrimSpace(h.CacheDir)
@@ -393,16 +392,16 @@ func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot,
 		cacheDir = "./cache"
 	}
 	ensureDir(cacheDir)
-	_ = h.editGuestInlineText(ctx, b, inlineMessageID, "正在转换音频…", nil, "")
+	_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_converting_audio"), nil, "")
 	mp3Data, err := convertToMP3(ctx, audioData, cacheDir)
 	if err != nil {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "音频格式转换失败，请稍后重试", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_audio_convert_failed"), nil, "")
 		return
 	}
-	_ = h.editGuestInlineText(ctx, b, inlineMessageID, "正在识别…", nil, "")
+	_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_recognizing"), nil, "")
 	result, err := h.RecognizeService.Recognize(ctx, mp3Data)
 	if err != nil || result == nil || strings.TrimSpace(result.TrackID) == "" || strings.TrimSpace(result.Platform) == "" {
-		_ = h.editGuestInlineText(ctx, b, inlineMessageID, "识别失败，可能是录音时间太短", nil, "")
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_recognize_failed_short"), nil, "")
 		return
 	}
 	userID, userName := guestRequester(message)

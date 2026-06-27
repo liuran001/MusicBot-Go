@@ -20,14 +20,16 @@ func ForwardButtonSettingDefinition() botpkg.PluginSettingDefinition {
 		Plugin:                ForwardButtonPlugin,
 		Key:                   ForwardButtonKey,
 		Title:                 "展示歌曲底部按钮",
+		TitleKey:              "set_pdef_forward_title",
 		Description:           "发送歌曲时是否显示底部按钮（发送到聊天 / 展示歌词 / 收藏）",
+		DescriptionKey:        "set_pdef_forward_desc",
 		DefaultUser:           ForwardButtonOn,
 		DefaultGroup:          ForwardButtonOn,
 		RequireAutoLinkDetect: false,
 		Order:                 120,
 		Options: []botpkg.PluginSettingOption{
-			{Value: ForwardButtonOn, Label: "开"},
-			{Value: ForwardButtonOff, Label: "关"},
+			{Value: ForwardButtonOn, Label: "开", LabelKey: "set_state_on"},
+			{Value: ForwardButtonOff, Label: "关", LabelKey: "set_state_off"},
 		},
 	}
 }

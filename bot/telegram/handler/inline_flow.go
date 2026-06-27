@@ -115,7 +115,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 				_, _ = b.EditMessageReplyMarkup(ctx, params)
 			}
 		}
-		retryMarkup := buildInlineSendKeyboard(platformName, trackID, qualityOverride, userID)
+		retryMarkup := buildInlineSendKeyboard(ctx, platformName, trackID, qualityOverride, userID)
 		editInlineMedia := func(songInfo *botpkg.SongInfo) (bool, error) {
 			if songInfo == nil || strings.TrimSpace(songInfo.FileID) == "" {
 				return false, fmt.Errorf("inline media requires file_id")
@@ -123,7 +123,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			media := &telego.InputMediaAudio{
 				Type:      telego.MediaTypeAudio,
 				Media:     telego.InputFile{FileID: songInfo.FileID},
-				Caption:   buildMusicCaption(music.PlatformManager, songInfo, music.BotName),
+				Caption:   buildMusicCaption(ctx, music.PlatformManager, songInfo, music.BotName),
 				ParseMode: telego.ModeHTML,
 				Title:     songInfo.SongName,
 				Performer: songInfo.SongArtists,
@@ -184,13 +184,13 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			}
 		}
 		clearInlineReplyMarkup()
-		setInlineText(waitForDown, nil)
+		setInlineText(tr(ctx, "wait_for_down"), nil)
 		songInfo, err := music.prepareInlineSongWithTimeout(ctx, b, userID, userName, platformName, trackID, qualityOverride, progress)
 		if err != nil {
 			if music.Logger != nil {
 				music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)
 			}
-			setInlineText(buildMusicInfoText("", "", "", userVisibleDownloadError(err)), retryMarkup)
+			setInlineText(buildMusicInfoText(ctx, "", "", "", userVisibleDownloadError(ctx, err)), retryMarkup)
 			return
 		}
 		modified, err := editInlineMedia(songInfo)
@@ -198,7 +198,7 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			if music.Logger != nil {
 				music.Logger.Error("failed to edit inline media", "platform", platformName, "trackID", trackID, "error", err)
 			}
-			setInlineText(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err)), retryMarkup)
+			setInlineText(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(ctx, err)), retryMarkup)
 			return
 		}
 		if modified && music.Repo != nil {

@@ -152,7 +152,7 @@ func (h *SearchHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 	if strings.TrimSpace(keyword) == "" {
 		params := &telego.SendMessageParams{
 			ChatID:          telego.ChatID{ID: message.Chat.ID},
-			Text:            inputKeyword,
+			Text:            tr(ctx, "input_keyword"),
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {
@@ -182,7 +182,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	sendParams := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,
-		Text:            searching,
+		Text:            tr(ctx, "searching"),
 		ReplyParameters: replyParams,
 	}
 	var msgResult *telego.Message
@@ -199,7 +199,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 		params := &telego.EditMessageTextParams{
 			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
 			MessageID: msgResult.MessageID,
-			Text:      noResults,
+			Text:      tr(ctx, "no_results"),
 		}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
@@ -266,7 +266,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
-		errorText := userVisibleSearchError(err, "搜索服务暂时不可用")
+		errorText := userVisibleSearchError(ctx, err)
 		params := &telego.EditMessageTextParams{
 			ChatID:    telego.ChatID{ID: msgResult.Chat.ID},
 			MessageID: msgResult.MessageID,
@@ -307,7 +307,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 		if hasPlatformSuffix {
 			state.setUnavailable(platformName, true)
 		}
-		text, keyboard := h.buildNoResultsPage(state, msgResult.MessageID)
+		text, keyboard := h.buildNoResultsPage(ctx, state, msgResult.MessageID)
 		params := &telego.EditMessageTextParams{
 			ChatID:      telego.ChatID{ID: msgResult.Chat.ID},
 			MessageID:   msgResult.MessageID,
@@ -329,10 +329,10 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	displayName := platformDisplayName(h.PlatformManager, platformName)
 
 	if usedFallback {
-		textMessage.WriteString(fmt.Sprintf("⚠️ 默认平台搜索失败，已切换到%s\n\n", displayName))
+		textMessage.WriteString(tr(ctx, "srch_fallback_switched", map[string]any{"Name": displayName}))
 	}
 
-	textMessage.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmoji, mdV2Replacer.Replace(displayName)))
+	textMessage.WriteString(fmt.Sprintf("%s *%s* %s\n\\* %s\n\n", platformEmoji, mdV2Replacer.Replace(displayName), trMd(ctx, "srch_results"), trMd(ctx, "srch_pick_number_hint")))
 
 	qualityValue := h.resolveDefaultQuality(ctx, message, userID)
 	if strings.TrimSpace(qualityOverride) != "" {
@@ -349,7 +349,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	}
 	initialLimit := h.initialSearchLimit(platformName)
 	hasMore := len(tracks) >= initialLimit && initialLimit < searchLimit
-	pageText, keyboard := h.buildSearchPage(tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit, biliFilter, filterLabel, action)
+	pageText, keyboard := h.buildSearchPage(ctx, tracks, platformName, keyword, qualityValue, requesterID, msgResult.MessageID, 1, unavailable, hasMore, searchLimit, biliFilter, filterLabel, action)
 	textMessage.WriteString(pageText)
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -414,7 +414,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		if !isRequesterOrAdmin(ctx, b, msg.Chat.ID, query.From.ID, requesterID) {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 				CallbackQueryID: query.ID,
-				Text:            callbackDenied,
+				Text:            tr(ctx, "callback_denied"),
 				ShowAlert:       true,
 			})
 			return
@@ -424,7 +424,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	if !ok {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{
 			CallbackQueryID: query.ID,
-			Text:            "搜索结果已过期，请重新搜索",
+			Text:            tr(ctx, "srch_expired"),
 		})
 		return
 	}
@@ -441,7 +441,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	guardKey := fmt.Sprintf("search:%d:%d", msg.Chat.ID, msg.MessageID)
 	releaseGuard, acquired := tryAcquireCallbackInFlight(guardKey, 8*time.Second)
 	if !acquired {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "处理中，请稍候"})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "srch_processing")})
 		return
 	}
 	defer releaseGuard()
@@ -489,9 +489,9 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	if page < 1 {
 		page = 1
 	}
-	isSearchPageMessage := strings.Contains(strings.TrimSpace(msg.Text), "搜索结果")
+	isSearchPageMessage := strings.Contains(strings.TrimSpace(msg.Text), tr(ctx, "srch_results"))
 	if action == "page" && state.currentPage == page && isSearchPageMessage {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("已是第 %d 页", page)})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "srch_page_toast", map[string]any{"Page": page})})
 		return
 	}
 	if h.Search.PlatformManager == nil {
@@ -530,7 +530,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		searchCtx := withSearchFilterContext(ctx, h.Search.PlatformManager, state.platform, state.biliFilter)
 		tracks, err = plat.Search(searchCtx, state.keyword, requestLimit)
 		if err != nil {
-			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: "搜索失败，请稍后重试"}
+			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: tr(ctx, "srch_search_failed_retry")}
 			if h.RateLimiter != nil {
 				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 			} else {
@@ -540,7 +540,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		}
 		if len(tracks) == 0 {
 			state.setUnavailable(state.platform, true)
-			text, keyboard := h.Search.buildNoResultsPage(state, messageID)
+			text, keyboard := h.Search.buildNoResultsPage(ctx, state, messageID)
 			params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID, Text: text, ReplyMarkup: keyboard}
 			if h.RateLimiter != nil {
 				_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
@@ -558,8 +558,8 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		hasMore = state.hasMore(state.platform)
 	}
 	manager := h.Search.PlatformManager
-	textHeader := fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)))
-	pageText, keyboard := h.Search.buildSearchPage(tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText, state.resultAction())
+	textHeader := fmt.Sprintf("%s *%s* %s\n\\* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)), trMd(ctx, "srch_results"), trMd(ctx, "srch_pick_number_hint"))
+	pageText, keyboard := h.Search.buildSearchPage(ctx, tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText, state.resultAction())
 	text := textHeader + pageText
 	disablePreview := true
 	params := &telego.EditMessageTextParams{
@@ -701,7 +701,7 @@ func (h *SearchHandler) resolveDefaultQuality(ctx context.Context, message *tele
 	return qualityValue
 }
 
-func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int, biliFilter bool, filterLabel string, action string) (string, *telego.InlineKeyboardMarkup) {
+func (h *SearchHandler) buildSearchPage(ctx context.Context, tracks []platform.Track, platformName, keyword, qualityValue string, requesterID int64, messageID int, page int, unavailable map[string]bool, hasMore bool, totalLimit int, biliFilter bool, filterLabel string, action string) (string, *telego.InlineKeyboardMarkup) {
 	if strings.TrimSpace(action) == "" {
 		action = "music"
 	}
@@ -738,10 +738,10 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	}
 	var textMessage strings.Builder
 	if strings.TrimSpace(keyword) != "" {
-		textMessage.WriteString(fmt.Sprintf("关键词: %s\n", mdV2Replacer.Replace(keyword)))
+		textMessage.WriteString(fmt.Sprintf("%s%s\n", trMd(ctx, "srch_keyword_label"), mdV2Replacer.Replace(keyword)))
 	}
 	if pageCount > 1 || hasMore {
-		textMessage.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, displayPageCount))
+		textMessage.WriteString(trMd(ctx, "srch_page_indicator", map[string]any{"Page": page, "Total": displayPageCount}) + "\n\n")
 	} else {
 		textMessage.WriteString("\n")
 	}
@@ -778,22 +778,22 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	if pageCount > 1 || hasMore {
 		navRow := make([]telego.InlineKeyboardButton, 0, 2)
 		if page == 1 {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "srch_close"), CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "srch_nav_next"), CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
 		} else if page >= pageCount && !hasMore {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "🏠 回到主页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "srch_nav_prev"), CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "srch_nav_home"), CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)})
 			rows = append(rows, navRow)
 		} else {
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
-			navRow = append(navRow, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "srch_nav_prev"), CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page-1, requesterID)})
+			navRow = append(navRow, telego.InlineKeyboardButton{Text: tr(ctx, "srch_nav_next"), CallbackData: fmt.Sprintf("search %d page %d %d", messageID, page+1, requesterID)})
 			rows = append(rows, navRow)
-			homeRow := []telego.InlineKeyboardButton{{Text: "🏠 回到主页", CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)}}
+			homeRow := []telego.InlineKeyboardButton{{Text: tr(ctx, "srch_nav_home"), CallbackData: fmt.Sprintf("search %d home %d", messageID, requesterID)}}
 			rows = append(rows, homeRow)
 		}
 	} else if page == 1 {
-		rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
+		rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "srch_close"), CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
 
 	if switchRows := h.buildPlatformSwitchRows(platformName, requesterID, messageID, unavailable); len(switchRows) > 0 {
@@ -801,10 +801,10 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	}
 
 	if strings.TrimSpace(filterLabel) != "" {
-		filterText := "开"
+		filterText := tr(ctx, "srch_filter_on")
 		toggleAction := "off"
 		if !biliFilter {
-			filterText = "关"
+			filterText = tr(ctx, "srch_filter_off")
 			toggleAction = "on"
 		}
 		btn := telego.InlineKeyboardButton{
@@ -818,20 +818,20 @@ func (h *SearchHandler) buildSearchPage(tracks []platform.Track, platformName, k
 	return textMessage.String(), keyboard
 }
 
-func (h *SearchHandler) buildNoResultsPage(state *searchState, messageID int) (string, *telego.InlineKeyboardMarkup) {
+func (h *SearchHandler) buildNoResultsPage(ctx context.Context, state *searchState, messageID int) (string, *telego.InlineKeyboardMarkup) {
 	if state == nil {
-		keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, 0)}}}}
-		return noResults, keyboard
+		keyboard := &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{{Text: tr(ctx, "srch_close"), CallbackData: fmt.Sprintf("search %d close %d", messageID, 0)}}}}
+		return tr(ctx, "no_results"), keyboard
 	}
-	text := noResults
+	text := tr(ctx, "no_results")
 	if state.platform != "" {
-		text = fmt.Sprintf("未找到结果（%s）", platformDisplayName(h.PlatformManager, state.platform))
+		text = tr(ctx, "srch_no_results_platform", map[string]any{"Platform": platformDisplayName(h.PlatformManager, state.platform)})
 	}
 	rows := make([][]telego.InlineKeyboardButton, 0, 2)
 	if switchRows := h.buildPlatformSwitchRows(state.platform, state.requesterID, messageID, state.unavailable); len(switchRows) > 0 {
 		rows = append(rows, switchRows...)
 	}
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "srch_close"), CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
 	return text, &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 

@@ -1,0 +1,33 @@
+# Chinese (Simplified) catalog shard — lyric handlers (lyr_ domain).
+# zh = EXACT original strings from the handler source. PLAIN text; MarkdownV2
+# escaping happens at the output boundary.
+
+# --- lyric fetch errors ---
+lyr_err_track_or_lyric_not_found = "未找到歌曲或歌词"
+lyr_err_lyric_unavailable = "此歌曲无法获取歌词"
+lyr_no_lyric_info = "暂无歌词信息"
+lyr_lyric_truncated = "...(歌词过长已截断)"
+
+# --- document caption ---
+lyr_caption_format = "当前歌词格式: {{.Format}}"
+lyr_caption_includes = " · 含{{.Items}}"
+
+# --- side-track names (buttons + caption) ---
+lyr_trans = "翻译"
+lyr_roma = "罗马音"
+
+# --- format-switch keyboard ---
+lyr_change_format = "🎼 更换歌词格式"
+lyr_toggle_trans_on = "翻译: 开"
+lyr_toggle_trans_off = "翻译: 关"
+lyr_toggle_roma_on = "罗马音: 开"
+lyr_toggle_roma_off = "罗马音: 关"
+lyr_save_default = "💾 保存为默认歌词格式"
+
+# --- default lyric file/display name ---
+lyr_default_name = "歌词"
+
+# --- lyric format display-name descriptors (shared with settings) ---
+lyr_fmt_wordbyword = "逐词"
+lyr_fmt_subtitle = "字幕"
+lyr_fmt_plaintext = "纯文本"

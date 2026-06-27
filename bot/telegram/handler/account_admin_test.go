@@ -71,7 +71,7 @@ func TestBuildPlatformLoginHelpIncludesSignExample(t *testing.T) {
 	plat := &loginSignTestPlatform{stubPlatform: newStubPlatform("kugou")}
 	manager.Register(plat)
 
-	text := buildPlatformLoginHelp(manager, plat)
+	text := buildPlatformLoginHelp(zhCtx(), manager, plat)
 	for _, want := range []string{"支持: qr, sign, renew, auto, status", "/login kugou sign", "/login sign kugou"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected help contains %q, got: %s", want, text)
@@ -113,7 +113,7 @@ func TestBuildPlatformLoginHelpMatchesSupportedMethods(t *testing.T) {
 	plat := &loginCookieOnlyTestPlatform{stubPlatform: newStubPlatform("soda")}
 	manager.Register(plat)
 
-	text := buildPlatformLoginHelp(manager, plat)
+	text := buildPlatformLoginHelp(zhCtx(), manager, plat)
 	if !strings.Contains(text, "/login soda cookie <cookie>") {
 		t.Fatalf("expected cookie example, got: %s", text)
 	}

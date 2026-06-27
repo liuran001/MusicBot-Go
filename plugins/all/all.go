@@ -7,4 +7,6 @@ import (
 	_ "github.com/liuran001/MusicBot-Go/plugins/netease"
 	_ "github.com/liuran001/MusicBot-Go/plugins/qqmusic"
 	_ "github.com/liuran001/MusicBot-Go/plugins/soda"
+	_ "github.com/liuran001/MusicBot-Go/plugins/spotify"
+	_ "github.com/liuran001/MusicBot-Go/plugins/youtubemusic"
 )

@@ -1,0 +1,33 @@
+# Japanese catalog shard — lyric handlers (lyr_ domain).
+# ja = faithful Japanese. PLAIN text; MarkdownV2 escaping happens at the output
+# boundary.
+
+# --- lyric fetch errors ---
+lyr_err_track_or_lyric_not_found = "曲または歌詞が見つかりません"
+lyr_err_lyric_unavailable = "この曲の歌詞は取得できません"
+lyr_no_lyric_info = "歌詞情報がありません"
+lyr_lyric_truncated = "...(歌詞が長すぎるため省略しました)"
+
+# --- document caption ---
+lyr_caption_format = "現在の歌詞フォーマット: {{.Format}}"
+lyr_caption_includes = " · {{.Items}}を含む"
+
+# --- side-track names (buttons + caption) ---
+lyr_trans = "翻訳"
+lyr_roma = "ローマ字"
+
+# --- format-switch keyboard ---
+lyr_change_format = "🎼 歌詞フォーマットを変更"
+lyr_toggle_trans_on = "翻訳: オン"
+lyr_toggle_trans_off = "翻訳: オフ"
+lyr_toggle_roma_on = "ローマ字: オン"
+lyr_toggle_roma_off = "ローマ字: オフ"
+lyr_save_default = "💾 デフォルト歌詞フォーマットとして保存"
+
+# --- default lyric file/display name ---
+lyr_default_name = "歌詞"
+
+# --- lyric format display-name descriptors (shared with settings) ---
+lyr_fmt_wordbyword = "単語ごと"
+lyr_fmt_subtitle = "字幕"
+lyr_fmt_plaintext = "プレーンテキスト"

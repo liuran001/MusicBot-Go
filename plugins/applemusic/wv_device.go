@@ -1,6 +1,10 @@
 package applemusic
 
-import "encoding/base64"
+import (
+	"encoding/base64"
+
+	widevine "github.com/iyear/gowidevine"
+)
 
 // Built-in Widevine L3 device credentials for zero-config native DRM
 // decryption. These are the public, shared test-device credentials used by
@@ -47,4 +51,12 @@ func defaultWVCredentials() (clientID, privKey []byte) {
 	clientID, _ = base64.StdEncoding.DecodeString(defaultWVClientIDBase64)
 	privKey = []byte(defaultWVPrivateKeyPEM)
 	return
+}
+
+// BuiltinL3Device builds the shared built-in Widevine L3 device. Exported so
+// other plugins (e.g. spotify) can reuse this one public test device instead of
+// embedding a duplicate private key of their own.
+func BuiltinL3Device() (*widevine.Device, error) {
+	clientID, privKey := defaultWVCredentials()
+	return widevine.NewDevice(widevine.FromRaw(clientID, privKey))
 }

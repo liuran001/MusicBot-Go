@@ -29,8 +29,18 @@ func (h *AboutHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 	runtimeText := mdV2Replacer.Replace(h.RuntimeVer)
 	buildTimeText := mdV2Replacer.Replace(h.BuildTime)
 	buildArchText := mdV2Replacer.Replace(h.BuildArch)
-	pluginText := h.pluginSummary()
-	msg := fmt.Sprintf(aboutText, versionText, pluginText, runtimeText, buildTimeText, buildArchText)
+	pluginText := h.pluginSummary(ctx)
+	esc := func(id string) string { return mdV2Replacer.Replace(tr(ctx, id)) }
+	// Structural markdown (bold title, links) lives in code; only labels are
+	// localized. Dynamic values are pre-escaped, so the whole result is MarkdownV2.
+	msg := "*ℹ️ " + esc("about_title") + "*\n" +
+		esc("about_version") + "：" + versionText + "\n" +
+		esc("about_source") + "：https://github\\.com/liuran001/MusicBot\\-Go\n\n" +
+		"🧩 " + esc("about_plugins") + "\n" + pluginText + "\n\n" +
+		"🛠 " + esc("about_build") + "\n" +
+		esc("about_build_env") + "：" + runtimeText + "\n" +
+		esc("about_build_date") + "：" + buildTimeText + "\n" +
+		esc("about_runtime_env") + "：" + buildArchText
 	params := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: update.Message.Chat.ID},
 		Text:            msg,
@@ -68,13 +78,13 @@ func formatVersionLink(binVersion, commitSHA string) string {
 	return fmt.Sprintf("[%s](%s)", escapedLabel, escapedURL)
 }
 
-func (h *AboutHandler) pluginSummary() string {
+func (h *AboutHandler) pluginSummary(ctx context.Context) string {
 	plugins := []dynplugin.PluginInfo{}
 	if h != nil && h.DynPlugins != nil {
 		plugins = h.DynPlugins.PluginInfos()
 	}
 	if len(plugins) == 0 {
-		return mdV2Replacer.Replace("无")
+		return mdV2Replacer.Replace(tr(ctx, "about_no_plugins"))
 	}
 	lines := make([]string, 0, len(plugins))
 	for _, plugin := range plugins {

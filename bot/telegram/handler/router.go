@@ -42,6 +42,9 @@ type Router struct {
 	Whitelist                *Whitelist
 	Logger                   botpkg.Logger
 	BotName                  string
+	// Repo resolves the persisted per-user/group language override. Optional;
+	// when nil the router falls back to client-language auto-detection only.
+	Repo botpkg.SongRepository
 }
 
 // Register registers all handlers to the bot handler.
@@ -279,7 +282,9 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 				if r.isOwnInlineMessage(&message) {
 					return nil
 				}
-				r.GuestMode.Handle(ctx, ctx.Bot(), &telego.Update{GuestMessage: &message})
+				update := &telego.Update{GuestMessage: &message}
+				reqCtx := r.localize(ctx, update)
+				r.GuestMode.Handle(reqCtx, ctx.Bot(), update)
 			}
 			return nil
 		})
@@ -312,6 +317,7 @@ func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
 		if r.isOwnInlineMessage(update.Message) {
 			return nil
 		}
+		reqCtx := r.localize(ctx, &update)
 		if r.Whitelist != nil && update.Message != nil {
 			chatID := update.Message.Chat.ID
 			var userID int64
@@ -332,7 +338,7 @@ func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
 				return nil
 			}
 		}
-		handler.Handle(ctx, ctx.Bot(), &update)
+		handler.Handle(reqCtx, ctx.Bot(), &update)
 		return nil
 	}
 }
@@ -342,13 +348,14 @@ func (r *Router) wrapInline(handler InlineHandler) th.Handler {
 		if handler == nil {
 			return nil
 		}
+		reqCtx := r.localize(ctx, &update)
 		if r.Whitelist != nil && update.InlineQuery != nil {
 			userID := update.InlineQuery.From.ID
 			if !r.Whitelist.IsAllowed(userID, userID) {
 				return nil
 			}
 		}
-		handler.Handle(ctx, ctx.Bot(), &update)
+		handler.Handle(reqCtx, ctx.Bot(), &update)
 		return nil
 	}
 }
@@ -358,7 +365,8 @@ func (r *Router) wrapCallback(handler CallbackHandler) th.Handler {
 		if handler == nil {
 			return nil
 		}
-		handler.Handle(ctx, ctx.Bot(), &update)
+		reqCtx := r.localize(ctx, &update)
+		handler.Handle(reqCtx, ctx.Bot(), &update)
 		return nil
 	}
 }
@@ -368,13 +376,14 @@ func (r *Router) wrapChosenInline(handler ChosenInlineHandler) th.Handler {
 		if handler == nil {
 			return nil
 		}
+		reqCtx := r.localize(ctx, &update)
 		if r.Whitelist != nil && update.ChosenInlineResult != nil {
 			userID := update.ChosenInlineResult.From.ID
 			if !r.Whitelist.IsAllowed(userID, userID) {
 				return nil
 			}
 		}
-		handler.Handle(ctx, ctx.Bot(), &update)
+		handler.Handle(reqCtx, ctx.Bot(), &update)
 		return nil
 	}
 }

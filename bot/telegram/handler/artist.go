@@ -52,26 +52,26 @@ func (h *ArtistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *te
 		return false
 	}
 	if h.PlatformManager == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, noResults)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
 		return true
 	}
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, noResults)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
 		return true
 	}
 
 	artist, trackCount, err := h.fetchArtist(ctx, plat, artistID)
 	if err != nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, userVisibleArtistError(err))
+		sendText(ctx, b, message.Chat.ID, message.MessageID, userVisibleArtistError(ctx, err))
 		return true
 	}
 	if artist == nil {
-		sendText(ctx, b, message.Chat.ID, message.MessageID, noResults)
+		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
 		return true
 	}
 
-	textOut := formatArtistMessage(h.PlatformManager, platformName, artist, trackCount)
+	textOut := formatArtistMessage(ctx, h.PlatformManager, platformName, artist, trackCount)
 	params := &telego.SendMessageParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: message.MessageThreadID,
@@ -102,43 +102,43 @@ func (h *ArtistHandler) fetchArtist(ctx context.Context, plat platform.Platform,
 	return artist, 0, err
 }
 
-func formatArtistMessage(manager platform.Manager, platformName string, artist *platform.Artist, trackCount int) string {
+func formatArtistMessage(ctx context.Context, manager platform.Manager, platformName string, artist *platform.Artist, trackCount int) string {
 	if artist == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	name := strings.TrimSpace(artist.Name)
 	if name == "" {
-		name = "未知歌手"
+		name = tr(ctx, "guest_artist_unknown")
 	}
 	platformText := platformDisplayName(manager, platformName)
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s 歌手信息", platformEmoji(manager, platformName)))
-	lines = append(lines, fmt.Sprintf("平台：%s", platformText))
-	lines = append(lines, fmt.Sprintf("歌手：%s", name))
+	lines = append(lines, fmt.Sprintf("%s %s", platformEmoji(manager, platformName), tr(ctx, "guest_artist_info")))
+	lines = append(lines, tr(ctx, "guest_artist_platform_label", map[string]any{"Platform": platformText}))
+	lines = append(lines, tr(ctx, "guest_artist_name_label", map[string]any{"Name": name}))
 	if url := strings.TrimSpace(artist.URL); url != "" {
-		lines = append(lines, fmt.Sprintf("链接：%s", url))
+		lines = append(lines, tr(ctx, "guest_artist_link_label", map[string]any{"URL": url}))
 	}
 	if trackCount > 0 {
-		lines = append(lines, fmt.Sprintf("代表作品数：%d", trackCount))
+		lines = append(lines, tr(ctx, "guest_artist_track_count_label", map[string]any{"Count": trackCount}))
 	}
 	if avatar := strings.TrimSpace(artist.AvatarURL); avatar != "" {
-		lines = append(lines, fmt.Sprintf("头像：%s", avatar))
+		lines = append(lines, tr(ctx, "guest_artist_avatar_label", map[string]any{"URL": avatar}))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func userVisibleArtistError(err error) string {
+func userVisibleArtistError(ctx context.Context, err error) string {
 	if err == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	if errors.Is(err, platform.ErrNotFound) {
-		return "未找到歌手"
+		return tr(ctx, "guest_artist_not_found")
 	}
 	if errors.Is(err, platform.ErrUnsupported) {
-		return "当前平台暂不支持歌手信息解析"
+		return tr(ctx, "guest_artist_unsupported")
 	}
 	if errors.Is(err, platform.ErrUnavailable) {
-		return "歌手信息暂时不可用，请稍后重试"
+		return tr(ctx, "guest_artist_unavailable")
 	}
-	return noResults
+	return tr(ctx, "no_results")
 }

@@ -145,18 +145,18 @@ func TestFormatLyricsError(t *testing.T) {
 		{
 			name:    "other error",
 			err:     errors.New("random error"),
-			wantStr: getLrcFailed,
+			wantStr: "未找到歌词，可能是纯音乐或平台暂不支持",
 		},
 		{
 			name:    "nil error",
 			err:     nil,
-			wantStr: getLrcFailed,
+			wantStr: "未找到歌词，可能是纯音乐或平台暂不支持",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := handler.formatLyricsError(tt.err)
+			got := handler.formatLyricsError(zhCtx(), tt.err)
 			if got != tt.wantStr {
 				t.Errorf("formatLyricsError(%v) = %q, want %q", tt.err, got, tt.wantStr)
 			}
@@ -168,19 +168,19 @@ func TestFormatLyricsError_WrappedErrors(t *testing.T) {
 	handler := &LyricHandler{}
 
 	wrappedNotFound := errors.Join(platform.ErrNotFound, errors.New("detail"))
-	got := handler.formatLyricsError(wrappedNotFound)
+	got := handler.formatLyricsError(zhCtx(), wrappedNotFound)
 	if got != "未找到歌曲或歌词" {
 		t.Errorf("formatLyricsError(wrapped ErrNotFound) = %q, want %q", got, "未找到歌曲或歌词")
 	}
 
 	wrappedUnavailable := errors.Join(platform.ErrUnavailable, errors.New("detail"))
-	got = handler.formatLyricsError(wrappedUnavailable)
+	got = handler.formatLyricsError(zhCtx(), wrappedUnavailable)
 	if got != "此歌曲无法获取歌词" {
 		t.Errorf("formatLyricsError(wrapped ErrUnavailable) = %q, want %q", got, "此歌曲无法获取歌词")
 	}
 
 	wrappedUnsupported := errors.Join(platform.ErrUnsupported, errors.New("detail"))
-	got = handler.formatLyricsError(wrappedUnsupported)
+	got = handler.formatLyricsError(zhCtx(), wrappedUnsupported)
 	if got != "此平台不支持获取歌词" {
 		t.Errorf("formatLyricsError(wrapped ErrUnsupported) = %q, want %q", got, "此平台不支持获取歌词")
 	}

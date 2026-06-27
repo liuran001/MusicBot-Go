@@ -125,7 +125,7 @@ func (h *ChosenInlineMusicHandler) tryPresentChosenInlineEpisodePicker(ctx conte
 	if err != nil || len(episodes) <= 1 {
 		return false
 	}
-	text, keyboard := buildInlineEpisodePickerPage(platformName, baseTrackID, qualityValue, chosen.From.ID, episodes, 1)
+	text, keyboard := buildInlineEpisodePickerPage(ctx, platformName, baseTrackID, qualityValue, chosen.From.ID, episodes, 1)
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false
 	}
@@ -150,9 +150,9 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 	if plat == nil {
 		return
 	}
-	loadingText := fetchingPlaylist
-	if collectionTypeLabelFromID(collectionID) == "专辑" {
-		loadingText = "正在获取专辑..."
+	loadingText := tr(ctx, "fetching_playlist")
+	if collectionTypeFromID(collectionID) == collectionTypeAlbum {
+		loadingText = tr(ctx, "cb_fetching_album")
 	}
 	setInlineText := func(text string) {
 		params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: text}
@@ -174,7 +174,7 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 	}
 	playlist, err := plat.GetPlaylist(requestCtx, collectionID)
 	if err != nil || playlist == nil || len(playlist.Tracks) == 0 {
-		setInlineText(noResults)
+		setInlineText(tr(ctx, "no_results"))
 		return
 	}
 	state := &inlineCollectionState{
@@ -184,7 +184,7 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		requesterID:     chosen.From.ID,
 		tracks:          playlist.Tracks,
 		totalTracks:     playlist.TrackCount,
-		collectionLabel: collectionTypeLabel(detectCollectionType(collectionID, playlist.URL)),
+		collectionLabel: collectionTypeLabel(ctx, detectCollectionType(collectionID, playlist.URL)),
 		title:           strings.TrimSpace(playlist.Title),
 		url:             strings.TrimSpace(playlist.URL),
 		creator:         strings.TrimSpace(playlist.Creator),
@@ -200,7 +200,7 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		state.qualityValue = "hires"
 	}
 	token := h.storeInlineCollectionState(state)
-	text, markup := h.renderInlineCollectionPage(state, token, 1)
+	text, markup := h.renderInlineCollectionPage(ctx, state, token, 1)
 	params := &telego.EditMessageTextParams{
 		InlineMessageID:    chosen.InlineMessageID,
 		Text:               text,
@@ -233,7 +233,7 @@ func (h *ChosenInlineMusicHandler) handleChosenEpisodeCollection(ctx context.Con
 	}
 	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
 	if err != nil || len(episodes) == 0 {
-		params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: noResults}
+		params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: tr(ctx, "no_results")}
 		if h.RateLimiter != nil {
 			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
 		} else {
@@ -241,7 +241,7 @@ func (h *ChosenInlineMusicHandler) handleChosenEpisodeCollection(ctx context.Con
 		}
 		return
 	}
-	text, keyboard := buildInlineEpisodePickerPage(platformName, baseTrackID, qualityValue, chosen.From.ID, episodes, 1)
+	text, keyboard := buildInlineEpisodePickerPage(ctx, platformName, baseTrackID, qualityValue, chosen.From.ID, episodes, 1)
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return
 	}
@@ -301,7 +301,7 @@ func (h *ChosenInlineMusicHandler) ensureInlineCollectionChunk(ctx context.Conte
 		state.description = desc
 	}
 	if strings.TrimSpace(state.collectionLabel) == "" {
-		state.collectionLabel = collectionTypeLabel(detectCollectionType(state.collectionID, playlist.URL))
+		state.collectionLabel = collectionTypeLabel(ctx, detectCollectionType(state.collectionID, playlist.URL))
 	}
 	state.cacheOffset = chunkOffset
 	state.updatedAt = time.Now()
@@ -319,9 +319,9 @@ func (h *ChosenInlineMusicHandler) inlineCollectionPageSize() int {
 	return size
 }
 
-func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineCollectionState, token string, page int) (string, *telego.InlineKeyboardMarkup) {
+func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(ctx context.Context, state *inlineCollectionState, token string, page int) (string, *telego.InlineKeyboardMarkup) {
 	if state == nil || len(state.tracks) == 0 {
-		return noResults, nil
+		return tr(ctx, "no_results"), nil
 	}
 	pageSize := h.inlineCollectionPageSize()
 	pageCount := 1
@@ -342,7 +342,7 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineColle
 		start = 0
 	}
 	if start >= len(state.tracks) {
-		return noResults, nil
+		return tr(ctx, "no_results"), nil
 	}
 	end := start + pageSize
 	if end > len(state.tracks) {
@@ -357,9 +357,9 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineColle
 	}
 	var bld strings.Builder
 	bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(h.Music.PlatformManager, state.platformName), mdV2Replacer.Replace(platformDisplayName(h.Music.PlatformManager, state.platformName)), state.collectionLabel))
-	bld.WriteString(renderInlineCollectionInfo(state))
+	bld.WriteString(renderInlineCollectionInfo(ctx, state))
 	if pageCount > 1 {
-		bld.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, pageCount))
+		bld.WriteString(tr(ctx, "cb_page_of", map[string]any{"Page": page, "Total": pageCount}) + "\n\n")
 	} else {
 		bld.WriteString("\n")
 	}
@@ -401,22 +401,22 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(state *inlineColle
 	if pageCount > 1 {
 		nav := make([]telego.InlineKeyboardButton, 0, 2)
 		if page > 1 {
-			nav = append(nav, telego.InlineKeyboardButton{Text: "上一页", CallbackData: fmt.Sprintf("ipl %s page %d %d", token, page-1, state.requesterID)})
+			nav = append(nav, telego.InlineKeyboardButton{Text: tr(ctx, "cb_prev_page"), CallbackData: fmt.Sprintf("ipl %s page %d %d", token, page-1, state.requesterID)})
 		}
 		if page < pageCount {
-			nav = append(nav, telego.InlineKeyboardButton{Text: "下一页", CallbackData: fmt.Sprintf("ipl %s page %d %d", token, page+1, state.requesterID)})
+			nav = append(nav, telego.InlineKeyboardButton{Text: tr(ctx, "cb_next_page"), CallbackData: fmt.Sprintf("ipl %s page %d %d", token, page+1, state.requesterID)})
 		}
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
 		if page > 1 {
-			rows = append(rows, []telego.InlineKeyboardButton{{Text: "回到首页", CallbackData: fmt.Sprintf("ipl %s home %d", token, state.requesterID)}})
+			rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "cb_back_home"), CallbackData: fmt.Sprintf("ipl %s home %d", token, state.requesterID)}})
 		}
 	}
 	return bld.String(), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func renderInlineCollectionInfo(state *inlineCollectionState) string {
+func renderInlineCollectionInfo(ctx context.Context, state *inlineCollectionState) string {
 	if state == nil {
 		return ""
 	}
@@ -431,13 +431,13 @@ func renderInlineCollectionInfo(state *inlineCollectionState) string {
 		}
 	}
 	if strings.TrimSpace(state.creator) != "" {
-		bld.WriteString(fmt.Sprintf("创建者: %s\n", mdV2Replacer.Replace(state.creator)))
+		bld.WriteString(fmt.Sprintf("%s%s\n", tr(ctx, "cb_creator_label"), mdV2Replacer.Replace(state.creator)))
 	}
 	if state.totalTracks > 0 {
-		bld.WriteString(fmt.Sprintf("曲目数: %d\n", state.totalTracks))
+		bld.WriteString(tr(ctx, "cb_track_total", map[string]any{"Count": state.totalTracks}) + "\n")
 	}
 	if desc := strings.TrimSpace(state.description); desc != "" {
-		if quote := formatExpandableQuote(mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
+		if quote := formatExpandableQuote(ctx, mdV2Replacer.Replace(truncateText(desc, 800))); quote != "" {
 			bld.WriteString(quote)
 			bld.WriteString("\n")
 		}

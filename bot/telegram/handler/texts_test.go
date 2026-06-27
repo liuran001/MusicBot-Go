@@ -13,7 +13,7 @@ func TestBuildHelpTextIncludesAccountCommandsForAdmin(t *testing.T) {
 		{Name: "login", Description: "统一账号登录（qr/cookie/sign/renew/auto/help）"},
 	}
 
-	text := buildHelpText(nil, true, adminCommands, false, true)
+	text := buildHelpText(zhCtx(), nil, true, adminCommands, false, true)
 
 	if !strings.Contains(text, "管理员命令") {
 		t.Fatalf("expected admin command section, got: %s", text)
@@ -36,7 +36,7 @@ func TestBuildHelpTextDoesNotShowAccountCommandsForNonAdmin(t *testing.T) {
 		{Name: "login", Description: "统一账号登录（qr/cookie/sign/renew/auto/help）"},
 	}
 
-	text := buildHelpText(nil, false, adminCommands, false, true)
+	text := buildHelpText(zhCtx(), nil, false, adminCommands, false, true)
 
 	if strings.Contains(text, "账号命令") {
 		t.Fatalf("expected non-admin help hides legacy account section, got: %s", text)

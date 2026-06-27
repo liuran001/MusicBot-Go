@@ -21,6 +21,7 @@ import (
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/admincmd"
 	"github.com/liuran001/MusicBot-Go/bot/download"
+	"github.com/liuran001/MusicBot-Go/bot/i18n"
 	"github.com/liuran001/MusicBot-Go/bot/id3"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/liuran001/MusicBot-Go/bot/telegram"
@@ -134,6 +135,7 @@ type MusicHandler struct {
 type downloadQueueEntry struct {
 	id     int64
 	update func(text string)
+	loc    *i18n.Localizer
 }
 
 type uploadTask struct {
@@ -150,12 +152,19 @@ type uploadTask struct {
 	cleanup    []string
 	resultCh   chan uploadResult
 	onDone     func(uploadResult)
+	loc        *i18n.Localizer
+	// cacheHit marks a task whose status message already shows the localized
+	// "cache hit" text, so the worker must not overwrite it with "uploading".
+	// Replaces the previous fragile strings.Contains(hitCache) check, which
+	// broke once the text became language-dependent.
+	cacheHit bool
 }
 
 type queuedStatus struct {
 	bot      *telego.Bot
 	message  *telego.Message
 	songInfo botpkg.SongInfo
+	loc      *i18n.Localizer
 }
 
 type uploadResult struct {
@@ -271,13 +280,13 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		adminHelp := h.AdminCommands
 		if isAdmin {
 			adminHelp = append([]admincmd.Command{
-				{Name: "reload", Description: "重载配置与插件"},
-				{Name: "rmcache", Description: "清除缓存（/rmcache <平台>|all）"},
+				{Name: "reload", Description: tr(ctx, "help_admin_reload")},
+				{Name: "rmcache", Description: tr(ctx, "help_admin_rmcache")},
 			}, adminHelp...)
 		}
 		params := &telego.SendMessageParams{
 			ChatID:             telego.ChatID{ID: message.Chat.ID},
-			Text:               buildHelpText(h.PlatformManager, isAdmin, adminHelp, h.RecognizeEnabled, strings.EqualFold(strings.TrimSpace(message.Chat.Type), "private")),
+			Text:               buildHelpText(ctx, h.PlatformManager, isAdmin, adminHelp, h.RecognizeEnabled, strings.EqualFold(strings.TrimSpace(message.Chat.Type), "private")),
 			ParseMode:          telego.ModeMarkdownV2,
 			LinkPreviewOptions: &telego.LinkPreviewOptions{IsDisabled: true},
 			ReplyParameters:    &telego.ReplyParameters{MessageID: message.MessageID},
@@ -303,7 +312,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		if strings.TrimSpace(args) == "" {
 			params := &telego.SendMessageParams{
 				ChatID:          telego.ChatID{ID: message.Chat.ID},
-				Text:            inputContent,
+				Text:            tr(ctx, "input_content"),
 				ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 			}
 			if h.RateLimiter != nil {
@@ -334,7 +343,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		}
 		params := &telego.SendMessageParams{
 			ChatID:          telego.ChatID{ID: message.Chat.ID},
-			Text:            noResults,
+			Text:            tr(ctx, "no_results"),
 			ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 		}
 		if h.RateLimiter != nil {
@@ -354,7 +363,7 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 			if strings.TrimSpace(args) == "" {
 				params := &telego.SendMessageParams{
 					ChatID:          telego.ChatID{ID: message.Chat.ID},
-					Text:            inputContent,
+					Text:            tr(ctx, "input_content"),
 					ReplyParameters: &telego.ReplyParameters{MessageID: message.MessageID},
 				}
 				if h.RateLimiter != nil {
@@ -545,7 +554,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		if h.Logger != nil {
 			h.Logger.Error("failed to send music", "platform", platformName, "trackID", trackID, "error", err)
 		}
-		text := buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(err))
+		text := buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), userVisibleDownloadError(ctx, err))
 		status.Edit(text)
 	}
 	handleInvalidCachedFileID := func(err error, cacheQuality string) bool {
@@ -584,7 +593,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	}
 
 	if !silent {
-		status.Upsert(fetchInfo)
+		status.Upsert(tr(ctx, "fetch_info"))
 	}
 
 	var queueStatusUpdater func(string)
@@ -652,7 +661,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		}
 	}
 
-	status.Edit(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
+	status.Edit(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), tr(ctx, "downloading")))
 
 	musicPath, picPath, releasePrepared, err := h.acquirePreparedMedia(ctx, platformName, trackID, actualQuality, plat, track, info, status.Message(), b, message, &songInfo, nil)
 	if err != nil {
@@ -663,7 +672,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		return err
 	}
 
-	status.Edit(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploading))
+	status.Edit(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), tr(ctx, "uploading")))
 
 	if err := h.sendMusic(ctx, b, status.Message(), message, &songInfo, musicPath, picPath, nil, releasePrepared, platformName, trackID); err != nil {
 		if releasePrepared != nil {
@@ -703,7 +712,7 @@ func (h *MusicHandler) tryPresentDirectEpisodes(ctx context.Context, b *telego.B
 	if message.From != nil {
 		requesterID = message.From.ID
 	}
-	text, keyboard := buildEpisodePickerPage(platformName, baseTrackID, qualityValue, requesterID, episodes, 1, "")
+	text, keyboard := buildEpisodePickerPage(ctx, platformName, baseTrackID, qualityValue, requesterID, episodes, 1, "")
 	if strings.TrimSpace(text) == "" || keyboard == nil {
 		return false, nil
 	}
@@ -797,7 +806,7 @@ func (h *MusicHandler) trySendCachedTrack(
 		verifyCachedNeteaseQuality(ctx, h.PlatformManager, h.Repo, h.Logger, &songInfo, platformName, trackID, cacheQuality)
 	}
 	if !silent {
-		status.Upsert(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), hitCache))
+		status.Upsert(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), tr(ctx, "hit_cache")))
 	}
 	if err := h.sendMusic(ctx, b, status.Message(), message, &songInfo, "", "", nil, nil, platformName, trackID); err != nil {
 		if onInvalidCachedFileID != nil && onInvalidCachedFileID(err, cacheQuality) {
@@ -858,7 +867,7 @@ func needsKugouLinkRefresh(songInfo *botpkg.SongInfo) bool {
 
 func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *telego.Message, status *statusSession, platformName, trackID string) (*platform.Track, platform.Platform, string, string, error) {
 	if h == nil || h.PlatformManager == nil {
-		status.Edit(fetchInfoFailed)
+		status.Edit(tr(ctx, "fetch_info_failed"))
 		return nil, nil, platformName, trackID, errors.New("platform manager not configured")
 	}
 
@@ -868,7 +877,7 @@ func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *teleg
 			if h.Logger != nil {
 				h.Logger.Error("platform not found", "platform", platformName)
 			}
-			status.Edit(fetchInfoFailed)
+			status.Edit(tr(ctx, "fetch_info_failed"))
 			return nil, nil, platformName, trackID, fmt.Errorf("platform not found: %s", platformName)
 		}
 
@@ -880,14 +889,14 @@ func (h *MusicHandler) loadTrackWithFallback(ctx context.Context, message *teleg
 			if nextPlatform, nextTrackID, ok := h.resolveFallbackTrack(ctx, message, platformName, trackID); ok {
 				platformName = nextPlatform
 				trackID = nextTrackID
-				status.Edit(fetchInfo)
+				status.Edit(tr(ctx, "fetch_info"))
 				continue
 			}
 		}
 		if h.Logger != nil {
 			h.Logger.Error("failed to get track", "platform", platformName, "trackID", trackID, "error", err)
 		}
-		status.Edit(fetchInfoFailed)
+		status.Edit(tr(ctx, "fetch_info_failed"))
 		return nil, nil, platformName, trackID, err
 	}
 }
@@ -898,11 +907,11 @@ func (h *MusicHandler) loadDownloadInfo(ctx context.Context, status *statusSessi
 		if h != nil && h.Logger != nil {
 			h.Logger.Error("failed to get download info", "platform", platformName, "trackID", trackID, "error", err)
 		}
-		status.Edit(fetchInfoFailed)
+		status.Edit(tr(ctx, "fetch_info_failed"))
 		return nil, err
 	}
 	if info == nil || info.URL == "" {
-		status.Edit(fetchInfoFailed)
+		status.Edit(tr(ctx, "fetch_info_failed"))
 		return nil, errors.New("download info unavailable")
 	}
 	if h != nil && h.Logger != nil {
@@ -1408,14 +1417,14 @@ func (h *MusicHandler) downloadAndPrepareFromPlatform(ctx context.Context, plat 
 		writtenMB := float64(written) / 1024 / 1024
 		text := ""
 		if total <= 0 {
-			text = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB", track.Title, writtenMB)
+			text = tr(ctx, "downloading_named", map[string]any{"Title": track.Title, "WrittenMB": fmt.Sprintf("%.2f", writtenMB)})
 		} else {
 			if songInfo != nil && total > 0 {
 				songInfo.MusicSize = int(total)
 			}
 			totalMB := float64(total) / 1024 / 1024
 			progressPct := float64(written) * 100 / float64(total)
-			text = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
+			text = tr(ctx, "downloading_progress", map[string]any{"Title": track.Title, "Percent": fmt.Sprintf("%.2f", progressPct), "WrittenMB": fmt.Sprintf("%.2f", writtenMB), "TotalMB": fmt.Sprintf("%.2f", totalMB)})
 		}
 		if total > 0 && written >= total && lastProgressText != "" {
 			return
@@ -1598,7 +1607,8 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 		return errors.New("music handler not configured")
 	}
 
-	h.registerQueuedStatus(b, statusMsg, songInfo)
+	reqLoc := i18n.From(ctx)
+	h.registerQueuedStatus(b, statusMsg, songInfo, reqLoc)
 
 	baseCtx := detachContext(ctx)
 	if baseCtx == nil {
@@ -1629,6 +1639,8 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 		picPath:    picPath,
 		cleanup:    cleanupCopy,
 		resultCh:   resultCh,
+		loc:        reqLoc,
+		cacheHit:   musicPath == "",
 		onDone: func(result uploadResult) {
 			if result.message != nil && result.message.Audio != nil {
 				songCopy.FileID = result.message.Audio.FileID
@@ -1657,7 +1669,7 @@ func (h *MusicHandler) sendMusic(ctx context.Context, b *telego.Bot, statusMsg *
 					if h.Logger != nil {
 						h.Logger.Error("upload worker failed", "platform", platformName, "trackID", trackID, "error", result.err)
 					}
-					statusMessage = editMessageTextOrSend(cleanupCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, buildMusicInfoText(songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), userVisibleDownloadError(result.err)))
+					statusMessage = editMessageTextOrSend(cleanupCtx, statusBot, h.RateLimiter, statusMessage, taskMessage.Chat.ID, buildMusicInfoText(cleanupCtx, songCopy.SongName, songCopy.SongAlbum, formatFileInfo(songCopy.FileExt, songCopy.MusicSize), userVisibleDownloadError(cleanupCtx, result.err)))
 				}
 			}
 			cleanupFiles(cleanupCopy...)
@@ -1790,13 +1802,15 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 	}()
 
 	if task.statusMsg != nil && task.statusBot != nil {
-		// 缓存命中场景下，保持“命中缓存, 正在发送中...”文案，不再二次改成 uploading。
-		if !strings.Contains(task.statusMsg.Text, hitCache) {
-			text := buildMusicInfoText(task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize), uploading)
+		// On a cache hit the status message already shows the localized "cache hit"
+		// text; don't overwrite it with "uploading".
+		if !task.cacheHit {
 			statusCtx := task.ctx
 			if statusCtx == nil {
 				statusCtx = context.Background()
 			}
+			statusCtx = i18n.WithLocalizer(statusCtx, task.loc)
+			text := buildMusicInfoText(statusCtx, task.songInfo.SongName, task.songInfo.SongAlbum, formatFileInfo(task.songInfo.FileExt, task.songInfo.MusicSize), tr(statusCtx, "uploading"))
 			updated := editMessageTextOrSend(statusCtx, task.statusBot, h.RateLimiter, task.statusMsg, task.statusMsg.Chat.ID, text)
 			if updated != nil {
 				task.statusMsg = updated
@@ -1808,13 +1822,13 @@ func (h *MusicHandler) processUploadTask(task uploadTask) {
 
 // registerQueuedStatus appends one status message entry into upload-status queue.
 // Lock scope: queueMu only.
-func (h *MusicHandler) registerQueuedStatus(b *telego.Bot, statusMsg *telego.Message, songInfo *botpkg.SongInfo) {
+func (h *MusicHandler) registerQueuedStatus(b *telego.Bot, statusMsg *telego.Message, songInfo *botpkg.SongInfo, loc *i18n.Localizer) {
 	if h == nil || statusMsg == nil || songInfo == nil {
 		return
 	}
 	h.queueMu.Lock()
 	defer h.queueMu.Unlock()
-	entry := queuedStatus{bot: b, message: statusMsg, songInfo: *songInfo}
+	entry := queuedStatus{bot: b, message: statusMsg, songInfo: *songInfo, loc: loc}
 	h.queuedStatus = append(h.queuedStatus, entry)
 	h.statusDirty = true
 }
@@ -1882,10 +1896,10 @@ func (h *MusicHandler) refreshQueuedStatuses(ctx context.Context) {
 		if entry.bot == nil || entry.message == nil {
 			continue
 		}
-		text := buildMusicInfoText(entry.songInfo.SongName, entry.songInfo.SongAlbum, formatFileInfo(entry.songInfo.FileExt, entry.songInfo.MusicSize), uploading)
+		entryCtx := i18n.WithLocalizer(ctx, entry.loc)
+		text := buildMusicInfoText(entryCtx, entry.songInfo.SongName, entry.songInfo.SongAlbum, formatFileInfo(entry.songInfo.FileExt, entry.songInfo.MusicSize), tr(entryCtx, "uploading"))
 		if idx > 0 {
-			queueText := fmt.Sprintf("当前正在发送队列中，前面还有 %d 个任务", idx)
-			text = text + "\n" + queueText
+			text = text + "\n" + tr(entryCtx, "upload_queue_ahead", map[string]any{"Count": idx})
 		}
 		if entry.message.Text == text {
 			continue
@@ -2010,7 +2024,7 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 		_ = b.SendChatAction(uploadCtx, &telego.SendChatActionParams{ChatID: telego.ChatID{ID: message.Chat.ID}, MessageThreadID: threadID, Action: telego.ChatActionUploadDocument})
 	}
 
-	caption := buildMusicCaption(h.PlatformManager, songInfo, h.BotName)
+	caption := buildMusicCaption(ctx, h.PlatformManager, songInfo, h.BotName)
 	params := &telego.SendAudioParams{
 		ChatID:          telego.ChatID{ID: message.Chat.ID},
 		MessageThreadID: threadID,
@@ -2206,7 +2220,13 @@ func (s *statusSession) editLocked(text string) *telego.Message {
 }
 
 func shouldThrottleStatusEdit(text string) bool {
-	if strings.Contains(text, "失败") || strings.Contains(text, "请稍后重试") {
+	// Error/retry messages should appear immediately (not throttled). The status
+	// text is localized, so match failure/retry markers across the shipped
+	// languages rather than a single language's wording.
+	low := strings.ToLower(text)
+	if strings.Contains(text, "失败") || strings.Contains(text, "请稍后") ||
+		strings.Contains(low, "failed") || strings.Contains(low, "try again") ||
+		strings.Contains(text, "失敗") || strings.Contains(text, "もう一度") {
 		return false
 	}
 	return true
@@ -2492,7 +2512,7 @@ func (h *MusicHandler) prepareInlineSong(
 	}
 
 	if progress != nil {
-		progress(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), downloading))
+		progress(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), tr(ctx, "downloading")))
 	}
 
 	lastProgressAt := time.Time{}
@@ -2508,16 +2528,16 @@ func (h *MusicHandler) prepareInlineSong(
 		writtenMB := float64(written) / 1024 / 1024
 		suffix := ""
 		if total <= 0 {
-			suffix = fmt.Sprintf("正在下载：%s\n已下载：%.2f MB", track.Title, writtenMB)
+			suffix = tr(ctx, "downloading_named", map[string]any{"Title": track.Title, "WrittenMB": fmt.Sprintf("%.2f", writtenMB)})
 		} else {
 			if songInfo.MusicSize <= 0 {
 				songInfo.MusicSize = int(total)
 			}
 			totalMB := float64(total) / 1024 / 1024
 			progressPct := float64(written) * 100 / float64(total)
-			suffix = fmt.Sprintf("正在下载：%s\n进度：%.2f%% (%.2f MB / %.2f MB)", track.Title, progressPct, writtenMB, totalMB)
+			suffix = tr(ctx, "downloading_progress", map[string]any{"Title": track.Title, "Percent": fmt.Sprintf("%.2f", progressPct), "WrittenMB": fmt.Sprintf("%.2f", writtenMB), "TotalMB": fmt.Sprintf("%.2f", totalMB)})
 		}
-		text := buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), suffix)
+		text := buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), suffix)
 		if text == lastProgressText {
 			return
 		}
@@ -2543,7 +2563,7 @@ func (h *MusicHandler) prepareInlineSong(
 	}
 
 	if progress != nil {
-		progress(buildMusicInfoText(songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), uploading))
+		progress(buildMusicInfoText(ctx, songInfo.SongName, songInfo.SongAlbum, formatFileInfo(songInfo.FileExt, songInfo.MusicSize), tr(ctx, "uploading")))
 	}
 
 	uploadBot := b
@@ -2556,7 +2576,7 @@ func (h *MusicHandler) prepareInlineSong(
 		return nil, err
 	}
 	defer file.Close()
-	caption := buildMusicCaption(h.PlatformManager, &songInfo, h.BotName)
+	caption := buildMusicCaption(ctx, h.PlatformManager, &songInfo, h.BotName)
 	params := &telego.SendAudioParams{
 		ChatID:    telego.ChatID{ID: uploadChatID},
 		Audio:     telego.InputFile{File: file},
@@ -2625,7 +2645,7 @@ func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, update func(text
 	default:
 	}
 
-	entryID, ok := h.enqueueDownloadQueue(update)
+	entryID, ok := h.enqueueDownloadQueue(i18n.From(ctx), update)
 	if !ok {
 		return nil, errDownloadQueueOverloaded
 	}
@@ -2639,7 +2659,7 @@ func (h *MusicHandler) acquireDownloadSlot(ctx context.Context, update func(text
 	}
 }
 
-func (h *MusicHandler) enqueueDownloadQueue(update func(text string)) (int64, bool) {
+func (h *MusicHandler) enqueueDownloadQueue(loc *i18n.Localizer, update func(text string)) (int64, bool) {
 	if h == nil {
 		return 0, false
 	}
@@ -2653,7 +2673,7 @@ func (h *MusicHandler) enqueueDownloadQueue(update func(text string)) (int64, bo
 	}
 	h.downloadQueueSeq++
 	entryID := h.downloadQueueSeq
-	h.downloadQueue = append(h.downloadQueue, downloadQueueEntry{id: entryID, update: update})
+	h.downloadQueue = append(h.downloadQueue, downloadQueueEntry{id: entryID, update: update, loc: loc})
 	snapshot := append([]downloadQueueEntry(nil), h.downloadQueue...)
 	if h.Logger != nil && h.EnableQueueObservability {
 		h.Logger.Debug("download task enqueued", "queue_len", len(h.downloadQueue), "queue_wait_limit", h.DownloadQueueWaitLimit)
@@ -2703,9 +2723,10 @@ func (h *MusicHandler) refreshDownloadQueue(snapshot []downloadQueueEntry) {
 			continue
 		}
 		ahead := idx
-		text := waitForDown
+		entryCtx := i18n.WithLocalizer(context.Background(), entry.loc)
+		text := tr(entryCtx, "wait_for_down")
 		if ahead > 0 {
-			text = fmt.Sprintf("%s\n当前正在下载队列中，前面还有 %d 个任务", waitForDown, ahead)
+			text = text + "\n" + tr(entryCtx, "download_queue_ahead", map[string]any{"Count": ahead})
 		}
 		if h.downloadQueueText[entry.id] == text {
 			continue

@@ -86,7 +86,7 @@ func TestParseInlineSearchOptions_PageSuffix(t *testing.T) {
 }
 
 func TestBuildInlineSearchPageFooter_HintQuery(t *testing.T) {
-	result := buildInlineSearchPageFooter("jj", "qqmusic", "", 1, 6, 48)
+	result := buildInlineSearchPageFooter(zhCtx(), "jj", "qqmusic", "", 1, 6, 48)
 	article, ok := result.(*telego.InlineQueryResultArticle)
 	if !ok {
 		t.Fatalf("result type = %T, want *telego.InlineQueryResultArticle", result)

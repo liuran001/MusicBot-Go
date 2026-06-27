@@ -1,0 +1,157 @@
+# Japanese catalog. Authored as PLAIN text; MarkdownV2 escaping happens at the
+# output boundary via Localizer.Tmd. Missing keys fall back to English.
+
+# --- status / progress ---
+hit_cache = "キャッシュヒット、送信中…"
+input_id_or_keyword = "曲の ID かキーワードを送信してください。/rmcache all で全キャッシュを削除できます"
+inline_tap_to_send = "反応がない？タップして更新"
+send_me_to = "チャットに送信…"
+wait_for_down = "ダウンロード待ち…"
+fetch_info = "曲情報を取得中…"
+fetch_info_failed = "曲情報の取得に失敗しました"
+downloading = "ダウンロード中…"
+uploading = "ダウンロード完了、送信中…"
+md5_ver_failed = "MD5 検証に失敗しました"
+download_timeout = "ダウンロードがタイムアウトしました"
+searching = "検索中…"
+fetching_playlist = "プレイリストを取得中…"
+fetching_lyric = "歌詞を取得中…"
+no_results = "結果が見つかりません。別のキーワードをお試しください"
+playlist_empty = "プレイリストに曲がありません"
+get_lrc_failed = "歌詞が見つかりません。インストゥルメンタルか非対応の可能性があります"
+callback_success = "成功しました"
+callback_denied = "リクエストした本人または管理者のみ操作できます"
+
+# --- usage prompts ---
+input_keyword = """検索キーワードを送信してください
+
+例：
+/search 周杰倫
+/search 起風了 qq"""
+
+input_content = """曲名・リンク・ID を送信してください
+
+例：
+/music 周杰倫
+/music https://music.163.com/song/1859603835"""
+
+input_lyric_content = """曲名・リンク・ID を送信するか、曲メッセージに返信してください
+
+例：
+/lyric 稲香
+/lyric 稲香 qrc"""
+
+# --- download progress (parametric) ---
+downloading_named = "ダウンロード中：{{.Title}}\nダウンロード済み：{{.WrittenMB}} MB"
+downloading_progress = "ダウンロード中：{{.Title}}\n進捗：{{.Percent}}% ({{.WrittenMB}} MB / {{.TotalMB}} MB)"
+upload_queue_ahead = "送信キューで待機中、あと {{.Count}} 件"
+download_queue_ahead = "ダウンロードキューで待機中、あと {{.Count}} 件"
+
+# --- queue / download wait ---
+queue_overloaded = "ダウンロードキューが満杯です。後でもう一度お試しください"
+
+# --- error messages (userVisibleDownloadError / search / playlist) ---
+err_process_timeout = "処理がタイムアウトしました。後でもう一度お試しください"
+err_task_canceled = "タスクがキャンセルされました。後でもう一度お試しください"
+err_download_overloaded = "ダウンロードタスクが多すぎます。後でもう一度お試しください"
+err_upload_overloaded = "送信タスクが多すぎます。後でもう一度お試しください"
+err_rate_limited = "リクエストが頻繁すぎます。後でもう一度お試しください"
+err_auth_required = "プラットフォーム認証が失効しました。管理者に認証情報の更新を依頼してください"
+err_unavailable = "現在この曲は利用できません。後でもう一度お試しください"
+err_download_failed = "ダウンロード／送信に失敗しました。後でもう一度お試しください"
+err_search_unsupported = "このプラットフォームは検索に対応していません"
+err_search_unavailable = "検索サービスは一時的に利用できません"
+err_playlist_unsupported = "このプラットフォームはプレイリスト取得に対応していません"
+err_playlist_unavailable = "プレイリストサービスは一時的に利用できません"
+err_playlist_not_found = "プレイリストが見つかりません"
+
+# --- music info ---
+album_label = "アルバム: "
+quality_tag_standard = "標準音質"
+quality_tag_high = "高音質"
+quality_tag_lossless = "ロスレス"
+
+# --- bot command menu (setMyCommands) ---
+cmd_help = "使い方"
+cmd_music = "曲をダウンロード"
+cmd_search = "曲を検索"
+cmd_lyric = "歌詞を取得"
+cmd_fav = "お気に入り登録 / 一覧表示"
+cmd_settings = "デフォルトのプラットフォーム・音質・歌詞形式"
+cmd_recognize = "曲を認識"
+cmd_status = "キャッシュとアカウントの状態"
+cmd_about = "バージョンとプラグイン情報"
+
+# --- bot profile (setMyName / setMyShortDescription / setMyDescription) ---
+bot_name = "音楽ボット"
+bot_short_description = "マルチプラットフォーム音楽 / 歌詞ダウンロードボット"
+bot_description = "曲名・リンク・ID を送ると検索してダウンロードできます。NetEase Cloud Music、QQ Music など複数のプラットフォームに対応。"
+
+# --- help / about / status (MarkdownV2 templates) ---
+help_intro = "曲名・リンク・IDを送ると音楽を検索してダウンロードできます。"
+help_private_hint = "プライベートチャットではコマンドなしで直接送信できます。"
+help_section_commands = "🚀 よく使うコマンド"
+help_cmd_music = "曲をダウンロード"
+help_cmd_search = "曲を検索"
+help_cmd_lyric = "歌詞を取得"
+help_cmd_recognize = "曲を認識（ボイスメッセージに返信）"
+help_cmd_settings = "デフォルトのプラットフォーム・音質・歌詞形式"
+help_cmd_status = "キャッシュとアカウントの状態"
+help_cmd_about = "バージョンとプラグイン情報"
+help_section_params = "🎚 パラメータ"
+help_quality_label = "音質"
+help_platform_label = "プラットフォーム"
+help_supported_platforms = "対応プラットフォーム"
+help_section_examples = "💡 例"
+help_example_music = "米津玄師"
+help_example_search = "Lemon qq"
+help_section_admin = "🛠 管理者コマンド"
+help_arg_track = "曲名|リンク|ID"
+help_arg_keyword = "キーワード"
+about_title = "MusicBot-Go"
+about_version = "バージョン"
+about_source = "ソース"
+about_plugins = "プラグイン"
+about_build = "ビルド"
+about_build_env = "コンパイラ"
+about_build_date = "ビルド日"
+about_runtime_env = "実行環境"
+status_title = "ステータス"
+status_cache = "キャッシュ"
+status_total = "合計"
+status_this_chat = "このチャット"
+status_your_cache = "あなたのキャッシュ"
+status_sent = "送信済み"
+status_unit_tracks = "曲"
+status_unit_times = "回"
+status_platform_cache = "プラットフォーム別キャッシュ"
+status_available_platforms = "利用可能なプラットフォーム"
+status_accounts = "アカウント"
+status_logged_in = "ログイン済み"
+status_state_available = "利用可能"
+status_state_not_logged_in = "未ログイン"
+status_state_error = "エラー"
+status_state_uninitialized = "未初期化"
+status_state_guest = "ゲスト"
+status_check_failed = "ステータス確認に失敗"
+status_no_accounts = "照会可能なプラットフォームアカウントが見つかりません"
+status_field_state = "状態"
+status_field_nickname = "ニックネーム"
+status_field_userid = "ユーザーID"
+status_field_login_method = "ログイン方法"
+status_field_supports = "対応"
+status_field_source = "ソース"
+
+help_default_platforms = "NetEase Cloud Music, QQ Music"
+
+about_no_plugins = "なし"
+
+# --- admin help command descriptions (music.go inline) ---
+help_admin_reload = "設定とプラグインを再読み込み"
+help_admin_rmcache = "キャッシュを削除（/rmcache <プラットフォーム>|all）"
+
+# --- admin command descriptions (rendered in /help via buildAdminHelp, keyed by command name) ---
+help_admincmd_login = "統合アカウントログイン（qr/cookie/sign/check/renew/auto/help）"
+help_admincmd_checkck = "プラグインの Cookie 有効性を確認"
+help_admincmd_renewck = "Cookie を手動更新（/renewck <platform>、空欄で全て）"
+help_admincmd_wl = "ホワイトリスト管理 (add/del/list)"

@@ -1,0 +1,75 @@
+# Chinese (Simplified) catalog shard — inline + callback handlers (cb_ domain).
+# zh = EXACT original strings from the handler source. PLAIN text; MarkdownV2
+# escaping happens at the output boundary.
+
+# --- callback answers (plain alert/toast text) ---
+cb_denied = "仅发起人或管理员可操作"
+cb_bad_params = "参数错误"
+cb_processing = "处理中，请稍候"
+cb_select_episode = "请选择分P"
+cb_op_expired = "操作已过期，请重新搜索"
+cb_no_random = "暂无可随机歌曲"
+cb_episode_load_failed = "选集加载失败"
+cb_episode_closed = "已关闭选集"
+cb_list_expired = "列表已过期，请重新选择"
+cb_load_failed = "加载失败，请重试"
+cb_already_on_page = "已是第 {{.Page}} 页"
+cb_page_n = "第 {{.Page}} 页"
+
+# --- pagination labels ---
+cb_page_of = "第 {{.Page}}/{{.Total}} 页"
+cb_page_footer = "第 {{.Page}} 页 / 共 {{.Total}} 页"
+cb_track_count = "{{.Count}} 首"
+cb_track_total = "曲目数: {{.Count}}"
+
+# --- collection / playlist cards ---
+cb_collection_not_found = "未找到专辑/歌单"
+cb_collection_tap_expand = "点击后自动展开详情"
+cb_collection_page_hint = "在链接末尾加数字翻页，例如：链接 2"
+cb_creator_label = "创建者: "
+cb_fetching_album = "正在获取专辑..."
+
+# --- empty / help / settings cards ---
+cb_empty_title = "输入 help 获取帮助"
+cb_setting_title = "平台：{{.Platform}} | 音质：{{.Quality}}"
+cb_tap_edit_settings = "点击修改设置"
+cb_settings_message = "当前用户设置\n平台：{{.Platform}}\n音质：{{.Quality}}\n\n💡 可在关键词后临时追加参数，例如：稻香 qq high"
+cb_edit_settings_btn = "⚙️ 修改设置"
+cb_search_header_desc = "点击修改设置｜可在关键词后临时追加参数，例如：稻香 qq high"
+
+# --- random / favorites cards ---
+cb_random_one = "🎲 随机一首"
+cb_random_empty_desc = "当前缓存里暂无可随机歌曲"
+cb_random_card_desc = "点击后随机发送一首缓存歌曲"
+cb_my_favorites = "📋 我的收藏"
+cb_favorites_menu_desc = "点开管理 / 随机 / 发送收藏"
+
+# --- search cards ---
+cb_input_keyword = "请输入关键词"
+cb_page_hint_example = "关键词 qq hires 2"
+cb_search_page_desc = "共 {{.Total}} 条结果｜在关键词末尾加数字翻页，如：{{.Hint}}"
+cb_unknown_artist = "未知歌手"
+
+# --- quality labels ---
+cb_quality_standard = "标准"
+cb_quality_high = "高品质"
+cb_quality_lossless = "无损"
+cb_quality_hires = "Hi-Res"
+
+# --- episode picker ---
+cb_tap_episode_below = "点击下方分P发送"
+cb_fetching_episodes = "正在获取选集..."
+cb_episode_page_hint = "在链接后加数字翻页，如：{{.Hint}}"
+cb_episodes_label = "选集"
+cb_prev_page = "上一页"
+cb_next_page = "下一页"
+cb_back_home = "回到首页"
+cb_prev_page_arrow = "⬅️ 上一页"
+cb_next_page_arrow = "➡️ 下一页"
+cb_home_page = "🏠 回到主页"
+cb_last_page = "⏭️ 最后一页"
+
+# --- song bottom buttons ---
+cb_lyric_btn = "📜 歌词"
+cb_favorite_btn = "⭐ 收藏"
+cb_group_favorite_btn = "👥 群收藏"

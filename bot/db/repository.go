@@ -834,6 +834,7 @@ func userSettingsToInternal(settings UserSettingsModel) *bot.UserSettings {
 		AutoDeleteList:                 settings.AutoDeleteList,
 		AutoLinkDetect:                 settings.AutoLinkDetect,
 		DefaultLyricFormat:             settings.DefaultLyricFormat,
+		Language:                       settings.Language,
 		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
 		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
 	}
@@ -855,6 +856,7 @@ func groupSettingsToInternal(settings GroupSettingsModel) *bot.GroupSettings {
 		AutoDeleteList:                 settings.AutoDeleteList,
 		AutoLinkDetect:                 settings.AutoLinkDetect,
 		DefaultLyricFormat:             settings.DefaultLyricFormat,
+		Language:                       settings.Language,
 		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
 		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
 	}
@@ -926,6 +928,7 @@ func (r *Repository) UpdateUserSettings(ctx context.Context, settings *bot.UserS
 		AutoDeleteList:     settings.AutoDeleteList,
 		AutoLinkDetect:     settings.AutoLinkDetect,
 		DefaultLyricFormat: settings.DefaultLyricFormat,
+		Language:           settings.Language,
 
 		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
 		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,
@@ -950,6 +953,7 @@ func (r *Repository) UpdateGroupSettings(ctx context.Context, settings *bot.Grou
 		AutoDeleteList:     settings.AutoDeleteList,
 		AutoLinkDetect:     settings.AutoLinkDetect,
 		DefaultLyricFormat: settings.DefaultLyricFormat,
+		Language:           settings.Language,
 
 		DefaultLyricIncludeTranslation: settings.DefaultLyricIncludeTranslation,
 		DefaultLyricIncludeRoma:        settings.DefaultLyricIncludeRoma,

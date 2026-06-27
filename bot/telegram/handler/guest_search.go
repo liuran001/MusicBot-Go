@@ -137,9 +137,9 @@ func (h *GuestModeHandler) guestSearchLimit(platformName string) int {
 	return h.SearchHandler.searchLimit(platformName)
 }
 
-func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token string, page int) (string, *telego.InlineKeyboardMarkup) {
+func (h *GuestModeHandler) renderGuestSearchPage(ctx context.Context, state *searchState, token string, page int) (string, *telego.InlineKeyboardMarkup) {
 	if h == nil || state == nil {
-		return noResults, nil
+		return tr(ctx, "no_results"), nil
 	}
 	tracks, _ := state.getTracks(state.platform)
 	if page < 1 {
@@ -186,18 +186,18 @@ func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token strin
 		// formatPlaylistInfo). No keyword line, no "点击数字" hint duplication.
 		collectionLabel := strings.TrimSpace(state.collectionLabel)
 		if collectionLabel == "" {
-			collectionLabel = collectionTypeLabel(collectionTypePlaylist)
+			collectionLabel = collectionTypeLabel(ctx, collectionTypePlaylist)
 		}
 		bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmojiText, mdV2Replacer.Replace(displayName), collectionLabel))
-		bld.WriteString(formatPlaylistInfo(state.playlist, collectionLabel))
+		bld.WriteString(formatPlaylistInfo(ctx, state.playlist, collectionLabel))
 	} else {
-		bld.WriteString(fmt.Sprintf("%s *%s* 搜索结果\n\\* 点击最下方数字选择对应歌曲\n\n", platformEmojiText, mdV2Replacer.Replace(displayName)))
+		bld.WriteString(fmt.Sprintf("%s *%s* %s\n\\* %s\n\n", platformEmojiText, mdV2Replacer.Replace(displayName), trMd(ctx, "guest_search_results"), trMd(ctx, "guest_pick_number_hint")))
 		if strings.TrimSpace(state.keyword) != "" {
-			bld.WriteString(fmt.Sprintf("关键词: %s\n", mdV2Replacer.Replace(state.keyword)))
+			bld.WriteString(fmt.Sprintf("%s%s\n", trMd(ctx, "guest_keyword_label"), mdV2Replacer.Replace(state.keyword)))
 		}
 	}
 	if pageCount > 1 || hasMore {
-		bld.WriteString(fmt.Sprintf("第 %d/%d 页\n\n", page, displayPageCount))
+		bld.WriteString(trMd(ctx, "guest_page_indicator", map[string]any{"Page": page, "Total": displayPageCount}) + "\n\n")
 	} else if !isPlaylist {
 		bld.WriteString("\n")
 	}
@@ -232,16 +232,16 @@ func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token strin
 	if pageCount > 1 || hasMore {
 		nav := make([]telego.InlineKeyboardButton, 0, 2)
 		if page > 1 {
-			nav = append(nav, telego.InlineKeyboardButton{Text: "⬅️ 上一页", CallbackData: fmt.Sprintf("guest %s page %d %d", token, page-1, state.requesterID)})
+			nav = append(nav, telego.InlineKeyboardButton{Text: tr(ctx, "guest_nav_prev"), CallbackData: fmt.Sprintf("guest %s page %d %d", token, page-1, state.requesterID)})
 		}
 		if page < pageCount || hasMore {
-			nav = append(nav, telego.InlineKeyboardButton{Text: "➡️ 下一页", CallbackData: fmt.Sprintf("guest %s page %d %d", token, page+1, state.requesterID)})
+			nav = append(nav, telego.InlineKeyboardButton{Text: tr(ctx, "guest_nav_next"), CallbackData: fmt.Sprintf("guest %s page %d %d", token, page+1, state.requesterID)})
 		}
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
 		if page > 1 {
-			rows = append(rows, []telego.InlineKeyboardButton{{Text: "🏠 回到主页", CallbackData: fmt.Sprintf("guest %s home %d", token, state.requesterID)}})
+			rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "guest_nav_home"), CallbackData: fmt.Sprintf("guest %s home %d", token, state.requesterID)}})
 		}
 	}
 
@@ -250,10 +250,10 @@ func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token strin
 			rows = append(rows, platformRows...)
 		}
 		if strings.TrimSpace(state.searchFilterText) != "" {
-			filterText := "开"
+			filterText := tr(ctx, "guest_filter_on")
 			toggleAction := "off"
 			if !state.biliFilter {
-				filterText = "关"
+				filterText = tr(ctx, "guest_filter_off")
 				toggleAction = "on"
 			}
 			rows = append(rows, []telego.InlineKeyboardButton{{
@@ -262,7 +262,7 @@ func (h *GuestModeHandler) renderGuestSearchPage(state *searchState, token strin
 			}})
 		}
 	}
-	rows = append(rows, []telego.InlineKeyboardButton{{Text: "❌ 关闭", CallbackData: fmt.Sprintf("guest %s close %d", token, state.requesterID)}})
+	rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "guest_close"), CallbackData: fmt.Sprintf("guest %s close %d", token, state.requesterID)}})
 
 	return bld.String(), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
@@ -345,18 +345,18 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 	}
 	requesterID, err := strconv.ParseInt(strings.TrimSpace(parts[len(parts)-1]), 10, 64)
 	if err != nil || requesterID == 0 {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_bad_params"), ShowAlert: true})
 		return
 	}
 	if query.From.ID != requesterID {
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: callbackDenied, ShowAlert: true})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_denied"), ShowAlert: true})
 		return
 	}
 
 	withInlineMessageLock(query.InlineMessageID, func() {
 		state, ok := h.Guest.guestSearchStore().get(token)
 		if !ok || state == nil {
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "搜索结果已过期，请重新搜索", ShowAlert: true})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_search_expired"), ShowAlert: true})
 			return
 		}
 
@@ -367,14 +367,14 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 		switch action {
 		case "close":
 			h.Guest.guestSearchStore().delete(token)
-			_ = h.Guest.editGuestInlineText(ctx, b, query.InlineMessageID, "已关闭", nil, "")
+			_ = h.Guest.editGuestInlineText(ctx, b, query.InlineMessageID, tr(ctx, "guest_closed"), nil, "")
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID})
 			return
 		case "home":
 			page = 1
 		case "page":
 			if len(parts) < 5 {
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_bad_params"), ShowAlert: true})
 				return
 			}
 			page, err = strconv.Atoi(strings.TrimSpace(parts[3]))
@@ -383,12 +383,12 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 			}
 		case "platform":
 			if len(parts) < 5 {
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_bad_params"), ShowAlert: true})
 				return
 			}
 			platformName := strings.TrimSpace(parts[3])
 			if platformName == "" || h.Guest.PlatformManager == nil || h.Guest.PlatformManager.Get(platformName) == nil {
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "平台不可用", ShowAlert: true})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_platform_unavailable"), ShowAlert: true})
 				return
 			}
 			state.platform = platformName
@@ -402,7 +402,7 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 			page = 1
 		case "bilifilter":
 			if len(parts) < 5 {
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_bad_params"), ShowAlert: true})
 				return
 			}
 			state.biliFilter = strings.TrimSpace(parts[3]) == "on"
@@ -411,7 +411,7 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 			}
 			page = 1
 		default:
-			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "参数错误", ShowAlert: true})
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_bad_params"), ShowAlert: true})
 			return
 		}
 
@@ -432,7 +432,7 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 		if needFetch {
 			plat := h.Guest.PlatformManager.Get(state.platform)
 			if plat == nil || !plat.SupportsSearch() {
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "平台不可用", ShowAlert: true})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_platform_unavailable"), ShowAlert: true})
 				return
 			}
 			searchCtx := withSearchFilterContext(ctx, h.Guest.PlatformManager, state.platform, state.biliFilter)
@@ -445,15 +445,15 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 			}
 			tracks, err = plat.Search(searchCtx, state.keyword, requestLimit)
 			if err != nil {
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: "搜索失败，请稍后重试", ShowAlert: true})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_search_failed_retry"), ShowAlert: true})
 				return
 			}
 			if len(tracks) == 0 {
 				state.setUnavailable(state.platform, true)
-				text := fmt.Sprintf("未找到结果（%s）", platformDisplayName(h.Guest.PlatformManager, state.platform))
-				_, keyboard := h.Guest.renderGuestSearchPage(state, token, 1)
+				text := tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(h.Guest.PlatformManager, state.platform)})
+				_, keyboard := h.Guest.renderGuestSearchPage(ctx, state, token, 1)
 				_ = h.Guest.editGuestInlineText(ctx, b, query.InlineMessageID, text, keyboard, "")
-				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: noResults})
+				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "no_results")})
 				return
 			}
 			state.setTracks(state.platform, tracks)
@@ -462,11 +462,11 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 
 		state.currentPage = page
 		state.updatedAt = time.Now()
-		text, markup := h.Guest.renderGuestSearchPage(state, token, page)
+		text, markup := h.Guest.renderGuestSearchPage(ctx, state, token, page)
 		if err := h.Guest.editGuestInlineText(ctx, b, query.InlineMessageID, text, markup, telego.ModeMarkdownV2); err != nil {
 			return
 		}
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: fmt.Sprintf("第 %d 页", page)})
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "guest_page_toast", map[string]any{"Page": page})})
 	})
 }
 

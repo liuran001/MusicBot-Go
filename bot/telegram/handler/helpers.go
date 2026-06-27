@@ -564,7 +564,7 @@ func cleanupFiles(paths ...string) {
 	}
 }
 
-func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
+func buildMusicInfoText(ctx context.Context, songName, songAlbum, fileInfo, suffix string) string {
 	songName = strings.TrimSpace(songName)
 	fileInfo = strings.TrimSpace(fileInfo)
 	songAlbum = strings.TrimSpace(songAlbum)
@@ -573,7 +573,7 @@ func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
 	builder.WriteString(songName)
 	builder.WriteString("\n")
 	if songAlbum != "" {
-		builder.WriteString("专辑: ")
+		builder.WriteString(tr(ctx, "album_label"))
 		builder.WriteString(songAlbum)
 		builder.WriteString("\n")
 	}
@@ -583,77 +583,79 @@ func buildMusicInfoText(songName, songAlbum, fileInfo, suffix string) string {
 	return builder.String()
 }
 
-func userVisibleDownloadError(err error) string {
+// userVisibleDownloadError maps a download/upload pipeline error to a localized,
+// user-facing message for the request language in ctx. Matching is done against
+// language-neutral signals (sentinel errors via errors.Is and lowercase English
+// substrings emitted by the download package), so localizing the DISPLAY text
+// never breaks the classification.
+func userVisibleDownloadError(ctx context.Context, err error) string {
 	if err != nil {
 		errText := fmt.Sprintf("%v", err)
 		errLower := strings.ToLower(errText)
-		if strings.Contains(errText, md5VerFailed) {
-			return md5VerFailed
+		if strings.Contains(errLower, "md5 verification failed") {
+			return tr(ctx, "md5_ver_failed")
 		}
-		if strings.Contains(errText, downloadTimeout) {
-			return downloadTimeout
+		if strings.Contains(errLower, "download timed out") || strings.Contains(errLower, "download timeout") {
+			return tr(ctx, "download_timeout")
 		}
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(errLower, "context deadline exceeded") {
-			return "处理超时，请稍后重试"
+			return tr(ctx, "err_process_timeout")
 		}
 		if errors.Is(err, context.Canceled) || strings.Contains(errLower, "context canceled") {
-			return "任务已取消，请稍后重试"
+			return tr(ctx, "err_task_canceled")
 		}
-		if errors.Is(err, errDownloadQueueOverloaded) || strings.Contains(errText, "download queue overloaded") {
-			return "当前下载任务过多，请稍后再试"
+		if errors.Is(err, errDownloadQueueOverloaded) || strings.Contains(errLower, "download queue overloaded") {
+			return tr(ctx, "err_download_overloaded")
 		}
-		if strings.Contains(errText, "upload queue is full") {
-			return "当前发送任务过多，请稍后再试"
+		if strings.Contains(errLower, "upload queue is full") {
+			return tr(ctx, "err_upload_overloaded")
 		}
 		if errors.Is(err, platform.ErrRateLimited) || strings.Contains(errText, "Too Many Requests") || strings.Contains(errLower, "retry after") {
-			return "请求过于频繁，请稍后重试"
+			return tr(ctx, "err_rate_limited")
 		}
 		if errors.Is(err, platform.ErrAuthRequired) {
-			return "平台认证已失效，请联系管理员更新凭据"
+			return tr(ctx, "err_auth_required")
 		}
 		if errors.Is(err, platform.ErrUnavailable) {
-			return "当前歌曲暂不可用，请稍后再试"
+			return tr(ctx, "err_unavailable")
 		}
 	}
-	return "下载/发送失败，请稍后重试"
+	return tr(ctx, "err_download_failed")
 }
 
-func userVisibleSearchError(err error, unavailableText string) string {
+func userVisibleSearchError(ctx context.Context, err error) string {
 	if err == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	if errors.Is(err, platform.ErrUnsupported) {
-		return "此平台不支持搜索功能"
+		return tr(ctx, "err_search_unsupported")
 	}
 	if errors.Is(err, platform.ErrRateLimited) {
-		return "请求过于频繁，请稍后再试"
+		return tr(ctx, "err_rate_limited")
 	}
 	if errors.Is(err, platform.ErrUnavailable) {
-		if strings.TrimSpace(unavailableText) != "" {
-			return unavailableText
-		}
-		return "搜索服务暂时不可用"
+		return tr(ctx, "err_search_unavailable")
 	}
-	return noResults
+	return tr(ctx, "no_results")
 }
 
-func userVisiblePlaylistError(err error) string {
+func userVisiblePlaylistError(ctx context.Context, err error) string {
 	if err == nil {
-		return noResults
+		return tr(ctx, "no_results")
 	}
 	if errors.Is(err, platform.ErrUnsupported) {
-		return "此平台不支持获取歌单"
+		return tr(ctx, "err_playlist_unsupported")
 	}
 	if errors.Is(err, platform.ErrRateLimited) {
-		return "请求过于频繁，请稍后再试"
+		return tr(ctx, "err_rate_limited")
 	}
 	if errors.Is(err, platform.ErrUnavailable) {
-		return "歌单服务暂时不可用"
+		return tr(ctx, "err_playlist_unavailable")
 	}
 	if errors.Is(err, platform.ErrNotFound) {
-		return "未找到歌单"
+		return tr(ctx, "err_playlist_not_found")
 	}
-	return noResults
+	return tr(ctx, "no_results")
 }
 
 func isTelegramFileIDInvalid(err error) bool {
@@ -667,7 +669,7 @@ func isTelegramFileIDInvalid(err error) bool {
 		strings.Contains(errText, "wrong remote file identifier")
 }
 
-func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
+func buildMusicCaption(ctx context.Context, manager platform.Manager, songInfo *botpkg.SongInfo, botName string) string {
 	if songInfo == nil {
 		return ""
 	}
@@ -689,7 +691,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	if infoLine != "" {
 		infoLine += "\n"
 	}
-	tags := strings.Join(formatInfoTags(manager, songInfo.Platform, songInfo.Quality, songInfo.FileExt), " ")
+	tags := strings.Join(formatInfoTags(ctx, manager, songInfo.Platform, songInfo.Quality, songInfo.FileExt), " ")
 
 	if strings.TrimSpace(songInfo.TrackURL) != "" {
 		songNameHTML = fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(songInfo.TrackURL), songNameText)
@@ -715,7 +717,7 @@ func buildMusicCaption(manager platform.Manager, songInfo *botpkg.SongInfo, botN
 	}
 	albumLine := ""
 	if strings.TrimSpace(songInfo.SongAlbum) != "" {
-		albumLine = fmt.Sprintf("专辑: %s\n", albumHTML)
+		albumLine = fmt.Sprintf("%s%s\n", tr(ctx, "album_label"), albumHTML)
 	}
 
 	return fmt.Sprintf("<b>「%s」- %s</b>\n%s<blockquote>%s%s\n</blockquote>via @%s",
@@ -742,27 +744,27 @@ func buildForwardQuery(trackURL, platformName, trackID string) string {
 	return trackID
 }
 
-func buildForwardKeyboard(trackURL, platformName, trackID string) *telego.InlineKeyboardMarkup {
+func buildForwardKeyboard(ctx context.Context, trackURL, platformName, trackID string) *telego.InlineKeyboardMarkup {
 	query := buildForwardQuery(trackURL, platformName, trackID)
 	if query == "" {
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{
-		{{Text: sendMeTo, SwitchInlineQuery: &query}},
+		{{Text: tr(ctx, "send_me_to"), SwitchInlineQuery: &query}},
 	}}
 }
 
-func buildInlineSendKeyboard(platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
+func buildInlineSendKeyboard(ctx context.Context, platformName, trackID, qualityValue string, requesterID int64) *telego.InlineKeyboardMarkup {
 	callbackData := buildInlineSendCallbackData(platformName, trackID, qualityValue, requesterID)
 	if callbackData == "" {
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: inlineTapToSend, CallbackData: callbackData},
+		{Text: tr(ctx, "inline_tap_to_send"), CallbackData: callbackData},
 	}}}
 }
 
-func buildInlineCollectionOpenKeyboard(token string, requesterID int64) *telego.InlineKeyboardMarkup {
+func buildInlineCollectionOpenKeyboard(ctx context.Context, token string, requesterID int64) *telego.InlineKeyboardMarkup {
 	token = strings.TrimSpace(token)
 	if token == "" || requesterID == 0 || !isInlineStartToken(token) {
 		return nil
@@ -772,11 +774,11 @@ func buildInlineCollectionOpenKeyboard(token string, requesterID int64) *telego.
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: "如果没反应点此刷新", CallbackData: callbackData},
+		{Text: tr(ctx, "inline_tap_to_send"), CallbackData: callbackData},
 	}}}
 }
 
-func buildInlineRandomSendKeyboard(requesterID int64) *telego.InlineKeyboardMarkup {
+func buildInlineRandomSendKeyboard(ctx context.Context, requesterID int64) *telego.InlineKeyboardMarkup {
 	if requesterID == 0 {
 		return nil
 	}
@@ -785,7 +787,7 @@ func buildInlineRandomSendKeyboard(requesterID int64) *telego.InlineKeyboardMark
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: [][]telego.InlineKeyboardButton{{
-		{Text: inlineTapToSend, CallbackData: callbackData},
+		{Text: tr(ctx, "inline_tap_to_send"), CallbackData: callbackData},
 	}}}
 }
 
@@ -1402,9 +1404,9 @@ func parseInlineCollectionResultID(resultID string) (platformName, collectionID,
 	return platformName, collectionID, qualityValue, true
 }
 
-func formatInfoTags(manager platform.Manager, platformName, quality, fileExt string) []string {
+func formatInfoTags(ctx context.Context, manager platform.Manager, platformName, quality, fileExt string) []string {
 	tags := []string{"#" + platformTag(manager, platformName)}
-	if qt := qualityTag(quality); qt != "" {
+	if qt := qualityTag(ctx, quality); qt != "" {
 		tags = append(tags, "#"+qt)
 	}
 	if strings.TrimSpace(fileExt) != "" {
@@ -1413,17 +1415,18 @@ func formatInfoTags(manager platform.Manager, platformName, quality, fileExt str
 	return tags
 }
 
-// qualityTag maps a quality value to its hashtag label. Hi-Res uses "HiRes"
-// (no hyphen) because Telegram terminates a hashtag at "-". Returns "" for
-// empty/unknown quality so no tag is emitted.
-func qualityTag(quality string) string {
+// qualityTag maps a quality value to its localized hashtag label. Hi-Res uses
+// "HiRes" (no hyphen) because Telegram terminates a hashtag at "-". Catalog
+// values are single tokens (no spaces) so they stay valid hashtags. Returns ""
+// for empty/unknown quality so no tag is emitted.
+func qualityTag(ctx context.Context, quality string) string {
 	switch strings.TrimSpace(strings.ToLower(quality)) {
 	case "standard":
-		return "标准音质"
+		return tr(ctx, "quality_tag_standard")
 	case "high":
-		return "高品质"
+		return tr(ctx, "quality_tag_high")
 	case "lossless":
-		return "无损"
+		return tr(ctx, "quality_tag_lossless")
 	case "hires":
 		return "HiRes"
 	default:
