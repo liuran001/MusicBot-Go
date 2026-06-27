@@ -275,6 +275,13 @@ func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, devic
 		if len(body) > 0 {
 			diag += " | body=" + snippet(body)
 		}
+		// A bare 403 with no error body is Spotify's signature for a blocklisted
+		// Widevine device. The shared/public L3 CDM is revoked by Spotify (Apple
+		// Music accepts it, Spotify does not); supplying a non-revoked,
+		// privately-extracted .wvd via wvd_path is the only fix.
+		if resp.StatusCode == 403 && len(body) == 0 {
+			diag += " — likely a blocklisted Widevine device; supply a non-revoked .wvd via [plugins.spotify] wvd_path (extract with KeyDive from a physical Android device)"
+		}
 		return nil, fmt.Errorf("license %s", diag)
 	}
 	keys, err := parseLicense(body)
