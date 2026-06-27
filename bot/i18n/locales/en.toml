@@ -105,7 +105,6 @@ help_cmd_about = "version & plugin info"
 help_section_params = "🎚 Parameters"
 help_quality_label = "Quality"
 help_platform_label = "Platform"
-help_supported_platforms = "Supported platforms"
 help_section_examples = "💡 Examples"
 # Illustrative example arguments shown in the /help examples block.
 help_example_music = "Jay Chou"

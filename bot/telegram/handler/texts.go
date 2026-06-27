@@ -27,23 +27,16 @@ const callbackText = "Success"
 // (platform names/aliases) are MarkdownV2-escaped by their builders, so the
 // whole result is sent with ParseMode=MarkdownV2.
 func buildHelpText(ctx context.Context, manager platform.Manager, isAdmin bool, adminCommands []admincmd.Command, recognizeEnabled bool, isPrivateChat bool) string {
-	aliasText := buildAliasHint(manager)
-	platformText := buildPlatformList(manager)
-	if aliasText == "" {
-		aliasText = "`163` / `qq`"
-	}
-	if platformText == "" {
-		platformText = mdV2Replacer.Replace(tr(ctx, "help_default_platforms"))
-	}
 	esc := func(id string) string { return mdV2Replacer.Replace(tr(ctx, id)) }
 	argTrack := esc("help_arg_track")
 	argKeyword := esc("help_arg_keyword")
+	platformBlock := buildPlatformBlock(ctx, manager)
 
 	text := "*🎵 MusicBot\\-Go*\n\n" + esc("help_intro") + "\n"
 	if isPrivateChat {
 		text += esc("help_private_hint") + "\n"
 	}
-	text += "\n*🚀 " + esc("help_section_commands") + "*\n" +
+	text += "\n*" + esc("help_section_commands") + "*\n" +
 		"`/music` " + argTrack + " \\[" + esc("help_platform_label") + "\\] \\[" + esc("help_quality_label") + "\\] \\- " + esc("help_cmd_music") + "\n" +
 		"`/search` " + argKeyword + " \\[" + esc("help_platform_label") + "\\] \\[" + esc("help_quality_label") + "\\] \\- " + esc("help_cmd_search") + "\n" +
 		"`/lyric` " + argTrack + " \\[" + esc("help_platform_label") + "\\] \\- " + esc("help_cmd_lyric") + "\n"
@@ -53,17 +46,16 @@ func buildHelpText(ctx context.Context, manager platform.Manager, isAdmin bool, 
 	text += "`/settings` \\- " + esc("help_cmd_settings") + "\n" +
 		"`/status` \\- " + esc("help_cmd_status") + "\n" +
 		"`/about` \\- " + esc("help_cmd_about") + "\n" +
-		"\n*🎚 " + esc("help_section_params") + "*\n" +
+		"\n*" + esc("help_section_params") + "*\n" +
 		esc("help_quality_label") + "：`low` / `high` / `lossless` / `hires`\n" +
-		esc("help_platform_label") + "：\n" + aliasText + "\n" +
-		"\n" + esc("help_supported_platforms") + "：" + platformText + "\n" +
-		"\n*💡 " + esc("help_section_examples") + "*\n" +
+		platformBlock +
+		"\n*" + esc("help_section_examples") + "*\n" +
 		"`/music " + tr(ctx, "help_example_music") + "`\n" +
 		"`/music https://music.163.com/song/1859603835`\n" +
 		"`/search " + tr(ctx, "help_example_search") + "`"
 	adminText := buildAdminHelp(ctx, adminCommands)
 	if isAdmin && adminText != "" {
-		text += "\n\n*🛠 " + esc("help_section_admin") + "*\n" + adminText
+		text += "\n\n*" + esc("help_section_admin") + "*\n" + adminText
 	}
 	return text
 }
@@ -106,13 +98,65 @@ func buildAdminHelp(ctx context.Context, adminCommands []admincmd.Command) strin
 	return strings.Join(lines, "\n")
 }
 
-func buildAliasHint(manager platform.Manager) string {
+// buildPlatformBlock renders the "Platform" line of the params section. The
+// platform list with per-platform aliases can be long, so it is folded into a
+// single expandable MarkdownV2 blockquote (`**>` … `||`): collapsed to one
+// summary line by default, tapped to reveal the full alias list. The summary
+// line shows the platform count and the first couple of display names so the
+// collapsed state is still informative.
+//
+// Returns the complete line(s) to splice into the help text (label + block),
+// already MarkdownV2-escaped, ending in a newline. Falls back to a plain inline
+// hint when no platforms are registered.
+func buildPlatformBlock(ctx context.Context, manager platform.Manager) string {
+	label := mdV2Replacer.Replace(tr(ctx, "help_platform_label"))
+
+	rows, displays := platformAliasRows(manager)
+	if len(rows) == 0 {
+		// No registered platforms: keep the section useful with a static hint.
+		return label + "：`163` / `qq`\n"
+	}
+
+	// Collapsed summary line, e.g. "Platform：NetEase, QQ Music, Apple Music …".
+	// Uses the same full-width colon the rest of the help text uses after labels,
+	// then an ASCII comma-separated preview so it reads the same in every
+	// language. A trailing ellipsis hints there is more behind the fold.
+	preview := displays
+	const maxPreview = 3
+	truncated := false
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+		truncated = true
+	}
+	summary := label + "：" + strings.Join(preview, mdV2Replacer.Replace(", "))
+	if truncated {
+		summary += mdV2Replacer.Replace(" …")
+	}
+
+	// Expandable blockquote: first line prefixed `**>`, the rest `>`, last
+	// line suffixed `||`. The summary rides on the first quoted line so the
+	// collapsed view shows it; expanding reveals every platform's aliases.
+	var b strings.Builder
+	b.WriteString("**>")
+	b.WriteString(summary)
+	for _, row := range rows {
+		b.WriteString("\n>")
+		b.WriteString(row)
+	}
+	b.WriteString("||\n")
+	return b.String()
+}
+
+// platformAliasRows returns one MarkdownV2-escaped "DisplayName: `a` / `b`" row
+// per registered platform (sorted by display name), plus the list of escaped
+// display names in the same order for building a summary.
+func platformAliasRows(manager platform.Manager) (rows []string, displays []string) {
 	if manager == nil {
-		return ""
+		return nil, nil
 	}
 	metaList := manager.ListMeta()
 	if len(metaList) == 0 {
-		return ""
+		return nil, nil
 	}
 	sort.Slice(metaList, func(i, j int) bool {
 		left := strings.TrimSpace(metaList[i].DisplayName)
@@ -128,7 +172,6 @@ func buildAliasHint(manager platform.Manager) string {
 		}
 		return left < right
 	})
-	lines := make([]string, 0, len(metaList))
 	for _, meta := range metaList {
 		platformName := strings.TrimSpace(meta.Name)
 		if platformName == "" {
@@ -162,32 +205,9 @@ func buildAliasHint(manager platform.Manager) string {
 		if display == "" {
 			display = platformName
 		}
-		lines = append(lines, "• "+mdV2Replacer.Replace(display)+": "+strings.Join(aliasItems, " / "))
+		escDisplay := mdV2Replacer.Replace(display)
+		rows = append(rows, escDisplay+": "+strings.Join(aliasItems, " / "))
+		displays = append(displays, escDisplay)
 	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.Join(lines, "\n")
-}
-
-func buildPlatformList(manager platform.Manager) string {
-	if manager == nil {
-		return ""
-	}
-	metaList := manager.ListMeta()
-	if len(metaList) == 0 {
-		return ""
-	}
-	items := make([]string, 0, len(metaList))
-	for _, meta := range metaList {
-		display := strings.TrimSpace(meta.DisplayName)
-		if display == "" {
-			display = meta.Name
-		}
-		if display == "" {
-			continue
-		}
-		items = append(items, mdV2Replacer.Replace(display))
-	}
-	return strings.Join(items, ", ")
+	return rows, displays
 }
