@@ -75,28 +75,40 @@ func TestTrackPlaybackParse(t *testing.T) {
 	}
 }
 
-func TestBuildPSSHFromFileID(t *testing.T) {
+func TestBuildSpotifyPSSH(t *testing.T) {
 	// A valid 40-hex (20-byte) Spotify file id.
 	fileID := "0123456789abcdef0123456789abcdef01234567"
-	box, err := buildPSSHFromFileID(fileID)
+	box, err := buildSpotifyPSSH(fileID)
 	if err != nil {
-		t.Fatalf("buildPSSHFromFileID: %v", err)
+		t.Fatalf("buildSpotifyPSSH: %v", err)
 	}
 	// The box must carry the 'pssh' fourcc at offset 4.
 	if len(box) < 32 || string(box[4:8]) != "pssh" {
 		t.Fatalf("not a pssh box: len=%d", len(box))
 	}
 	// gowidevine must be able to parse the box we built (proves it's well-formed).
-	if _, perr := widevine.NewPSSH(box); perr != nil {
+	parsed, perr := widevine.NewPSSH(box)
+	if perr != nil {
 		t.Fatalf("widevine.NewPSSH rejected our box: %v", perr)
+	}
+	// Verify the inner data has all 5 fields set (matching votify).
+	inner := parsed.Data()
+	if inner.GetProvider() != "spotify" {
+		t.Errorf("provider = %q, want %q", inner.GetProvider(), "spotify")
+	}
+	if inner.GetProtectionScheme() != 1667591779 {
+		t.Errorf("protection_scheme = %d, want 1667591779", inner.GetProtectionScheme())
+	}
+	if len(inner.GetKeyIds()) != 1 || len(inner.GetKeyIds()[0]) != 16 {
+		t.Errorf("key_ids = %v, want 1 key of 16 bytes", inner.GetKeyIds())
 	}
 }
 
-func TestBuildPSSHFromFileIDRejectsBad(t *testing.T) {
-	if _, err := buildPSSHFromFileID("00"); err == nil {
+func TestBuildSpotifyPSSHRejectsBad(t *testing.T) {
+	if _, err := buildSpotifyPSSH("00"); err == nil {
 		t.Fatal("expected error for too-short file id, got nil")
 	}
-	if _, err := buildPSSHFromFileID("not-hex-at-all"); err == nil {
+	if _, err := buildSpotifyPSSH("not-hex-at-all"); err == nil {
 		t.Fatal("expected error for non-hex file id, got nil")
 	}
 }

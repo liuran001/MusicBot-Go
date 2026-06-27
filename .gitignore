@@ -54,6 +54,8 @@ docker-data/
 # Widevine L3 device credentials (do NOT commit these)
 widevine/
 *.wvd
+# Extracted CDM material (client_id.bin / private_key.pem etc.) — real DRM keys
+secrets/
 
 # sisyphus sessions
 .sisyphus/

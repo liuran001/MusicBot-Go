@@ -183,20 +183,31 @@ func fetchPSSH(ctx context.Context, hc *http.Client, fileID string) ([]byte, err
 	return b, nil
 }
 
-// buildPSSHFromFileID constructs a Widevine PSSH box locally from the file id,
-// as a fallback when the seektable CDN has no pssh. It uses the same minimal
-// WidevinePsshData shape proven by the applemusic plugin (key_id + algorithm),
-// which is sufficient for the license challenge — the key id is what matters.
-// key_id = first 16 bytes of the file id.
-func buildPSSHFromFileID(fileID string) ([]byte, error) {
+// buildSpotifyPSSH constructs a WidevinePsshData protobuf locally from a
+// 40-hex Spotify file_id, matching votify's _get_pssh() exactly. This is
+// preferred over the seektable CDN because votify (which works) uses this
+// same local construction, and the seektable PSSH may have subtle field
+// differences (e.g. missing protection_scheme) that cause a 403.
+//
+// Fields (all five, matching votify):
+//   - algorithm = AESCTR
+//   - key_ids = [first 16 bytes of file_id]
+//   - provider = "spotify"
+//   - content_id = full file_id bytes (20 bytes)
+//   - protection_scheme = 0x636E6363 ('cenc' little-endian)
+func buildSpotifyPSSH(fileID string) ([]byte, error) {
 	raw, err := hex.DecodeString(fileID)
 	if err != nil || len(raw) < 16 {
 		return nil, fmt.Errorf("bad file id for pssh: %q", fileID)
 	}
-	inner, err := proto.Marshal(&widevinepb.WidevinePsshData{
-		KeyIds:    [][]byte{raw[:16]},
-		Algorithm: widevinepb.WidevinePsshData_AESCTR.Enum(),
-	})
+	psshData := &widevinepb.WidevinePsshData{
+		Algorithm:        widevinepb.WidevinePsshData_AESCTR.Enum(),
+		KeyIds:           [][]byte{raw[:16]},
+		Provider:         proto.String("spotify"),
+		ContentId:        raw,
+		ProtectionScheme: proto.Uint32(1667591779), // 'cenc' in little-endian
+	}
+	inner, err := proto.Marshal(psshData)
 	if err != nil {
 		return nil, fmt.Errorf("marshal pssh data: %w", err)
 	}
@@ -218,50 +229,121 @@ var widevineSystemID = []byte{
 	0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
 }
 
+// postLicense sends a raw Widevine message (challenge or service-cert request)
+// to Spotify's license endpoint and returns the raw response body + status.
+func postLicense(ctx context.Context, hc *http.Client, auth WebAuth, payload []byte) ([]byte, int, http.Header, error) {
+	licURL := fmt.Sprintf("%s/widevine-license/v1/audio/license", spclientHost)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, licURL, bytes.NewReader(payload))
+	webHeaders(req, auth.Bearer)
+	if auth.ClientToken != "" {
+		req.Header.Set("Client-Token", auth.ClientToken)
+	}
+	// votify (which works) posts the raw protobuf challenge but REUSES the
+	// default web-player client headers — httpx does NOT override a preset
+	// content-type when you pass raw bytes, so the binary challenge actually
+	// goes out as content-type/accept: application/json. We match that exactly;
+	// octet-stream (a "more correct" guess) is NOT what the working client sends.
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return body, resp.StatusCode, resp.Header, nil
+}
+
+// fetchSpotifyServiceCert retrieves Spotify's Widevine service certificate so we
+// can build a privacy-mode (encrypted-ClientID) challenge. The browser web
+// player ALWAYS does this first; a plaintext-ClientID challenge is what Spotify
+// rejects with a bare 403. The service cert is obtained by POSTing the
+// well-known ServiceCertificateRequest ({0x08,0x04}) to the license endpoint.
+func fetchSpotifyServiceCert(ctx context.Context, hc *http.Client, auth WebAuth) (*widevinepb.DrmCertificate, error) {
+	body, status, _, err := postLicense(ctx, hc, auth, widevine.ServiceCertificateRequest)
+	if err != nil {
+		return nil, fmt.Errorf("service-cert post: %w", err)
+	}
+	if status != 200 || len(body) == 0 {
+		return nil, fmt.Errorf("service-cert HTTP %d (len=%d)", status, len(body))
+	}
+	cert, err := widevine.ParseServiceCert(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse service-cert: %w", err)
+	}
+	return cert, nil
+}
+
+// fetchProductState queries Spotify's product_state endpoint and returns the
+// account's product tier ("free", "premium", ...). Used only as a 403
+// diagnostic: a free account cannot obtain a Widevine license for encrypted
+// interactive audio, which is the most common cause of a bare license 403.
+func fetchProductState(ctx context.Context, hc *http.Client, auth WebAuth) (string, error) {
+	url := spclientHost + "/melody/v1/product_state"
+	body, status, err := getRawAuth(ctx, hc, url, auth)
+	if err != nil {
+		return "", err
+	}
+	if status != 200 {
+		return "", fmt.Errorf("product_state HTTP %d", status)
+	}
+	var ps struct {
+		Product string `json:"product"`
+	}
+	if err := json.Unmarshal(body, &ps); err != nil {
+		return "", fmt.Errorf("product_state decode: %w", err)
+	}
+	return ps.Product, nil
+}
+
 // acquireContentKey runs the Widevine flow against Spotify's license server and
-// returns the CONTENT keys for the given PSSH.
+// returns the CONTENT keys for the given PSSH. It matches votify EXACTLY:
+// non-privacy mode (plaintext ClientID — votify never sets a service certificate,
+// so pywidevine's default privacy_mode=True is a no-op) and a STREAMING license
+// type. The decisive variable that was wrong before was the PSSH shape, not the
+// privacy mode: the seektable PSSH lacked provider/content_id/protection_scheme.
 func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, psshBytes []byte) ([]*widevine.Key, error) {
 	pssh, err := widevine.NewPSSH(psshBytes)
 	if err != nil {
 		return nil, fmt.Errorf("parse pssh: %w", err)
 	}
 	cdm := widevine.NewCDM(device)
-	challenge, parseLicense, err := cdm.GetLicenseChallenge(pssh, widevinepb.LicenseType_AUTOMATIC, false)
+
+	challenge, parseLicense, err := cdm.GetLicenseChallenge(pssh, widevinepb.LicenseType_STREAMING, false)
 	if err != nil {
 		return nil, fmt.Errorf("license challenge: %w", err)
 	}
-	licURL := fmt.Sprintf("%s/widevine-license/v1/audio/license", spclientHost)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, licURL, bytes.NewReader(challenge))
-	webHeaders(req, auth.Bearer)
-	if auth.ClientToken != "" {
-		req.Header.Set("Client-Token", auth.ClientToken)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Do(req)
+
+	body, status, hdr, err := postLicense(ctx, hc, auth, challenge)
 	if err != nil {
 		return nil, fmt.Errorf("license post: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != 200 {
-		// Dump diagnostic headers — for a 403 these usually indicate WHY (device
-		// revoked, token scope, etc.) so we can tell a fixable issue from a hard
-		// device rejection.
-		diag := fmt.Sprintf("HTTP %d", resp.StatusCode)
+	if status != 200 {
+		diag := fmt.Sprintf("HTTP %d", status)
 		for _, h := range []string{"Www-Authenticate", "X-Error-Code", "X-Spotify-Error", "Retry-After", "Content-Type", "Cf-Mitigated"} {
-			if v := resp.Header.Get(h); v != "" {
+			if v := hdr.Get(h); v != "" {
 				diag += fmt.Sprintf(" | %s=%s", h, v)
 			}
 		}
 		if len(body) > 0 {
 			diag += " | body=" + snippet(body)
 		}
-		// A bare 403 with no error body is Spotify's signature for a blocklisted
-		// Widevine device. The shared/public L3 CDM is revoked by Spotify (Apple
-		// Music accepts it, Spotify does not); supplying a non-revoked,
-		// privately-extracted .wvd via wvd_path is the only fix.
-		if resp.StatusCode == 403 && len(body) == 0 {
-			diag += " — likely a blocklisted Widevine device; supply a non-revoked .wvd via [plugins.spotify] wvd_path (extract with KeyDive from a physical Android device)"
+		if status == 403 && len(body) == 0 {
+			// A bare 403 has three possible causes, in order of likelihood as
+			// established by live testing (2026-06): (1) a FREE account — Spotify
+			// only grants Widevine licenses for encrypted interactive audio to
+			// Premium; (2) a blocklisted/revoked Widevine device; (3) a token/scope
+			// issue. Probe product_state to tell (1) apart from (2)/(3) so the
+			// caller gets actionable advice instead of guessing at the device.
+			if prod, perr := fetchProductState(ctx, hc, auth); perr == nil && prod != "" {
+				if prod != "premium" {
+					diag += fmt.Sprintf(" — account product=%q (NOT premium). Spotify only issues Widevine licenses for encrypted audio to Premium accounts; a free account always gets a bare 403 here regardless of device. Use a Premium account's sp_dc.", prod)
+				} else {
+					diag += " — account is premium, so this is a blocklisted/revoked Widevine device. Supply a non-revoked .wvd (KeyDive from a physical Android 13/14+ device) via [plugins.spotify] wvd_path."
+				}
+			} else {
+				diag += " — bare 403; likely a free (non-Premium) account, or a blocklisted Widevine device. Confirm the sp_dc belongs to a Premium account, then supply a non-revoked .wvd via [plugins.spotify] wvd_path."
+			}
 		}
 		return nil, fmt.Errorf("license %s", diag)
 	}
@@ -322,13 +404,9 @@ func BatchTryDevices(ctx context.Context, hc *http.Client, auth WebAuth, trackID
 	if rerr != nil {
 		return "", nil, "", 0, fmt.Errorf("storage-resolve: %w", rerr)
 	}
-	psshBytes, rerr := fetchPSSH(ctx, hc, file.FileID)
+	psshBytes, rerr := buildSpotifyPSSH(file.FileID)
 	if rerr != nil {
-		built, berr := buildPSSHFromFileID(file.FileID)
-		if berr != nil {
-			return "", nil, "", 0, fmt.Errorf("pssh: seektable failed (%v) and build failed: %w", rerr, berr)
-		}
-		psshBytes = built
+		return "", nil, "", 0, fmt.Errorf("build pssh: %w", rerr)
 	}
 
 	for i, path := range wvdPaths {
@@ -415,20 +493,14 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, auth WebAuth, dev
 	res.CDNURL = cdnURL
 	add("storage-resolve ok: host=%s", hostOf(cdnURL))
 
-	// 3) Obtain the PSSH (Widevine init data). Prefer the seektable CDN; if it
-	// has none for this file, build it locally from the file id (votify's
-	// approach), so a missing seektable entry doesn't block the download.
-	psshBytes, err := fetchPSSH(ctx, hc, file.FileID)
+	// 3) Build the PSSH (Widevine init data) locally from the file_id,
+	// matching votify's approach exactly. This includes all 5 fields
+	// (algorithm, key_ids, provider, content_id, protection_scheme).
+	psshBytes, err := buildSpotifyPSSH(file.FileID)
 	if err != nil {
-		built, berr := buildPSSHFromFileID(file.FileID)
-		if berr != nil {
-			return res, fmt.Errorf("seektable failed (%v) and local pssh build failed: %w", err, berr)
-		}
-		psshBytes = built
-		add("seektable unavailable (%v); built pssh locally: %d bytes", err, len(psshBytes))
-	} else {
-		add("seektable ok: pssh %d bytes", len(psshBytes))
+		return res, fmt.Errorf("build pssh: %w", err)
 	}
+	add("built pssh locally: %d bytes", len(psshBytes))
 
 	// 4) Run the Widevine license flow to get the CONTENT key.
 	keys, err := acquireContentKey(ctx, hc, auth, device, psshBytes)
