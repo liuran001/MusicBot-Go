@@ -829,7 +829,8 @@ func (c *Client) resolveHLSToMP4(ctx context.Context, m3u8URL string) (mp4URL st
 //  3. Fetch the variant media playlist (per-segment skd:// keys + mp4 URL).
 //  4. Download the single byte-range mp4 from CDN.
 //  5. Stream each cbcs sample through wrapper port 10020 to decrypt in place,
-//     then (ALAC) run alacfix and remux to a progressive MP4.
+//     remux to a progressive MP4, then (ALAC) run alacfix on the progressive
+//     file — alacfix needs the progressive sample table to locate packets.
 func (c *Client) fetchViaWrapper(ctx context.Context, trackID string, quality platform.Quality, wantAtmos bool) (*platform.DownloadInfo, error) {
 	host := strings.TrimSpace(c.wrapperHost)
 	if host == "" {
@@ -922,21 +923,26 @@ func (c *Client) fetchViaWrapper(ctx context.Context, trackID string, quality pl
 			return 0, fmt.Errorf("close output: %w", err)
 		}
 
-		// ALAC packets from Apple sometimes lack the TYPE_END terminator, which
-		// trips ffmpeg ("invalid element channel count"). Patch in place. This
-		// is a no-op for files without the defect; failures are non-fatal.
-		if isALAC {
-			if err := fixALACFile(destPath); err != nil && c.logger != nil {
-				c.logger.Warn("applemusic: alac fix failed (file may still play)",
+		// The wrapper emits a fragmented MP4 (samples in moof/trun, moov's stsz
+		// advertises 0 samples); remux to progressive first so it shows a
+		// progress bar / seeks in Telegram and desktop players. This must happen
+		// BEFORE alacfix, because alacfix locates packets via the progressive
+		// sample table (stsz/stsc/stco) — on the fragmented file it would find
+		// zero packets and patch nothing.
+		if err := remuxToProgressive(ctx, destPath); err != nil {
+			if c.logger != nil {
+				c.logger.Warn("applemusic: remux to progressive failed (file may not seek)",
 					"track_id", trackID, "error", err)
 			}
 		}
 
-		// The wrapper emits a fragmented MP4; remux to progressive so it shows a
-		// progress bar / seeks in Telegram and desktop players.
-		if err := remuxToProgressive(ctx, destPath); err != nil {
-			if c.logger != nil {
-				c.logger.Warn("applemusic: remux to progressive failed (file may not seek)",
+		// ALAC packets from Apple sometimes lack the TYPE_END terminator, which
+		// trips ffmpeg ("invalid element channel count") and stalls players at
+		// the first bad packet. Patch in place, on the now-progressive file.
+		// This is a no-op for files without the defect; failures are non-fatal.
+		if isALAC {
+			if err := fixALACFile(destPath); err != nil && c.logger != nil {
+				c.logger.Warn("applemusic: alac fix failed (file may still play)",
 					"track_id", trackID, "error", err)
 			}
 		}
