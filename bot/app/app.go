@@ -368,6 +368,7 @@ func (a *App) Start(ctx context.Context) error {
 	adminCommands := make([]admincmd.Command, 0, len(a.AdminCommands)+2)
 	adminCommands = append(adminCommands,
 		handler.BuildAccountLoginCommand(a.PlatformManager),
+		a.BuildProfileCommand(),
 	)
 	if whitelist.Enabled() {
 		adminCommands = append(adminCommands, BuildWhitelistCommand(whitelist))
@@ -564,6 +565,72 @@ var botCommandSpecs = []localizedCommandSpec{
 	{command: "about", descKey: "cmd_about"},
 }
 
+// botProfileField maps a bot-profile config key to its i18n fallback key.
+type botProfileField struct {
+	configKey string // key inside [bot_profile.<lang>]
+	i18nKey   string // embedded catalog key used when no override is set
+}
+
+var botProfileFields = []botProfileField{
+	{configKey: "name", i18nKey: "bot_name"},
+	{configKey: "description", i18nKey: "bot_description"},
+	{configKey: "short_description", i18nKey: "bot_short_description"},
+}
+
+// effectiveBotProfile resolves the value for a profile field in a language:
+// a [bot_profile.<lang>] config override wins over the embedded i18n default.
+// The bool reports whether the value is safe to publish (non-empty and not the
+// echoed i18n key that signals a missing catalog entry).
+func (a *App) effectiveBotProfile(lang string, f botProfileField, loc *i18n.Localizer) (string, bool) {
+	if a.Config != nil {
+		if v := strings.TrimSpace(a.Config.GetBotProfileField(lang, f.configKey)); v != "" {
+			return v, true
+		}
+	}
+	v := loc.T(f.i18nKey)
+	if strings.TrimSpace(v) == "" || v == f.i18nKey {
+		return "", false
+	}
+	return v, true
+}
+
+// pushBotProfile publishes the bot name and (short) description for one
+// language table to Telegram. profileLang is the language used to look up
+// config overrides and the i18n catalog; langCode is the Telegram
+// language_code to write under (empty = the default table).
+func (a *App) pushBotProfile(ctx context.Context, langCode, profileLang string) {
+	client := a.Telegram.Client()
+	loc := i18n.For(profileLang)
+
+	if name, ok := a.effectiveBotProfile(profileLang, botProfileFields[0], loc); ok {
+		params := &telego.SetMyNameParams{Name: name}
+		if langCode != "" {
+			params.LanguageCode = langCode
+		}
+		if err := client.SetMyName(ctx, params); err != nil && a.Logger != nil {
+			a.Logger.Debug("failed to set bot name", "lang", langCode, "error", err)
+		}
+	}
+	if desc, ok := a.effectiveBotProfile(profileLang, botProfileFields[1], loc); ok {
+		params := &telego.SetMyDescriptionParams{Description: desc}
+		if langCode != "" {
+			params.LanguageCode = langCode
+		}
+		if err := client.SetMyDescription(ctx, params); err != nil && a.Logger != nil {
+			a.Logger.Debug("failed to set bot description", "lang", langCode, "error", err)
+		}
+	}
+	if short, ok := a.effectiveBotProfile(profileLang, botProfileFields[2], loc); ok {
+		params := &telego.SetMyShortDescriptionParams{ShortDescription: short}
+		if langCode != "" {
+			params.LanguageCode = langCode
+		}
+		if err := client.SetMyShortDescription(ctx, params); err != nil && a.Logger != nil {
+			a.Logger.Debug("failed to set bot short description", "lang", langCode, "error", err)
+		}
+	}
+}
+
 // registerLocalizedCommands publishes the command menu, bot name, and bot
 // descriptions to Telegram once per supported language. Telegram stores one
 // table per (scope, language_code) and serves each client the table matching
@@ -573,6 +640,10 @@ var botCommandSpecs = []localizedCommandSpec{
 // user sees a usable menu, then one table per remaining supported language. The
 // language_code Telegram accepts is a 2-letter ISO 639-1 code — exactly the
 // codes i18n.SupportedLanguages already uses.
+//
+// Bot name / description / short description honor per-language overrides from
+// the [bot_profile.<lang>] config sections, falling back to the embedded i18n
+// catalog (see effectiveBotProfile).
 func (a *App) registerLocalizedCommands(ctx context.Context, enableRecognize bool) {
 	client := a.Telegram.Client()
 
@@ -592,49 +663,22 @@ func (a *App) registerLocalizedCommands(ctx context.Context, enableRecognize boo
 
 	// Apply one (scope=default) catalog per language. The fallback language is
 	// also written with an empty language_code so it becomes the default table.
-	apply := func(langCode string, loc *i18n.Localizer) {
-		params := &telego.SetMyCommandsParams{Commands: buildCommands(loc)}
+	apply := func(langCode, profileLang string) {
+		params := &telego.SetMyCommandsParams{Commands: buildCommands(i18n.For(profileLang))}
 		if langCode != "" {
 			params.LanguageCode = langCode
 		}
 		if err := client.SetMyCommands(ctx, params); err != nil && a.Logger != nil {
 			a.Logger.Warn("failed to set bot commands", "lang", langCode, "error", err)
 		}
-
-		if name := loc.T("bot_name"); strings.TrimSpace(name) != "" && name != "bot_name" {
-			nameParams := &telego.SetMyNameParams{Name: name}
-			if langCode != "" {
-				nameParams.LanguageCode = langCode
-			}
-			if err := client.SetMyName(ctx, nameParams); err != nil && a.Logger != nil {
-				a.Logger.Debug("failed to set bot name", "lang", langCode, "error", err)
-			}
-		}
-		if desc := loc.T("bot_description"); desc != "" && desc != "bot_description" {
-			descParams := &telego.SetMyDescriptionParams{Description: desc}
-			if langCode != "" {
-				descParams.LanguageCode = langCode
-			}
-			if err := client.SetMyDescription(ctx, descParams); err != nil && a.Logger != nil {
-				a.Logger.Debug("failed to set bot description", "lang", langCode, "error", err)
-			}
-		}
-		if short := loc.T("bot_short_description"); short != "" && short != "bot_short_description" {
-			shortParams := &telego.SetMyShortDescriptionParams{ShortDescription: short}
-			if langCode != "" {
-				shortParams.LanguageCode = langCode
-			}
-			if err := client.SetMyShortDescription(ctx, shortParams); err != nil && a.Logger != nil {
-				a.Logger.Debug("failed to set bot short description", "lang", langCode, "error", err)
-			}
-		}
+		a.pushBotProfile(ctx, langCode, profileLang)
 	}
 
 	// Default table (empty language_code) uses the fallback language so users
 	// whose client language has no dedicated table still get a complete menu.
-	apply("", i18n.For(i18n.DefaultLanguage))
+	apply("", i18n.DefaultLanguage)
 	for _, lang := range i18n.SupportedLanguages {
-		apply(lang, i18n.For(lang))
+		apply(lang, lang)
 	}
 }
 

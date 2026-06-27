@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	"github.com/spf13/viper"
@@ -19,10 +20,11 @@ type PluginConfig map[string]interface{}
 
 // Config wraps viper and provides typed accessors.
 type Config struct {
-	v       *viper.Viper
-	plugins map[string]PluginConfig
-	path    string
-	mu      sync.Mutex
+	v           *viper.Viper
+	plugins     map[string]PluginConfig
+	botProfiles map[string]map[string]string
+	path        string
+	mu          sync.Mutex
 }
 
 // Load reads an INI config file and prepares defaults.
@@ -40,12 +42,14 @@ func Load(path string) (*Config, error) {
 		}
 
 		c := &Config{
-			v:       v,
-			plugins: make(map[string]PluginConfig),
-			path:    path,
+			v:           v,
+			plugins:     make(map[string]PluginConfig),
+			botProfiles: make(map[string]map[string]string),
+			path:        path,
 		}
 
 		loadPlugins(cfg, c)
+		loadBotProfiles(cfg, c)
 		if err := c.Validate(); err != nil {
 			return nil, fmt.Errorf("validate config: %w", err)
 		}
@@ -58,9 +62,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	c := &Config{
-		v:       v,
-		plugins: make(map[string]PluginConfig),
-		path:    path,
+		v:           v,
+		plugins:     make(map[string]PluginConfig),
+		botProfiles: make(map[string]map[string]string),
+		path:        path,
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
@@ -321,6 +326,71 @@ func findSectionRange(lines []string, sectionName string) (start, end int) {
 		}
 	}
 	return start, end
+}
+
+// deleteINIKey removes a single key from a section, preserving all other
+// formatting. Missing file/section/key is a no-op.
+func deleteINIKey(path, sectionName, key string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := string(data)
+	lineSep := "\n"
+	if strings.Contains(content, "\r\n") {
+		lineSep = "\r\n"
+	}
+	lines := strings.Split(content, lineSep)
+	start, end := findSectionRange(lines, sectionName)
+	if start < 0 {
+		return nil
+	}
+	target := strings.ToLower(strings.TrimSpace(key))
+	out := make([]string, 0, len(lines))
+	out = append(out, lines[:start+1]...)
+	for i := start + 1; i < end; i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, ";") {
+			if eq := strings.Index(line, "="); eq >= 0 {
+				if strings.ToLower(strings.TrimSpace(line[:eq])) == target {
+					continue
+				}
+			}
+		}
+		out = append(out, line)
+	}
+	out = append(out, lines[end:]...)
+	return atomicWriteFile(path, []byte(strings.Join(out, lineSep)), 0o644)
+}
+
+// deleteINISection removes an entire [section] and its body. Missing
+// file/section is a no-op.
+func deleteINISection(path, sectionName string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := string(data)
+	lineSep := "\n"
+	if strings.Contains(content, "\r\n") {
+		lineSep = "\r\n"
+	}
+	lines := strings.Split(content, lineSep)
+	start, end := findSectionRange(lines, sectionName)
+	if start < 0 {
+		return nil
+	}
+	out := make([]string, 0, len(lines))
+	out = append(out, lines[:start]...)
+	out = append(out, lines[end:]...)
+	return atomicWriteFile(path, []byte(strings.Join(out, lineSep)), 0o644)
 }
 
 func leadingWhitespace(s string) string {
@@ -630,4 +700,198 @@ func loadPlugins(cfg *ini.File, c *Config) {
 			c.plugins[pluginName] = pluginCfg
 		}
 	}
+}
+
+// botProfilePrefix is the INI section prefix for per-language bot profile
+// overrides, e.g. [bot_profile.zh]. Keys inside are name / description /
+// short_description; any present key overrides the embedded i18n default.
+const botProfilePrefix = "bot_profile."
+
+// BotProfileKeys are the recognized fields inside a [bot_profile.<lang>]
+// section, in display order.
+var BotProfileKeys = []string{"name", "description", "short_description"}
+
+// BotProfileLimits is the maximum length (in characters) Telegram accepts for
+// each profile field. Validating here gives a friendly error before the API
+// call instead of a raw Bad Request from Telegram.
+var BotProfileLimits = map[string]int{
+	"name":              64,
+	"description":       512,
+	"short_description": 120,
+}
+
+// IsBotProfileKey reports whether key is a recognized bot profile field.
+func IsBotProfileKey(key string) bool {
+	for _, k := range BotProfileKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// BotProfileFieldLimit returns Telegram's max character length for a profile
+// field, or 0 if the key is not a recognized field.
+func BotProfileFieldLimit(key string) int {
+	return BotProfileLimits[strings.ToLower(strings.TrimSpace(key))]
+}
+
+// loadBotProfiles reads every [bot_profile.<lang>] section into c.botProfiles.
+func loadBotProfiles(cfg *ini.File, c *Config) {
+	for _, section := range cfg.Sections() {
+		sectionName := section.Name()
+		if !strings.HasPrefix(sectionName, botProfilePrefix) {
+			continue
+		}
+		lang := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(sectionName, botProfilePrefix)))
+		if lang == "" {
+			continue
+		}
+		fields := make(map[string]string)
+		for _, key := range section.Keys() {
+			name := strings.ToLower(strings.TrimSpace(key.Name()))
+			if !IsBotProfileKey(name) {
+				continue
+			}
+			fields[name] = key.Value()
+		}
+		if len(fields) > 0 {
+			c.botProfiles[lang] = fields
+		}
+	}
+}
+
+// GetBotProfile returns the override fields configured for a language, if any.
+// The returned map is a copy and safe to mutate.
+func (c *Config) GetBotProfile(lang string) (map[string]string, bool) {
+	if c == nil {
+		return nil, false
+	}
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	fields, ok := c.botProfiles[lang]
+	if !ok || len(fields) == 0 {
+		return nil, false
+	}
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		out[k] = v
+	}
+	return out, true
+}
+
+// GetBotProfileField returns a single override field for a language, or empty.
+func (c *Config) GetBotProfileField(lang, key string) string {
+	if c == nil {
+		return ""
+	}
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	key = strings.ToLower(strings.TrimSpace(key))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fields, ok := c.botProfiles[lang]; ok {
+		return fields[key]
+	}
+	return ""
+}
+
+// SetBotProfileField persists a single override field for a language to the
+// config file and updates the in-memory copy. An empty value removes the key
+// (falling back to the embedded i18n default). Only recognized keys are
+// accepted.
+func (c *Config) SetBotProfileField(lang, key, value string) error {
+	if c == nil {
+		return fmt.Errorf("config is nil")
+	}
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	key = strings.ToLower(strings.TrimSpace(key))
+	if lang == "" {
+		return fmt.Errorf("language empty")
+	}
+	if !IsBotProfileKey(key) {
+		return fmt.Errorf("unknown profile field %q (allowed: %s)", key, strings.Join(BotProfileKeys, ", "))
+	}
+	// Telegram enforces per-field character limits (counted in code points, not
+	// bytes). Reject early so the caller gets a friendly message instead of an
+	// opaque API error at push time. An empty value means "remove override".
+	if value != "" {
+		if limit, ok := BotProfileLimits[key]; ok {
+			if n := utf8.RuneCountInString(value); n > limit {
+				return fmt.Errorf("%s 超出长度限制: %d/%d 字符", key, n, limit)
+			}
+		}
+	}
+
+	path := strings.TrimSpace(c.path)
+	if path == "" {
+		path = strings.TrimSpace(c.v.ConfigFileUsed())
+	}
+	if path == "" {
+		path = "config.ini"
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := ensureParentDir(path); err != nil {
+		return err
+	}
+
+	section := botProfilePrefix + lang
+	if value == "" {
+		if err := deleteINIKey(path, section, key); err != nil {
+			return err
+		}
+		if fields, ok := c.botProfiles[lang]; ok {
+			delete(fields, key)
+			if len(fields) == 0 {
+				delete(c.botProfiles, lang)
+			}
+		}
+		return nil
+	}
+
+	if err := upsertINIWithoutReformat(path, section, map[string]string{key: formatINIPersistValue(value)}); err != nil {
+		return err
+	}
+	fields, ok := c.botProfiles[lang]
+	if !ok || fields == nil {
+		fields = make(map[string]string)
+		c.botProfiles[lang] = fields
+	}
+	fields[key] = value
+	return nil
+}
+
+// ResetBotProfile removes all override fields for a language, restoring the
+// embedded i18n defaults. It is a no-op if no overrides exist.
+func (c *Config) ResetBotProfile(lang string) error {
+	if c == nil {
+		return fmt.Errorf("config is nil")
+	}
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	if lang == "" {
+		return fmt.Errorf("language empty")
+	}
+
+	path := strings.TrimSpace(c.path)
+	if path == "" {
+		path = strings.TrimSpace(c.v.ConfigFileUsed())
+	}
+	if path == "" {
+		path = "config.ini"
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.botProfiles[lang]; !ok {
+		return nil
+	}
+	if err := deleteINISection(path, botProfilePrefix+lang); err != nil {
+		return err
+	}
+	delete(c.botProfiles, lang)
+	return nil
 }
