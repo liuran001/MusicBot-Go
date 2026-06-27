@@ -74,9 +74,10 @@ func iosContext() innertubeContext {
 		ClientVersion: iosClientVersion,
 		Hl:            "en",
 		Gl:            "US",
+		DeviceMake:    "Apple",
 		DeviceModel:   "iPhone16,2",
-		OsName:        "iOS",
-		OsVersion:     "18.1.0.22B83",
+		OsName:        "iPhone",
+		OsVersion:     "18.3.2.22D82",
 	}}
 }
 

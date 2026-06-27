@@ -22,8 +22,8 @@ const (
 	webRemixClientVersion = "1.20240101.01.00"
 
 	iosClientName    = "IOS"
-	iosClientVersion = "19.45.4"
-	iosUserAgent     = "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1 like Mac OS X)"
+	iosClientVersion = "21.02.3"
+	iosUserAgent     = "com.google.ios.youtube/21.02.3 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
 
 	defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
@@ -38,6 +38,7 @@ type clientInfo struct {
 	ClientVersion     string `json:"clientVersion"`
 	Hl                string `json:"hl,omitempty"`
 	Gl                string `json:"gl,omitempty"`
+	DeviceMake        string `json:"deviceMake,omitempty"`
 	DeviceModel       string `json:"deviceModel,omitempty"`
 	OsName            string `json:"osName,omitempty"`
 	OsVersion         string `json:"osVersion,omitempty"`
