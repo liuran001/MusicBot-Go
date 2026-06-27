@@ -62,6 +62,10 @@ func main() {
 	spotifyCode := flag.String("spotify-code", "", "授权后从回调地址里复制的 code（配合 -spotify-verify 使用）")
 	spotifyCookie := flag.String("spotify-cookie", "", "用 sp_dc cookie 探测 Widevine 链路（诊断用，从浏览器登录 open.spotify.com 后复制 sp_dc）")
 	spotifyWvdDir := flag.String("spotify-wvd-dir", "", "批量测试一个目录里的所有 .wvd 设备，找出未被 Spotify 吊销的（配合 -spotify-cookie 用）")
+	spotifyUser := flag.String("spotify-user", "", "测试 device-free 的 OGG 路径：账号用户名（配合 -spotify-pass）")
+	spotifyPass := flag.String("spotify-pass", "", "测试 device-free 的 OGG 路径：账号密码")
+	spotifyOgg := flag.Bool("spotify-ogg", false, "测试 device-free 的 OGG 路径（sp_dc → AP token，无 Widevine 设备，配合 -spotify-cookie）")
+	spotifyTrack := flag.String("spotify-track", "", "测试用的曲目 ID（默认 Mr. Brightside）")
 	flag.Parse()
 
 	if created, err := ensureConfig(*configPath); err != nil {
@@ -74,6 +78,22 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if *spotifyOgg && *spotifyCookie != "" {
+		if err := runSpotifyVerifyOGGCookie(ctx, *configPath, *spotifyCookie, *spotifyUser, *spotifyTrack); err != nil {
+			fmt.Fprintf(os.Stderr, "Spotify OGG (cookie) 测试失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *spotifyUser != "" && *spotifyPass != "" {
+		if err := runSpotifyVerifyPassword(ctx, *configPath, *spotifyUser, *spotifyPass); err != nil {
+			fmt.Fprintf(os.Stderr, "Spotify OGG (password) 测试失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *spotifyWvdDir != "" {
 		if err := runSpotifyBatchWvd(ctx, *configPath, *spotifyCookie, *spotifyWvdDir); err != nil {
@@ -206,4 +226,31 @@ func runSpotifyBatchWvd(ctx context.Context, configPath, spDC, wvdDir string) er
 		logger, _ = logpkg.New("info", "text", false)
 	}
 	return spotify.RunBatchWvd(ctx, conf, logger, spDC, wvdDir, "")
+}
+
+// runSpotifyVerifyPassword tests the device-free librespot OGG path via
+// username/password AP login.
+func runSpotifyVerifyPassword(ctx context.Context, configPath, username, password string) error {
+	conf, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed loading config: %w", err)
+	}
+	logger, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), false)
+	if err != nil {
+		logger, _ = logpkg.New("info", "text", false)
+	}
+	return spotify.RunVerifyPassword(ctx, conf, logger, username, password, "")
+}
+
+// runSpotifyVerifyOGGCookie tests the device-free OGG path via sp_dc -> AP token.
+func runSpotifyVerifyOGGCookie(ctx context.Context, configPath, spDC, usernameHint, trackID string) error {
+	conf, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed loading config: %w", err)
+	}
+	logger, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), false)
+	if err != nil {
+		logger, _ = logpkg.New("info", "text", false)
+	}
+	return spotify.RunVerifyOGGCookie(ctx, conf, logger, spDC, usernameHint, trackID)
 }

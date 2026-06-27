@@ -333,3 +333,85 @@ func RunBatchWvd(ctx context.Context, cfg *config.Config, logger *logpkg.Logger,
 		workingPath, outPath, len(mp4), bitrate/1000, fileID)
 	return nil
 }
+
+// RunVerifyPassword tests the device-free librespot OGG path: connect to the AP
+// with username/password and download a track as Ogg Vorbis (no Widevine).
+func RunVerifyPassword(ctx context.Context, cfg *config.Config, logger *logpkg.Logger, username, password, trackID string) error {
+	if cfg == nil {
+		return fmt.Errorf("spotify: config required")
+	}
+	if trackID == "" {
+		trackID = "003vvx7Niy0yvhvHt4a68B"
+	}
+	statePath := strings.TrimSpace(cfg.GetPluginString(platformName, "credentials_path"))
+	if statePath == "" {
+		cacheDir := strings.TrimSpace(cfg.GetString("CacheDir"))
+		if cacheDir == "" {
+			cacheDir = "./cache"
+		}
+		statePath = filepath.Join(cacheDir, "spotify-credentials.json")
+	}
+
+	fmt.Println("=== device-free librespot OGG 路径（账号密码登录）===")
+	res, err := native.DownloadOGGWithPassword(ctx, logger, username, password, trackID, 0)
+	if res != nil {
+		for _, s := range res.Steps {
+			fmt.Println("  •", s)
+		}
+	}
+	if err != nil {
+		fmt.Printf("\n失败: %v\n", err)
+		return err
+	}
+	outPath := filepath.Join(filepath.Dir(statePath), "spotify-ogg-"+trackID+".ogg")
+	if werr := os.WriteFile(outPath, res.OGG, 0o644); werr != nil {
+		return fmt.Errorf("写出 OGG 失败: %w", werr)
+	}
+	fmt.Printf("\n✅ OGG 路径成功！%s (%d 字节, %d kbps) — 完全没用 Widevine 设备\n", outPath, len(res.OGG), res.Bitrate)
+	return nil
+}
+
+// RunVerifyOGGCookie tests the device-free OGG path using an sp_dc cookie
+// (web token -> AP via SPOTIFY_TOKEN -> audio-key -> Ogg Vorbis).
+func RunVerifyOGGCookie(ctx context.Context, cfg *config.Config, logger *logpkg.Logger, spDC, usernameHint, trackID string) error {
+	if cfg == nil {
+		return fmt.Errorf("spotify: config required")
+	}
+	if trackID == "" {
+		trackID = "003vvx7Niy0yvhvHt4a68B"
+	}
+	timeoutSec := cfg.GetPluginInt(platformName, "timeout")
+	if timeoutSec <= 0 {
+		timeoutSec = 15
+	}
+	nativeHTTP, err := httpproxy.NewHTTPClient(cfg.ResolveAPIProxyConfig(platformName), time.Duration(timeoutSec)*time.Second)
+	if err != nil {
+		return err
+	}
+	statePath := strings.TrimSpace(cfg.GetPluginString(platformName, "credentials_path"))
+	if statePath == "" {
+		cacheDir := strings.TrimSpace(cfg.GetString("CacheDir"))
+		if cacheDir == "" {
+			cacheDir = "./cache"
+		}
+		statePath = filepath.Join(cacheDir, "spotify-credentials.json")
+	}
+
+	fmt.Println("=== device-free OGG 路径（sp_dc → AP token，无 Widevine 设备）===")
+	res, err := native.DownloadOGGWithCookie(ctx, logger, nativeHTTP, spDC, usernameHint, trackID, 0)
+	if res != nil {
+		for _, s := range res.Steps {
+			fmt.Println("  •", s)
+		}
+	}
+	if err != nil {
+		fmt.Printf("\n失败: %v\n", err)
+		return err
+	}
+	outPath := filepath.Join(filepath.Dir(statePath), "spotify-ogg-"+trackID+".ogg")
+	if werr := os.WriteFile(outPath, res.OGG, 0o644); werr != nil {
+		return fmt.Errorf("写出 OGG 失败: %w", werr)
+	}
+	fmt.Printf("\n✅ OGG 路径成功！%s (%d 字节, %d kbps) — 完全没用 Widevine 设备\n", outPath, len(res.OGG), res.Bitrate)
+	return nil
+}
