@@ -258,3 +258,78 @@ func RunVerifyCookie(ctx context.Context, cfg *config.Config, logger *logpkg.Log
 	fmt.Printf("\n✅ 成功！解密的 AAC 已写入: %s (%d 字节, %d kbps)\n", outPath, len(wv.MP4), wv.Bitrate/1000)
 	return nil
 }
+
+// RunBatchWvd mints a web token from sp_dc, then tries every .wvd in wvdDir
+// against the Spotify license endpoint until one is accepted (not revoked),
+// downloading + decrypting a track with the first working device.
+func RunBatchWvd(ctx context.Context, cfg *config.Config, logger *logpkg.Logger, spDC, wvdDir, trackID string) error {
+	if cfg == nil {
+		return fmt.Errorf("spotify: config required")
+	}
+	timeoutSec := cfg.GetPluginInt(platformName, "timeout")
+	if timeoutSec <= 0 {
+		timeoutSec = 15
+	}
+	timeout := time.Duration(timeoutSec) * time.Second
+	nativeHTTP, err := httpproxy.NewHTTPClient(cfg.ResolveAPIProxyConfig(platformName), timeout)
+	if err != nil {
+		return err
+	}
+	if trackID == "" {
+		trackID = "003vvx7Niy0yvhvHt4a68B"
+	}
+
+	// Collect .wvd files.
+	entries, err := os.ReadDir(wvdDir)
+	if err != nil {
+		return fmt.Errorf("读取 wvd 目录失败: %w", err)
+	}
+	var paths []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".wvd") {
+			paths = append(paths, filepath.Join(wvdDir, e.Name()))
+		}
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("目录里没有 .wvd 文件: %s", wvdDir)
+	}
+	fmt.Printf("找到 %d 个 .wvd 设备，开始逐个测试…\n", len(paths))
+
+	fmt.Println("用 sp_dc cookie 换取 web-player token…")
+	wt, err := native.WebTokenFromCookie(ctx, nativeHTTP, spDC)
+	if wt != nil {
+		for _, s := range wt.Steps {
+			fmt.Println("  •", s)
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	auth := native.WebAuth{Bearer: wt.AccessToken, ClientToken: wt.ClientToken}
+	rejected := 0
+	onProgress := func(idx, total int, path, status string) {
+		// Only print non-routine rejections sparsely + any non-"rejected" event.
+		if strings.HasPrefix(status, "rejected") {
+			rejected++
+			if rejected%10 == 0 || idx == total {
+				fmt.Printf("  [%d/%d] 已拒绝 %d 个…\n", idx, total, rejected)
+			}
+			return
+		}
+		fmt.Printf("  [%d/%d] %s → %s\n", idx, total, filepath.Base(path), status)
+	}
+
+	workingPath, mp4, fileID, bitrate, err := native.BatchTryDevices(ctx, nativeHTTP, auth, trackID, 0, paths, onProgress)
+	if err != nil {
+		return err
+	}
+
+	outPath := filepath.Join(wvdDir, "spotify-batch-"+trackID+".m4a")
+	if werr := os.WriteFile(outPath, mp4, 0o644); werr != nil {
+		return fmt.Errorf("写出解密文件失败: %w", werr)
+	}
+	fmt.Printf("\n✅ 找到可用设备！\n   设备: %s\n   解密 AAC: %s (%d 字节, %d kbps, file_id=%s)\n",
+		workingPath, outPath, len(mp4), bitrate/1000, fileID)
+	return nil
+}

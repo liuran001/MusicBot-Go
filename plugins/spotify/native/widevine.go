@@ -300,6 +300,71 @@ func downloadAndDecryptMP4(ctx context.Context, hc *http.Client, cdnURL string, 
 	return out.Bytes(), nil
 }
 
+// BatchTryDevices resolves a track once (track-playback -> storage-resolve ->
+// PSSH), then loops over the given .wvd device files trying ONLY the per-device
+// license step until one is accepted (not revoked) by Spotify. On the first
+// working device it downloads + decrypts and returns the playable MP4 bytes.
+//
+// onProgress(idx,total,path,status) is called per device so the caller can show
+// progress. Returns the working device path, decrypted MP4, and selected file
+// info; err is non-nil only if the one-time resolve failed or NO device worked.
+func BatchTryDevices(ctx context.Context, hc *http.Client, auth WebAuth, trackID string, preferredBitrate int, wvdPaths []string, onProgress func(idx, total int, path, status string)) (workingPath string, mp4 []byte, fileID string, bitrate int, err error) {
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	// One-time resolution (device-independent).
+	files, rerr := resolveMP4Files(ctx, hc, auth, trackID)
+	if rerr != nil {
+		return "", nil, "", 0, fmt.Errorf("resolve: %w", rerr)
+	}
+	file := selectMP4(files, preferredBitrate)
+	cdnURL, rerr := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
+	if rerr != nil {
+		return "", nil, "", 0, fmt.Errorf("storage-resolve: %w", rerr)
+	}
+	psshBytes, rerr := fetchPSSH(ctx, hc, file.FileID)
+	if rerr != nil {
+		built, berr := buildPSSHFromFileID(file.FileID)
+		if berr != nil {
+			return "", nil, "", 0, fmt.Errorf("pssh: seektable failed (%v) and build failed: %w", rerr, berr)
+		}
+		psshBytes = built
+	}
+
+	for i, path := range wvdPaths {
+		if ctx.Err() != nil {
+			return "", nil, "", 0, ctx.Err()
+		}
+		device, derr := LoadWVDeviceFile(path)
+		if derr != nil {
+			if onProgress != nil {
+				onProgress(i+1, len(wvdPaths), path, "load-error: "+derr.Error())
+			}
+			continue
+		}
+		keys, kerr := acquireContentKey(ctx, hc, auth, device, psshBytes)
+		if kerr != nil {
+			if onProgress != nil {
+				onProgress(i+1, len(wvdPaths), path, "rejected: "+kerr.Error())
+			}
+			continue
+		}
+		// Device accepted — download + decrypt with these keys.
+		dec, derr2 := downloadAndDecryptMP4(ctx, hc, cdnURL, keys)
+		if derr2 != nil {
+			if onProgress != nil {
+				onProgress(i+1, len(wvdPaths), path, "license OK but decrypt failed: "+derr2.Error())
+			}
+			continue
+		}
+		if onProgress != nil {
+			onProgress(i+1, len(wvdPaths), path, fmt.Sprintf("WORKS — %d bytes decrypted", len(dec)))
+		}
+		return path, dec, file.FileID, file.Bitrate, nil
+	}
+	return "", nil, "", 0, fmt.Errorf("all %d devices rejected by Spotify license server", len(wvdPaths))
+}
+
 // WidevineResult carries the outcome of a full Widevine download chain plus a
 // diagnostic trace, used by the live probe and the production path.
 type WidevineResult struct {

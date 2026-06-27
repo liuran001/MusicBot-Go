@@ -61,6 +61,7 @@ func main() {
 	spotifyVerify := flag.Bool("spotify-verify", false, "探测 AAC+Widevine 链路是否可用（诊断用）。先不带 code 运行获取授权链接，授权后用 -spotify-code 粘贴回来")
 	spotifyCode := flag.String("spotify-code", "", "授权后从回调地址里复制的 code（配合 -spotify-verify 使用）")
 	spotifyCookie := flag.String("spotify-cookie", "", "用 sp_dc cookie 探测 Widevine 链路（诊断用，从浏览器登录 open.spotify.com 后复制 sp_dc）")
+	spotifyWvdDir := flag.String("spotify-wvd-dir", "", "批量测试一个目录里的所有 .wvd 设备，找出未被 Spotify 吊销的（配合 -spotify-cookie 用）")
 	flag.Parse()
 
 	if created, err := ensureConfig(*configPath); err != nil {
@@ -73,6 +74,14 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if *spotifyWvdDir != "" {
+		if err := runSpotifyBatchWvd(ctx, *configPath, *spotifyCookie, *spotifyWvdDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Spotify 批量 wvd 测试失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *spotifyCookie != "" {
 		if err := runSpotifyVerifyCookie(ctx, *configPath, *spotifyCookie); err != nil {
@@ -180,4 +189,21 @@ func runSpotifyVerifyCookie(ctx context.Context, configPath, spDC string) error 
 		logger, _ = logpkg.New("info", "text", false)
 	}
 	return spotify.RunVerifyCookie(ctx, conf, logger, spDC, "")
+}
+
+// runSpotifyBatchWvd tries every .wvd in a directory against Spotify's license
+// endpoint to find one that isn't revoked.
+func runSpotifyBatchWvd(ctx context.Context, configPath, spDC, wvdDir string) error {
+	if spDC == "" {
+		return fmt.Errorf("需要 -spotify-cookie <sp_dc> 一起用")
+	}
+	conf, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("failed loading config: %w", err)
+	}
+	logger, err := logpkg.New(conf.GetString("LogLevel"), conf.GetString("LogFormat"), false)
+	if err != nil {
+		logger, _ = logpkg.New("info", "text", false)
+	}
+	return spotify.RunBatchWvd(ctx, conf, logger, spDC, wvdDir, "")
 }
