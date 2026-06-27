@@ -3,6 +3,8 @@ package native
 import (
 	"encoding/json"
 	"testing"
+
+	widevine "github.com/iyear/gowidevine"
 )
 
 func TestSelectMP4(t *testing.T) {
@@ -69,5 +71,31 @@ func TestTrackPlaybackParse(t *testing.T) {
 	}
 	if files[1].FileID != "deadbeef02" || files[1].Format != "11" {
 		t.Fatalf("second file = %+v, want {deadbeef02 11}", files[1])
+	}
+}
+
+func TestBuildPSSHFromFileID(t *testing.T) {
+	// A valid 40-hex (20-byte) Spotify file id.
+	fileID := "0123456789abcdef0123456789abcdef01234567"
+	box, err := buildPSSHFromFileID(fileID)
+	if err != nil {
+		t.Fatalf("buildPSSHFromFileID: %v", err)
+	}
+	// The box must carry the 'pssh' fourcc at offset 4.
+	if len(box) < 32 || string(box[4:8]) != "pssh" {
+		t.Fatalf("not a pssh box: len=%d", len(box))
+	}
+	// gowidevine must be able to parse the box we built (proves it's well-formed).
+	if _, perr := widevine.NewPSSH(box); perr != nil {
+		t.Fatalf("widevine.NewPSSH rejected our box: %v", perr)
+	}
+}
+
+func TestBuildPSSHFromFileIDRejectsBad(t *testing.T) {
+	if _, err := buildPSSHFromFileID("00"); err == nil {
+		t.Fatal("expected error for too-short file id, got nil")
+	}
+	if _, err := buildPSSHFromFileID("not-hex-at-all"); err == nil {
+		t.Fatal("expected error for non-hex file id, got nil")
 	}
 }
