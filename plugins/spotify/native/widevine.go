@@ -51,7 +51,9 @@ func postRawAuth(ctx context.Context, hc *http.Client, url string, auth WebAuth,
 	if auth.ClientToken != "" {
 		req.Header.Set("Client-Token", auth.ClientToken)
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	// votify sends the session-default application/json even for the raw-protobuf
+	// license challenge; match that (the body is still raw challenge bytes).
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := hc.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -83,10 +85,11 @@ func mp4FormatBitrate(format string) int {
 
 // trackPlaybackResp models the track-playback media manifest. Spotify returns
 // the MP4 (Widevine) file ids here in 2026; the old JSON metadata `file[]`
-// array no longer carries them for web-token clients. Each entry carries the
-// storage-resolve format id ("10"/"11") in its `format` field.
+// array no longer carries them for web-token clients. `media` is an OBJECT
+// keyed by an opaque id (not an array); each entry carries the storage-resolve
+// format id ("10"/"11") in its `format` field.
 type trackPlaybackResp struct {
-	Media []struct {
+	Media map[string]struct {
 		Item struct {
 			Manifest struct {
 				FileIDsMP4 []struct {
@@ -111,7 +114,7 @@ func resolveMP4Files(ctx context.Context, hc *http.Client, auth WebAuth, trackID
 	}
 	var tp trackPlaybackResp
 	if err := json.Unmarshal(raw, &tp); err != nil {
-		return nil, fmt.Errorf("track-playback decode: %w", err)
+		return nil, fmt.Errorf("track-playback decode: %w (raw: %s)", err, snippet(raw))
 	}
 	var files []wvFile
 	seen := map[string]bool{}
@@ -129,7 +132,7 @@ func resolveMP4Files(ctx context.Context, hc *http.Client, auth WebAuth, trackID
 		}
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no MP4 (Widevine) files in manifest")
+		return nil, fmt.Errorf("no MP4 (Widevine) files in manifest (raw: %s)", snippet(raw))
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Bitrate > files[j].Bitrate })
 	return files, nil
@@ -242,17 +245,37 @@ func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, devic
 		return nil, fmt.Errorf("parse pssh: %w", err)
 	}
 	cdm := widevine.NewCDM(device)
-	challenge, parseLicense, err := cdm.GetLicenseChallenge(pssh, widevinepb.LicenseType_STREAMING, false)
+	challenge, parseLicense, err := cdm.GetLicenseChallenge(pssh, widevinepb.LicenseType_AUTOMATIC, false)
 	if err != nil {
 		return nil, fmt.Errorf("license challenge: %w", err)
 	}
 	licURL := fmt.Sprintf("%s/widevine-license/v1/audio/license", spclientHost)
-	status, body, err := postRawAuth(ctx, hc, licURL, auth, challenge)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, licURL, bytes.NewReader(challenge))
+	webHeaders(req, auth.Bearer)
+	if auth.ClientToken != "" {
+		req.Header.Set("Client-Token", auth.ClientToken)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("license post: %w", err)
 	}
-	if status != 200 {
-		return nil, fmt.Errorf("license HTTP %d: %s", status, snippet(body))
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != 200 {
+		// Dump diagnostic headers — for a 403 these usually indicate WHY (device
+		// revoked, token scope, etc.) so we can tell a fixable issue from a hard
+		// device rejection.
+		diag := fmt.Sprintf("HTTP %d", resp.StatusCode)
+		for _, h := range []string{"Www-Authenticate", "X-Error-Code", "X-Spotify-Error", "Retry-After", "Content-Type", "Cf-Mitigated"} {
+			if v := resp.Header.Get(h); v != "" {
+				diag += fmt.Sprintf(" | %s=%s", h, v)
+			}
+		}
+		if len(body) > 0 {
+			diag += " | body=" + snippet(body)
+		}
+		return nil, fmt.Errorf("license %s", diag)
 	}
 	keys, err := parseLicense(body)
 	if err != nil {
@@ -309,6 +332,9 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, auth WebAuth, dev
 	res := &WidevineResult{}
 	add := func(f string, a ...any) { res.Steps = append(res.Steps, fmt.Sprintf(f, a...)) }
 
+	if hc == nil {
+		hc = http.DefaultClient
+	}
 	if device == nil {
 		return res, fmt.Errorf("widevine device not configured")
 	}

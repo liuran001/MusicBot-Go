@@ -48,15 +48,16 @@ func TestMP4FormatBitrate(t *testing.T) {
 }
 
 func TestTrackPlaybackParse(t *testing.T) {
-	// Shape per the track-playback media manifest: media[].item.manifest.file_ids_mp4[].
-	// Each entry carries the storage-resolve format id ("10"/"11") in `format`.
+	// Shape per the live track-playback response: `media` is an OBJECT keyed by
+	// an opaque id (not an array); each entry carries the storage-resolve format
+	// id ("10"/"11") in `format`.
 	raw := `{
-		"media": [
-			{"item": {"manifest": {"file_ids_mp4": [
+		"media": {
+			"abc123": {"item": {"manifest": {"file_ids_mp4": [
 				{"file_id": "deadbeef01", "format": "10"},
 				{"file_id": "deadbeef02", "format": "11"}
 			]}}}
-		]
+		}
 	}`
 	var tp trackPlaybackResp
 	if err := json.Unmarshal([]byte(raw), &tp); err != nil {
@@ -65,7 +66,7 @@ func TestTrackPlaybackParse(t *testing.T) {
 	if len(tp.Media) != 1 {
 		t.Fatalf("media len = %d, want 1", len(tp.Media))
 	}
-	files := tp.Media[0].Item.Manifest.FileIDsMP4
+	files := tp.Media["abc123"].Item.Manifest.FileIDsMP4
 	if len(files) != 2 {
 		t.Fatalf("file_ids_mp4 len = %d, want 2", len(files))
 	}
