@@ -229,8 +229,13 @@ func upsertINIWithoutReformat(path, sectionName string, pairs map[string]string)
 			indent = leadingWhitespace(line)
 		}
 		key := strings.TrimSpace(line[:eq])
+		// Determine the line span of this key's value before checking whether
+		// we care about it, so multi-line continuation lines are never mistaken
+		// for separate keys on the next iteration.
+		end := valueEndLine(lines, i, sectionEnd)
 		value, ok := pending[key]
 		if !ok {
+			i = end
 			continue
 		}
 		rest := line[eq+1:]
@@ -238,7 +243,11 @@ func upsertINIWithoutReformat(path, sectionName string, pairs map[string]string)
 		for j < len(rest) && (rest[j] == ' ' || rest[j] == '\t') {
 			j++
 		}
-		lines[i] = line[:eq+1] + rest[:j] + value
+		// Replace the entire old value (line i..end) with the new single entry,
+		// dropping any continuation lines from a previous multi-line value.
+		replacement := line[:eq+1] + rest[:j] + value
+		lines = append(lines[:i], append([]string{replacement}, lines[end+1:]...)...)
+		sectionEnd -= end - i
 		delete(pending, key)
 	}
 
@@ -356,9 +365,18 @@ func deleteINIKey(path, sectionName, key string) error {
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, ";") {
 			if eq := strings.Index(line, "="); eq >= 0 {
+				// Determine the full value span (key line plus any multi-line
+				// continuation lines) so a removed multi-line value never leaves
+				// orphaned continuation lines, and continuation lines of a kept
+				// key are never mistaken for separate keys.
+				valEnd := valueEndLine(lines, i, end)
 				if strings.ToLower(strings.TrimSpace(line[:eq])) == target {
+					i = valEnd
 					continue
 				}
+				out = append(out, lines[i:valEnd+1]...)
+				i = valEnd
+				continue
 			}
 		}
 		out = append(out, line)
@@ -399,6 +417,44 @@ func leadingWhitespace(s string) string {
 		i++
 	}
 	return s[:i]
+}
+
+// valueEndLine returns the index of the last physical line spanned by the
+// value of the key=value line at index start. Ordinary single-line values
+// return start. Backtick- or triple-quote-delimited values that wrap across
+// multiple lines (as written by formatINIPersistValue) scan forward to the
+// line containing the closing delimiter, so callers can rewrite or drop the
+// whole value without orphaning its continuation lines. limit bounds the
+// search (exclusive), normally the section end.
+func valueEndLine(lines []string, start, limit int) int {
+	line := lines[start]
+	eq := strings.Index(line, "=")
+	if eq < 0 {
+		return start
+	}
+	val := strings.TrimLeft(line[eq+1:], " \t")
+	var delim string
+	switch {
+	case strings.HasPrefix(val, "```"):
+		delim = "```"
+	case strings.HasPrefix(val, "`"):
+		delim = "`"
+	case strings.HasPrefix(val, `"""`):
+		delim = `"""`
+	default:
+		return start
+	}
+	// Closed on the same line? Then it's effectively single-line.
+	if strings.Contains(val[len(delim):], delim) {
+		return start
+	}
+	for i := start + 1; i < limit; i++ {
+		if strings.Contains(lines[i], delim) {
+			return i
+		}
+	}
+	// Unterminated value: consume to the limit so we don't leave half of it.
+	return limit - 1
 }
 
 // Validate checks critical configuration values for sane ranges.

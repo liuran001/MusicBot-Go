@@ -181,6 +181,97 @@ api_url = https://x
 	}
 }
 
+// TestBotProfileMultilineThenSingle reproduces the startup-failure bug: a
+// multi-line value (wrapped in backticks across several physical lines) that is
+// later overwritten with a single-line value used to leave the old
+// continuation lines orphaned in the file. On reload those orphaned lines have
+// no "=" and the INI parser rejected them with "key-value delimiter not found".
+func TestBotProfileMultilineThenSingle(t *testing.T) {
+	path := writeTempConfig(t, "BOT_TOKEN = t\n")
+	conf, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	multi := "複数プラットフォームからの音楽ダウンロードに対応\n" +
+		"フィードバック： @BDovo\n" +
+		"チャンネル： @bakaPD\n" +
+		"オープンソース： https://obdo.cc/MusicBot-Go"
+	if err := conf.SetBotProfileField("ja", "short_description", multi); err != nil {
+		t.Fatalf("set multi: %v", err)
+	}
+	// The round-trip through disk must preserve the multi-line value exactly.
+	if r, err := Load(path); err != nil {
+		t.Fatalf("reload after multi: %v", err)
+	} else if got := r.GetBotProfileField("ja", "short_description"); got != multi {
+		t.Fatalf("multi value mismatch: %q", got)
+	}
+
+	// Overwrite with a single-line value.
+	if err := conf.SetBotProfileField("ja", "short_description", "単一行の説明"); err != nil {
+		t.Fatalf("set single: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read raw: %v", err)
+	}
+	if strings.Contains(string(raw), "@BDovo") {
+		t.Fatalf("orphaned continuation lines left behind:\n%s", raw)
+	}
+
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload after single (the bug): %v", err)
+	}
+	if got := reloaded.GetBotProfileField("ja", "short_description"); got != "単一行の説明" {
+		t.Fatalf("value mismatch: %q", got)
+	}
+}
+
+// TestBotProfileDeleteMultiline verifies clearing a multi-line value removes the
+// whole block, including continuation lines, and leaves sibling keys intact.
+func TestBotProfileDeleteMultiline(t *testing.T) {
+	path := writeTempConfig(t, "BOT_TOKEN = t\n")
+	conf, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	multi := "line one\nline two\nline three"
+	if err := conf.SetBotProfileField("ja", "short_description", multi); err != nil {
+		t.Fatalf("set multi: %v", err)
+	}
+	if err := conf.SetBotProfileField("ja", "name", "BotName"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+
+	// Clearing the multi-line value must not orphan its continuation lines.
+	if err := conf.SetBotProfileField("ja", "short_description", ""); err != nil {
+		t.Fatalf("clear multi: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read raw: %v", err)
+	}
+	if strings.Contains(string(raw), "line two") {
+		t.Fatalf("orphaned continuation lines after delete:\n%s", raw)
+	}
+
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload after delete: %v", err)
+	}
+	if got := reloaded.GetBotProfileField("ja", "short_description"); got != "" {
+		t.Fatalf("short_description should be gone, got %q", got)
+	}
+	// The sibling key must survive.
+	if got := reloaded.GetBotProfileField("ja", "name"); got != "BotName" {
+		t.Fatalf("sibling name clobbered: %q", got)
+	}
+}
+
 // TestBotProfileSetRejectsTooLong verifies the per-field character limit is
 // enforced before persisting, counting runes (not bytes) so multi-byte CJK
 // text gets its true character count.
