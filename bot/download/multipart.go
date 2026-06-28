@@ -156,6 +156,23 @@ func (md *MultipartDownloader) Download(ctx context.Context, rawURL string, info
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	// Sources that demand bounded Range chunks (e.g. googlevideo, which 403s on
+	// HEAD, plain GET, open-ended ranges, and any single Range larger than a
+	// per-IP cap) advertise MaxChunkSize. For these we MUST skip the HEAD probe
+	// and never fall back to an unbounded single GET — both 403. Always fetch in
+	// bounded Range chunks no larger than the advertised cap.
+	if info != nil && info.MaxChunkSize > 0 {
+		totalSize := info.Size
+		if totalSize <= 0 {
+			// Without a known size we can't compute bounded ranges. Probing the
+			// upper bound would mean an open-ended/unbounded request, which these
+			// servers reject — so there is nothing safe to fall back to.
+			return 0, fmt.Errorf("chunked download requires known size, got %d", totalSize)
+		}
+		return md.downloadChunked(ctx, rawURL, info, destPath, totalSize, info.MaxChunkSize, progress)
+	}
+
 	supportsRange, contentLength, err := md.SupportsRange(ctx, rawURL, info)
 	if err != nil {
 		return md.downloadSingle(ctx, rawURL, info, destPath, info.Size, progress)
@@ -250,9 +267,22 @@ func (md *MultipartDownloader) downloadSingle(ctx context.Context, rawURL string
 }
 
 // downloadMultipart performs concurrent chunk downloads
+// downloadChunked fetches the whole file in bounded Range chunks of at most
+// maxChunk bytes, for sources (e.g. googlevideo) that reject HEAD, plain GET,
+// open-ended ranges, and any single Range larger than a per-IP cap. There is no
+// fallback path: every request is a bounded Range within the cap.
+func (md *MultipartDownloader) downloadChunked(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, totalSize, maxChunk int64, progress ProgressFunc) (int64, error) {
+	if maxChunk <= 0 {
+		maxChunk = 1024 * 1024
+	}
+	partSize := totalSize / int64(md.concurrency)
+	if partSize > maxChunk || partSize <= 0 {
+		partSize = maxChunk
+	}
+	return md.downloadMultipartWithPartSize(ctx, rawURL, info, destPath, totalSize, partSize, progress)
+}
+
 func (md *MultipartDownloader) downloadMultipart(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, totalSize int64, progress ProgressFunc) (int64, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	// Calculate part size
 	partSize := md.partSize
 	if partSize <= 0 {
@@ -260,6 +290,15 @@ func (md *MultipartDownloader) downloadMultipart(ctx context.Context, rawURL str
 		if partSize < 1024*1024 {
 			partSize = 1024 * 1024 // Minimum 1MB per part
 		}
+	}
+	return md.downloadMultipartWithPartSize(ctx, rawURL, info, destPath, totalSize, partSize, progress)
+}
+
+func (md *MultipartDownloader) downloadMultipartWithPartSize(ctx context.Context, rawURL string, info *platform.DownloadInfo, destPath string, totalSize, partSize int64, progress ProgressFunc) (int64, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if partSize <= 0 {
+		partSize = 1024 * 1024
 	}
 
 	// Calculate number of parts

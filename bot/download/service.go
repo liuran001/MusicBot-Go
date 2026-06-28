@@ -103,13 +103,15 @@ func NewDownloadService(opts DownloadServiceOptions) *DownloadService {
 		s.maxRetries = defaultDownloadMaxRetries
 	}
 
-	if opts.EnableMultipart {
-		s.multipartOpts = MultipartDownloadOptions{
-			Concurrency: opts.MultipartConcurrency,
-			MinSize:     opts.MultipartMinSize,
-		}
-		s.multipartDownloader = NewMultipartDownloader(client, opts.Timeout, s.multipartOpts)
+	s.multipartOpts = MultipartDownloadOptions{
+		Concurrency: opts.MultipartConcurrency,
+		MinSize:     opts.MultipartMinSize,
 	}
+	// Always build the chunked/multipart downloader, even when multipart is
+	// disabled: some sources (e.g. googlevideo, advertised via
+	// DownloadInfo.MaxChunkSize) MUST be fetched in bounded Range chunks or they
+	// 403 on plain GET. The plain-GET single-thread path can't serve those.
+	s.multipartDownloader = NewMultipartDownloader(client, opts.Timeout, s.multipartOpts)
 
 	return s
 }
@@ -242,6 +244,31 @@ func (s *DownloadService) downloadToPath(ctx context.Context, info *platform.Dow
 	for idx, raw := range urls {
 		info.URL = raw
 		baseURL := rewriteNeteaseHost(raw)
+
+		// Sources advertising MaxChunkSize (e.g. googlevideo) reject plain GET,
+		// HEAD, and oversized ranges with 403. They MUST go through the bounded
+		// Range chunk path and must NOT fall back to the single-thread plain GET
+		// below — that GET is exactly what 403s. Treat chunked failure as fatal
+		// for this URL and move to the next candidate (if any).
+		chunkedRequired := info.MaxChunkSize > 0 && s.multipartDownloader != nil
+		if chunkedRequired {
+			written, err := s.tryMultipartDownload(ctx, baseURL, info, destPath, progress)
+			if err == nil {
+				if s.checkMD5 && info.MD5 != "" {
+					if ok, err := util.VerifyMD5(destPath, info.MD5); err != nil || !ok {
+						_ = os.Remove(destPath)
+						if err != nil {
+							return 0, err
+						}
+						return 0, errors.New("md5 verification failed")
+					}
+				}
+				return written, nil
+			}
+			lastErr = err
+			_ = os.Remove(destPath)
+			continue
+		}
 
 		if s.multipartEnabled && s.multipartDownloader != nil {
 			written, err := s.tryMultipartDownload(ctx, baseURL, info, destPath, progress)

@@ -195,6 +195,15 @@ type DownloadInfo struct {
 	Quality       Quality           `json:"quality"`
 	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
 	Downloader    DownloadFunc      `json:"-"`
+
+	// MaxChunkSize, when > 0, marks a source that REQUIRES bounded Range
+	// requests no larger than this many bytes per request. Some CDNs
+	// (notably googlevideo for YouTube Music) reject HEAD requests, plain
+	// GETs with no Range, open-ended ranges (bytes=N-), and any single range
+	// larger than a per-IP cap with HTTP 403. For such sources the downloader
+	// must always issue bounded Range chunks of at most this size and never
+	// fall back to an unbounded GET.
+	MaxChunkSize int64 `json:"max_chunk_size,omitempty"`
 }
 
 type DownloadFunc func(ctx context.Context, info *DownloadInfo, destPath string, progress func(written, total int64)) (written int64, err error)
