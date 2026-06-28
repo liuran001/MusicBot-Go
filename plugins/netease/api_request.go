@@ -48,6 +48,18 @@ func encodeURIComponent(str string) string {
 	return strings.ReplaceAll(r, "+", "%20")
 }
 
+// randomNMTID generates a NetEase NMTID device cookie. The real client value is
+// a "00" prefix followed by ~30 alphanumeric chars; the anti-cheat only checks
+// for presence/shape, not server-issued validity, so a random one is accepted.
+func randomNMTID() string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 30)
+	for i := range b {
+		b[i] = alphabet[rand.Intn(len(alphabet))]
+	}
+	return "00" + string(b)
+}
+
 func createNewRequest(ctx context.Context, data string, endpoint string, options RequestData) (string, http.Header, error) {
 	client := options.Client
 	if client == nil {
@@ -73,6 +85,14 @@ func createNewRequest(ctx context.Context, data string, endpoint string, options
 	cookie["buildver"] = strconv.FormatInt(time.Now().Unix(), 10)[:10]
 	cookie["resolution"] = "1920x1080"
 	cookie["os"] = "android"
+	// NMTID is a device-tracking cookie that NetEase's anti-cheat requires on the
+	// stream/url endpoints. When it is absent, those endpoints reject the request
+	// with code -462 ("检测到您的网络环境存在风险") / verifyType:50 regardless of a
+	// valid MUSIC_U or the source IP. Inject a random one when the caller didn't
+	// supply it so a bare MUSIC_U cookie still works.
+	if _, ok := cookie["NMTID"]; !ok {
+		cookie["NMTID"] = randomNMTID()
+	}
 	if _, ok := cookie["MUSIC_U"]; !ok {
 		if _, ok := cookie["MUSIC_A"]; !ok {
 			cookie["MUSIC_A"] = "4ee5f776c9ed1e4d5f031b09e084c6cb333e43ee4a841afeebbef9bbf4b7e4152b51ff20ecb9e8ee9e89ab23044cf50d1609e4781e805e73a138419e5583bc7fd1e5933c52368d9127ba9ce4e2f233bf5a77ba40ea6045ae1fc612ead95d7b0e0edf70a74334194e1a190979f5fc12e9968c3666a981495b33a649814e309366"
