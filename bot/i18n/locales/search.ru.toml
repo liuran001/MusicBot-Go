@@ -1,0 +1,21 @@
+# Search handler (srch_*) — Russian.
+
+# --- search result page (MarkdownV2) ---
+srch_results = "результаты поиска"
+srch_pick_number_hint = "Нажмите номер ниже, чтобы выбрать трек"
+srch_keyword_label = "Запрос: "
+srch_page_indicator = "Страница {{.Page}}/{{.Total}}"
+srch_fallback_switched = "⚠️ Поиск на платформе по умолчанию не удался, переключено на {{.Name}}\n\n"
+
+# --- search buttons / toasts ---
+srch_nav_prev = "⬅️ Назад"
+srch_nav_next = "➡️ Далее"
+srch_nav_home = "🏠 В начало"
+srch_filter_on = "Вкл"
+srch_filter_off = "Выкл"
+srch_close = "❌ Закрыть"
+srch_expired = "Результаты поиска устарели, выполните поиск заново"
+srch_processing = "Обработка, подождите"
+srch_search_failed_retry = "Поиск не удался, попробуйте позже"
+srch_no_results_platform = "Ничего не найдено ({{.Platform}})"
+srch_page_toast = "Вы уже на странице {{.Page}}"

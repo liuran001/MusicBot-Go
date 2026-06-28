@@ -51,6 +51,7 @@ set_resp_language_set = "✅ Language set to {{.Name}}"
 set_lang_name_en = "English"
 set_lang_name_zh = "简体中文"
 set_lang_name_ja = "日本語"
+set_lang_name_ru = "Русский"
 
 # --- plugin setting definitions (forward button / group favorites) ---
 set_pdef_forward_title = "Show song bottom buttons"

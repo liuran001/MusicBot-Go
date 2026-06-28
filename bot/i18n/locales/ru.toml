@@ -1,0 +1,164 @@
+# Русский каталог — перевод с английского (английский остаётся языком по умолчанию).
+# Авторский текст в формате PLAIN (без экранирования MarkdownV2);
+# экранирование выполняется на границе вывода через Localizer.Tmd.
+# ИСКЛЮЧЕНИЕ: блок help/about/status написан С разметкой MarkdownV2 и
+# рендерится через T (не Tmd); их билдеры сами экранируют динамические значения.
+
+# --- статус / прогресс ---
+hit_cache = "Найдено в кэше, отправляю…"
+input_id_or_keyword = "Отправьте ID трека или ключевое слово, либо используйте /rmcache all, чтобы очистить весь кэш"
+inline_tap_to_send = "Ничего не произошло? Нажмите, чтобы обновить"
+send_me_to = "Отправить в чат…"
+wait_for_down = "Ожидание загрузки…"
+fetch_info = "Получаю информацию о треке…"
+fetch_info_failed = "Не удалось получить информацию о треке"
+downloading = "Загрузка…"
+uploading = "Загрузка завершена, отправляю…"
+md5_ver_failed = "Проверка MD5 не пройдена"
+download_timeout = "Время загрузки истекло"
+searching = "Поиск…"
+fetching_playlist = "Получаю плейлист…"
+fetching_lyric = "Получаю текст песни…"
+no_results = "Ничего не найдено, попробуйте другое ключевое слово"
+playlist_empty = "В плейлисте нет треков"
+get_lrc_failed = "Текст не найден — возможно, инструментал или не поддерживается"
+callback_success = "Готово"
+callback_denied = "Это может сделать только автор запроса или администратор"
+
+# --- подсказки по использованию ---
+input_keyword = """Отправьте ключевое слово для поиска
+
+Примеры:
+/search Jay Chou
+/search Take My Hand qq"""
+
+input_content = """Отправьте название песни, ссылку или ID
+
+Примеры:
+/music Jay Chou
+/music https://music.163.com/song/1859603835"""
+
+input_lyric_content = """Отправьте название песни, ссылку или ID, либо ответьте на сообщение с песней
+
+Примеры:
+/lyric Sunny Day
+/lyric Sunny Day qrc"""
+
+# --- прогресс загрузки (с параметрами) ---
+downloading_named = "Загрузка: {{.Title}}\nЗагружено: {{.WrittenMB}} МБ"
+downloading_progress = "Загрузка: {{.Title}}\nПрогресс: {{.Percent}}% ({{.WrittenMB}} МБ / {{.TotalMB}} МБ)"
+upload_queue_ahead = "В очереди на отправку, впереди задач: {{.Count}}"
+
+# --- очередь / ожидание загрузки ---
+queue_overloaded = "Очередь загрузки переполнена, попробуйте позже"
+download_queued = "В очереди…"
+download_queue_button = "Показать очередь"
+download_queue_status = "Загружается: {{.Running}}\nОжидают в очереди: {{.Waiting}}"
+download_queue_status_limited = "Загружается: {{.Running}}\nОжидают в очереди: {{.Waiting}} / {{.Limit}}"
+
+# --- меню команд бота (setMyCommands) ---
+cmd_help = "Как пользоваться"
+cmd_music = "Скачать трек"
+cmd_search = "Поиск треков"
+cmd_lyric = "Получить текст песни"
+cmd_fav = "Добавить трек в избранное / показать избранное"
+cmd_settings = "Платформа, качество и формат текста по умолчанию"
+cmd_recognize = "Распознать песню"
+cmd_status = "Состояние кэша и аккаунтов"
+cmd_about = "Версия и информация о плагинах"
+
+# --- профиль бота ---
+bot_name = "Музыкальный бот"
+bot_short_description = "Мультиплатформенный бот для скачивания музыки и текстов"
+bot_description = "Отправьте название песни, ссылку или ID, чтобы найти и скачать музыку. Поддерживаются NetEase Cloud Music, QQ Music и другие."
+
+# --- сопоставление ошибок для пользователя (helpers.go) ---
+err_process_timeout = "Время обработки истекло, попробуйте позже"
+err_task_canceled = "Задача отменена, попробуйте позже"
+err_download_overloaded = "Сейчас слишком много задач на загрузку, попробуйте позже"
+err_upload_overloaded = "Сейчас слишком много задач на отправку, попробуйте позже"
+err_rate_limited = "Слишком много запросов, попробуйте позже"
+err_auth_required = "Авторизация на платформе истекла, попросите администратора обновить учётные данные"
+err_unavailable = "Этот трек сейчас недоступен, попробуйте позже"
+err_download_failed = "Не удалось загрузить/отправить, попробуйте позже"
+err_search_unsupported = "Эта платформа не поддерживает поиск"
+err_search_unavailable = "Сервис поиска временно недоступен"
+err_playlist_unsupported = "Эта платформа не поддерживает плейлисты"
+err_playlist_unavailable = "Сервис плейлистов временно недоступен"
+err_playlist_not_found = "Плейлист не найден"
+
+# --- информация о музыке ---
+album_label = "Альбом: "
+# Хэштеги качества в подписи к аудио (одиночные токены — без пробелов, безопасные для хэштега).
+quality_tag_standard = "Стандарт"
+quality_tag_high = "Высокое"
+quality_tag_lossless = "БезПотерь"
+
+# --- help / about / status (написано С разметкой markdown, рендерится через T, не Tmd) ---
+help_intro = "Отправьте название песни, ссылку или ID, чтобы найти и скачать музыку."
+help_private_hint = "В личном чате можно отправлять контент напрямую, без команды."
+help_section_commands = "🚀 Основные команды"
+help_cmd_music = "скачать трек"
+help_cmd_search = "поиск треков"
+help_cmd_lyric = "получить текст песни"
+help_cmd_recognize = "распознать песню (ответьте на голосовое сообщение)"
+help_cmd_settings = "платформа, качество и формат текста по умолчанию"
+help_cmd_status = "состояние кэша и аккаунтов"
+help_cmd_about = "версия и информация о плагинах"
+help_section_params = "🎚 Параметры"
+help_quality_label = "Качество"
+help_platform_label = "Платформа"
+help_section_examples = "💡 Примеры"
+# Иллюстративные примеры аргументов в блоке примеров /help.
+help_example_music = "Кино"
+help_example_search = "Звезда по имени Солнце qq"
+help_section_admin = "🛠 Команды администратора"
+help_arg_track = "название|ссылка|ID"
+help_arg_keyword = "ключевое слово"
+about_title = "MusicBot-Go"
+about_version = "Версия"
+about_source = "Исходный код"
+about_plugins = "Плагины"
+about_build = "Сборка"
+about_build_env = "Компилятор"
+about_build_date = "Дата сборки"
+about_runtime_env = "Среда выполнения"
+status_title = "Состояние"
+status_cache = "Кэш"
+status_total = "Всего"
+status_this_chat = "Этот чат"
+status_your_cache = "Ваш кэш"
+status_sent = "Отправлено"
+status_unit_tracks = "треков"
+status_unit_times = "раз"
+status_platform_cache = "Кэш платформы"
+status_available_platforms = "Доступные платформы"
+status_accounts = "Аккаунты"
+status_logged_in = "Выполнен вход"
+status_state_available = "доступен"
+status_state_not_logged_in = "вход не выполнен"
+status_state_error = "ошибка"
+status_state_uninitialized = "не инициализирован"
+status_state_guest = "гостевой"
+status_check_failed = "не удалось проверить состояние"
+status_no_accounts = "Не найдено аккаунтов платформ для запроса"
+status_field_state = "Состояние"
+status_field_nickname = "Никнейм"
+status_field_userid = "ID пользователя"
+status_field_login_method = "Способ входа"
+status_field_supports = "Поддерживает"
+status_field_source = "Источник"
+
+help_default_platforms = "NetEase Cloud Music, QQ Music"
+
+about_no_plugins = "Нет"
+
+# --- описания команд справки администратора (music.go inline) ---
+help_admin_reload = "Перезагрузить конфигурацию и плагины"
+help_admin_rmcache = "Очистить кэш (/rmcache <platform>|all)"
+
+# --- описания команд администратора (рендерятся в /help через buildAdminHelp, по имени команды) ---
+help_admincmd_login = "Единый вход в аккаунт (qr/cookie/sign/check/renew/auto/help)"
+help_admincmd_checkck = "Проверить валидность cookie плагина"
+help_admincmd_renewck = "Вручную обновить cookie (/renewck <platform>, пусто = все)"
+help_admincmd_wl = "Управление белым списком (add/del/list)"

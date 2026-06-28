@@ -44,6 +44,8 @@ func languageDisplayName(ctx context.Context, lang string) string {
 		return tr(ctx, "set_lang_name_zh")
 	case "ja":
 		return tr(ctx, "set_lang_name_ja")
+	case "ru":
+		return tr(ctx, "set_lang_name_ru")
 	default:
 		return lang
 	}

@@ -1,0 +1,37 @@
+# Русский шард каталога — обработчик плейлиста + выбор эпизодов (домен pl_).
+# ОБЫЧНЫЙ текст; экранирование MarkdownV2 происходит на границе вывода.
+
+# --- метки типа коллекции ---
+pl_collection_album = "Альбом"
+pl_collection_playlist = "Плейлист"
+
+# --- получение / пусто / статус ---
+pl_fetching_album = "Получение альбома…"
+pl_album_empty = "В альбоме нет треков"
+pl_list_expired = "Этот список устарел, отправьте ссылку заново"
+pl_processing = "Обработка, подождите"
+pl_already_on_page = "Уже на странице {{.Page}}"
+pl_load_failed = "Не удалось загрузить {{.Label}}"
+pl_no_results = "Ничего не найдено"
+
+# --- кнопки пагинации / навигации ---
+pl_page_of = "Страница {{.Page}}/{{.Total}}"
+pl_close = "Закрыть"
+pl_next_page = "Далее"
+pl_prev_page = "Назад"
+pl_home = "К первой странице"
+
+# --- метки информации о коллекции ---
+pl_creator = "Создатель"
+pl_track_count = "Треки"
+pl_description = "Описание"
+
+# --- выбор эпизода (многочастный) ---
+pl_prev_page_arrow = "⬅️ Назад"
+pl_next_page_arrow = "➡️ Далее"
+pl_home_arrow = "🏠 В начало"
+pl_last_page_arrow = "⏭️ Последняя страница"
+pl_back_to_search = "↩️ Назад к результатам поиска"
+pl_episode_close = "❌ Закрыть"
+pl_title = "Название"
+pl_uploader = "Загрузил"

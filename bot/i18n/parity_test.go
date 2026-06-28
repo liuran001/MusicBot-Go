@@ -129,6 +129,7 @@ var intentionallyEnglish = map[string]bool{
 	"set_lang_name_en":       true,
 	"set_lang_name_zh":       true,
 	"set_lang_name_ja":       true,
+	"set_lang_name_ru":       true,
 	"help_default_platforms": true,
 }
 

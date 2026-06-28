@@ -1,0 +1,74 @@
+# Русский шард каталога — обработчики inline + callback (домен cb_).
+# Простой текст; экранирование MarkdownV2 происходит на этапе вывода.
+
+# --- ответы callback (текст алерта/тоста) ---
+cb_denied = "Это может сделать только запросивший или администратор"
+cb_bad_params = "Неверные параметры"
+cb_processing = "Обработка, подождите"
+cb_select_episode = "Выберите эпизод"
+cb_op_expired = "Это действие истекло, выполните поиск снова"
+cb_no_random = "Нет треков для перемешивания"
+cb_episode_load_failed = "Не удалось загрузить эпизоды"
+cb_episode_closed = "Список эпизодов закрыт"
+cb_list_expired = "Список истёк, выберите снова"
+cb_load_failed = "Загрузка не удалась, попробуйте позже"
+cb_already_on_page = "Уже на странице {{.Page}}"
+cb_page_n = "Страница {{.Page}}"
+
+# --- метки пагинации ---
+cb_page_of = "Страница {{.Page}}/{{.Total}}"
+cb_page_footer = "Страница {{.Page}} / {{.Total}}"
+cb_track_count = "Треков: {{.Count}}"
+cb_track_total = "Треков: {{.Count}}"
+
+# --- карточки коллекций / плейлистов ---
+cb_collection_not_found = "Альбом/плейлист не найден"
+cb_collection_tap_expand = "Нажмите, чтобы автоматически развернуть детали"
+cb_collection_page_hint = "Добавьте число в конец ссылки для пагинации, например ссылка 2"
+cb_creator_label = "Создатель: "
+cb_fetching_album = "Получение альбома…"
+
+# --- карточки пустого / справки / настроек ---
+cb_empty_title = "Введите help для помощи"
+cb_setting_title = "Платформа: {{.Platform}} | Качество: {{.Quality}}"
+cb_tap_edit_settings = "Нажмите, чтобы изменить настройки"
+cb_settings_message = "Текущие настройки пользователя\nПлатформа: {{.Platform}}\nКачество: {{.Quality}}\n\n💡 Можно добавить временные параметры после ключевого слова, например 稻香 qq high"
+cb_edit_settings_btn = "⚙️ Изменить настройки"
+cb_search_header_desc = "Нажмите, чтобы изменить настройки｜добавьте временные параметры после ключевого слова, например 稻香 qq high"
+
+# --- карточки случайного / избранного ---
+cb_random_one = "🎲 Случайный трек"
+cb_random_empty_desc = "Сейчас в кэше нет треков для перемешивания"
+cb_random_card_desc = "Нажмите, чтобы отправить случайный трек из кэша"
+cb_my_favorites = "📋 Моё избранное"
+cb_favorites_menu_desc = "Откройте для управления / перемешивания / отправки избранного"
+
+# --- карточки поиска ---
+cb_input_keyword = "Введите ключевое слово"
+cb_page_hint_example = "ключевое слово qq hires 2"
+cb_search_page_desc = "Всего результатов: {{.Total}}｜добавьте число в конец ключевого слова для пагинации, например {{.Hint}}"
+cb_unknown_artist = "Неизвестный исполнитель"
+
+# --- метки качества ---
+cb_quality_standard = "Стандартное"
+cb_quality_high = "Высокое"
+cb_quality_lossless = "Без потерь"
+cb_quality_hires = "Hi-Res"
+
+# --- выбор эпизода ---
+cb_tap_episode_below = "Нажмите на эпизод ниже, чтобы отправить"
+cb_fetching_episodes = "Получение эпизодов…"
+cb_episode_page_hint = "Добавьте число к ссылке для пагинации, например {{.Hint}}"
+cb_episodes_label = "Эпизоды"
+cb_prev_page = "Назад"
+cb_next_page = "Далее"
+cb_back_home = "В начало"
+cb_prev_page_arrow = "⬅️ Назад"
+cb_next_page_arrow = "➡️ Далее"
+cb_home_page = "🏠 В начало"
+cb_last_page = "⏭️ Последняя страница"
+
+# --- нижние кнопки трека ---
+cb_lyric_btn = "📜 Текст песни"
+cb_favorite_btn = "⭐ В избранное"
+cb_group_favorite_btn = "👥 Групповое избранное"

@@ -1,0 +1,78 @@
+# Шард обработчика администратора — русский.
+# Простой текст; экранирование MarkdownV2 происходит на этапе вывода.
+
+# --- общее ---
+adm_platform_manager_uninitialized = "Менеджер платформ не инициализирован"
+adm_platform_unrecognized = "Нераспознанная платформа: {{.Args}}"
+adm_platform_unrecognized_usage = "Нераспознанная платформа: {{.Name}}\n\n{{.Usage}}"
+adm_no_platforms = "Нет доступных платформ"
+adm_exec_failed = "Ошибка выполнения: {{.Err}}"
+adm_exec_done = "Готово"
+adm_cmd_unavailable = "Команда недоступна"
+adm_complete_with_failures = "\nГотово (платформ с ошибкой: {{.Count}})"
+
+# --- диспетчеризация входа в аккаунт ---
+adm_sign_unsupported = "{{.Platform}} сейчас не поддерживает отметку / получение VIP"
+adm_sign_done = "Отметка / получение VIP для {{.Platform}} завершены"
+adm_renew_unsupported = "{{.Platform}} сейчас не поддерживает продление"
+adm_check_unsupported = "{{.Platform}} сейчас не поддерживает проверку аккаунта"
+adm_lang_unsupported = "{{.Platform}} сейчас не поддерживает настройки языка"
+adm_cookie_import_unsupported = "{{.Platform}} сейчас не поддерживает импорт Cookie"
+adm_cookie_usage = "Использование: /login {{.Platform}} cookie <содержимое cookie>"
+adm_cookie_import_done = "Импорт Cookie завершён"
+adm_qr_unsupported = "{{.Platform}} сейчас не поддерживает вход по QR-коду"
+adm_qr_session_failed = "Не удалось создать сессию QR-кода"
+adm_qr_cancel_button = "Отменить вход"
+adm_qr_timeout = "QR-код истёк, запустите /login {{.Platform}} qr снова"
+adm_sign_usage = "Использование: /login sign <платформа>"
+adm_qr_poll_cancelled = "Опрос входа отменён"
+
+# --- использование / справка ---
+adm_login_usage = """Единые команды аккаунта:
+/status - Показать статистику и статус аккаунта
+/login <платформа> help - Показать поддерживаемые способы входа для платформы
+/login <платформа> qr - Вход по QR-коду (если поддерживается)
+/login <платформа> cookie <cookie> - Импорт Cookie
+/login <платформа> sign - Отметка / получение VIP (если поддерживается)
+/login sign <платформа> - Выполнить отметку / получение VIP для платформы
+/login <платформа> check - Проверить статус аккаунта платформы
+/login check - Проверить статусы аккаунтов всех платформ
+/login <платформа> renew - Ручное продление
+/login renew - Массовое продление всех платформ
+/login <платформа> auto on|off|status [intervalSec] - Автопродление
+/login auto on|off|status [intervalSec] - Настроить автопродление для всех платформ
+Поддерживаемые платформы: {{.Platforms}}"""
+adm_login_help = "{{.Platform}} поддерживает: {{.Methods}}\n\nПримеры:\n{{.Examples}}"
+adm_lang_arg = "язык"
+
+# --- автопродление ---
+adm_auto_unsupported = "{{.Platform}} сейчас не поддерживает автопродление"
+adm_auto_on = "Автопродление для {{.Platform}} включено, интервал {{.Seconds}} секунд"
+adm_auto_off = "Автопродление для {{.Platform}} отключено (текущий интервал {{.Seconds}} секунд)"
+adm_auto_usage_platform = "Использование: /login {{.Platform}} auto on [intervalSec]\n/login {{.Platform}} auto off\n/login {{.Platform}} auto status"
+adm_auto_on_batch = "✅ {{.Platform}}: автопродление включено, интервал {{.Seconds}} секунд"
+adm_auto_off_batch = "✅ {{.Platform}}: автопродление отключено (текущий интервал {{.Seconds}} секунд)"
+adm_auto_usage_batch = "Использование: /login auto on [intervalSec]\n/login auto off\n/login auto status"
+adm_auto_none = "Ни одна платформа не поддерживает автопродление"
+adm_auto_status = "Автопродление {{.Platform}}: {{.State}}, интервал {{.Seconds}} секунд"
+adm_auto_state_off = "выкл"
+adm_auto_state_on = "вкл"
+
+# --- checkck / renewck ---
+adm_check_none = "Ни одна платформа не поддерживает проверку Cookie"
+adm_renew_cookie_unsupported = "{{.Platform}} не поддерживает продление Cookie"
+adm_renew_none = "Ни одна платформа не поддерживает продление Cookie"
+adm_check_unknown = "Неизвестно"
+adm_renew_done = "Продление завершено"
+
+# --- rmcache ---
+adm_rmcache_failed = "Не удалось очистить кэш"
+adm_rmcache_all_done = "Весь кэш очищен"
+adm_rmcache_platform_all_done = "Весь кэш платформы {{.Platform}} очищен"
+adm_rmcache_invalid = "Отправьте корректный ID трека или URL, либо используйте формат: /rmcache <платформа> <trackID>|all"
+adm_rmcache_track_done = "Кэш трека {{.TrackID}} на платформе {{.Platform}} очищен"
+
+# --- reload ---
+adm_reload_disabled = "❌ Перезагрузка не включена"
+adm_reload_failed = "❌ Ошибка перезагрузки: {{.Err}}"
+adm_reload_done = "✅ Конфигурация и плагины перезагружены"

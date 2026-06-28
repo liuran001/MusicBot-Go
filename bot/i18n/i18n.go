@@ -29,7 +29,7 @@ const DefaultLanguage = "en"
 
 // SupportedLanguages lists the catalogs shipped with the binary, in display
 // order. The first entry must be DefaultLanguage.
-var SupportedLanguages = []string{"en", "zh", "ja"}
+var SupportedLanguages = []string{"en", "zh", "ja", "ru"}
 
 // Manager owns the message bundle and caches one Localizer per language.
 type Manager struct {
