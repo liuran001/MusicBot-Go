@@ -96,6 +96,10 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_unsupported_platform"), nil, "")
 		return
 	}
+	if !h.ResourceLimiter.Allow(ActionPlaylist, userID, platformName) {
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "err_rate_limited"), nil, "")
+		return
+	}
 	playlist, err := plat.GetPlaylist(ctx, playlistID)
 	if err != nil || playlist == nil || len(playlist.Tracks) == 0 {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_playlist_failed_or_empty"), nil, "")
@@ -193,7 +197,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 	}
 	searchCtx := withSearchFilterContext(ctx, h.PlatformManager, platformName, biliFilter)
 	primaryPlatform := platformName
-	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.guestSearchLimit, true)
+	tracks, platformName, usedFallback, err := searchTracksWithFallbackLimited(searchCtx, h.PlatformManager, h.ResourceLimiter, userID, platformName, fallbackPlatform, keyword, h.guestSearchLimit, true)
 	if err != nil {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, userVisibleSearchError(ctx, err), nil, "")
 		return
@@ -277,7 +281,7 @@ func (h *GuestModeHandler) fetchAndEditGuestLyric(ctx context.Context, b *telego
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_platform_no_lyrics"), nil, "")
 		return
 	}
-	lyrics, err := plat.GetLyrics(ctx, trackID)
+	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, requesterID, plat, platformName, trackID)
 	if err != nil || lyrics == nil {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_get_lyric_failed"), nil, "")
 		return
@@ -326,7 +330,7 @@ func (h *GuestModeHandler) resolveGuestLyricTrack(ctx context.Context, message *
 			platformName = requestedPlatform
 			fallbackPlatform = ""
 		}
-		tracks, matchedPlatform, _, err := searchTracksWithFallback(ctx, h.LyricHandler.PlatformManager, platformName, fallbackPlatform, base, h.guestSearchLimit, true)
+		tracks, matchedPlatform, _, err := searchTracksWithFallbackLimited(ctx, h.LyricHandler.PlatformManager, h.ResourceLimiter, guestUserID(message), platformName, fallbackPlatform, base, h.guestSearchLimit, true)
 		if err != nil || len(tracks) == 0 {
 			return "", "", false
 		}
@@ -367,6 +371,10 @@ func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot,
 			_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_reply_voice_message"), nil, "")
 			return
 		}
+	}
+	if requesterID, _ := guestRequester(message); !h.ResourceLimiter.Allow(ActionRecognize, requesterID, "") {
+		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "err_rate_limited"), nil, "")
+		return
 	}
 	fileBot := b
 	if h.DownloadBot != nil {

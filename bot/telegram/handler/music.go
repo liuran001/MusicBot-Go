@@ -105,6 +105,7 @@ type MusicHandler struct {
 	UploadQueueSize    int
 	UploadBot          *telego.Bot
 	RateLimiter        *telegram.RateLimiter
+	ResourceLimiter    *ResourceRateLimiter
 	// queueMu protects queuedStatus/statusDirty state.
 	queueMu           sync.RWMutex
 	queuedStatus      []queuedStatus
@@ -597,6 +598,17 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 		return nil
 	}
 
+	// Throttle genuine downloads (cache misses only — both cache checks above
+	// return early). A download fans out into GetTrack + GetDownloadInfo (stream
+	// URL resolve / decrypt, expensive for Apple/Spotify) plus the transfer, so
+	// it is the heaviest per-user platform op and is rate-limited per user /
+	// platform / global. Cache hits never reach here and stay free.
+	if !h.ResourceLimiter.Allow(ActionDownload, userID, platformName) {
+		err := platform.ErrRateLimited
+		sendFailed(err)
+		return err
+	}
+
 	if !silent {
 		status.Upsert(tr(ctx, "fetch_info"))
 	}
@@ -705,6 +717,13 @@ func (h *MusicHandler) tryPresentDirectEpisodes(ctx context.Context, b *telego.B
 	}
 	provider, ok := plat.(platform.EpisodeProvider)
 	if !ok {
+		return false, nil
+	}
+	var episodeUserID int64
+	if message.From != nil {
+		episodeUserID = message.From.ID
+	}
+	if !h.ResourceLimiter.Allow(ActionEpisode, episodeUserID, platformName) {
 		return false, nil
 	}
 	episodes, err := provider.ListEpisodes(ctx, baseTrackID)

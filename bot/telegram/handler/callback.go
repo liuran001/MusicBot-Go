@@ -296,7 +296,7 @@ func (h *CallbackMusicHandler) tryPresentInlineEpisodePicker(ctx context.Context
 	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false
 	}
-	episodes, err := h.fetchEpisodes(ctx, platformName, baseTrackID)
+	episodes, err := h.fetchEpisodes(ctx, requesterID, platformName, baseTrackID)
 	if err != nil || len(episodes) <= 1 {
 		return false
 	}
@@ -322,13 +322,13 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false
 	}
-	episodes, err := h.fetchEpisodes(ctx, platformName, baseTrackID)
-	if err != nil || len(episodes) <= 1 {
-		return false
-	}
 	reqID := requesterID
 	if reqID == 0 {
 		reqID = operatorID
+	}
+	episodes, err := h.fetchEpisodes(ctx, reqID, platformName, baseTrackID)
+	if err != nil || len(episodes) <= 1 {
+		return false
 	}
 	backCallback := fmt.Sprintf("search %d home %d", listMsg.MessageID, reqID)
 	setEpisodeSearchBackCallback(listMsg.Chat.ID, listMsg.MessageID, backCallback)
@@ -352,7 +352,7 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	return true
 }
 
-func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, platformName, trackID string) ([]platform.Episode, error) {
+func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, userID int64, platformName, trackID string) ([]platform.Episode, error) {
 	if h == nil || h.Music == nil || h.Music.PlatformManager == nil {
 		return nil, platform.ErrUnavailable
 	}
@@ -363,6 +363,9 @@ func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, platformName, 
 	provider, ok := plat.(platform.EpisodeProvider)
 	if !ok {
 		return nil, platform.ErrUnsupported
+	}
+	if !h.Music.ResourceLimiter.Allow(ActionEpisode, userID, strings.TrimSpace(platformName)) {
+		return nil, platform.ErrRateLimited
 	}
 	return provider.ListEpisodes(ctx, strings.TrimSpace(trackID))
 }
@@ -610,7 +613,7 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 		}
 		return
 	case "s", "n":
-		episodes, err := h.fetchEpisodes(ctx, platformName, trackID)
+		episodes, err := h.fetchEpisodes(ctx, query.From.ID, platformName, trackID)
 		if err != nil || len(episodes) == 0 {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_episode_load_failed"), ShowAlert: true})
 			return
@@ -719,7 +722,7 @@ func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, 
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_success")})
 		return
 	case "s", "n":
-		episodes, err := h.fetchEpisodes(ctx, platformName, trackID)
+		episodes, err := h.fetchEpisodes(ctx, query.From.ID, platformName, trackID)
 		if err != nil || len(episodes) == 0 {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_episode_load_failed"), ShowAlert: true})
 			return

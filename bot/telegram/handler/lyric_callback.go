@@ -251,6 +251,7 @@ func decodeLyricFlags(s string) (includeTranslation, includeRoma, ok bool) {
 type LyricCallbackHandler struct {
 	PlatformManager  platform.Manager
 	RateLimiter      *telegram.RateLimiter
+	ResourceLimiter  *ResourceRateLimiter
 	Repo             botpkg.SongRepository
 	DefaultPlatform  string
 	FallbackPlatform string
@@ -318,7 +319,7 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 
 	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_fetching"))
 
-	lyrics, err := plat.GetLyrics(ctx, trackID)
+	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, query.From.ID, plat, platformName, trackID)
 	if err != nil || lyrics == nil {
 		if inlineMessageID != "" {
 			h.editInlineError(ctx, b, inlineMessageID, tr(ctx, "get_lrc_failed"))
@@ -443,7 +444,7 @@ func (h *LyricCallbackHandler) handleFormatCallback(ctx context.Context, b *tele
 
 	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_generating", map[string]any{"Format": lyricFormatDisplayName(ctx, format)}))
 
-	lyrics, err := plat.GetLyrics(ctx, payload.trackID)
+	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, query.From.ID, plat, payload.platformName, payload.trackID)
 	if err != nil || lyrics == nil {
 		if inlineMessageID != "" {
 			h.editInlineError(ctx, b, inlineMessageID, tr(ctx, "get_lrc_failed"))
@@ -486,6 +487,7 @@ func (h *LyricCallbackHandler) newLyricHandler() *LyricHandler {
 	return &LyricHandler{
 		PlatformManager:    h.PlatformManager,
 		RateLimiter:        h.RateLimiter,
+		ResourceLimiter:    h.ResourceLimiter,
 		Repo:               h.Repo,
 		InlineUploadChatID: h.InlineUploadChatID,
 		UploadBot:          h.UploadBot,

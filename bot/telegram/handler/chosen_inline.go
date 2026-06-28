@@ -121,6 +121,9 @@ func (h *ChosenInlineMusicHandler) tryPresentChosenInlineEpisodePicker(ctx conte
 	if !ok {
 		return false
 	}
+	if !h.Music.ResourceLimiter.Allow(ActionEpisode, chosen.From.ID, platformName) {
+		return false
+	}
 	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
 	if err != nil || len(episodes) <= 1 {
 		return false
@@ -161,6 +164,10 @@ func (h *ChosenInlineMusicHandler) handleChosenCollection(ctx context.Context, b
 		} else {
 			_, _ = b.EditMessageText(ctx, params)
 		}
+	}
+	if !h.Music.ResourceLimiter.Allow(ActionPlaylist, chosen.From.ID, platformName) {
+		setInlineText(tr(ctx, "err_rate_limited"))
+		return
 	}
 	setInlineText(loadingText)
 	pageSize := h.inlineCollectionPageSize()
@@ -231,6 +238,15 @@ func (h *ChosenInlineMusicHandler) handleChosenEpisodeCollection(ctx context.Con
 	if !ok {
 		return
 	}
+	if !h.Music.ResourceLimiter.Allow(ActionEpisode, chosen.From.ID, platformName) {
+		params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: tr(ctx, "err_rate_limited")}
+		if h.RateLimiter != nil {
+			_, _ = telegram.EditMessageTextWithRetry(ctx, h.RateLimiter, b, params)
+		} else {
+			_, _ = b.EditMessageText(ctx, params)
+		}
+		return
+	}
 	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
 	if err != nil || len(episodes) == 0 {
 		params := &telego.EditMessageTextParams{InlineMessageID: chosen.InlineMessageID, Text: tr(ctx, "no_results")}
@@ -272,6 +288,9 @@ func (h *ChosenInlineMusicHandler) ensureInlineCollectionChunk(ctx context.Conte
 	plat := h.Music.PlatformManager.Get(state.platformName)
 	if plat == nil {
 		return fmt.Errorf("platform unavailable")
+	}
+	if !h.Music.ResourceLimiter.Allow(ActionPlaylist, state.requesterID, state.platformName) {
+		return platform.ErrRateLimited
 	}
 	requestCtx := platform.WithPlaylistOffset(ctx, chunkOffset)
 	requestCtx = platform.WithPlaylistLimit(requestCtx, chunkLimit)

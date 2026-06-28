@@ -35,6 +35,7 @@ type GuestModeHandler struct {
 	SearchHandler    *SearchHandler
 	Favorites        *FavoritesHandler
 	RateLimiter      *telegram.RateLimiter
+	ResourceLimiter  *ResourceRateLimiter
 	RecognizeService recognize.Service
 	CacheDir         string
 	DownloadBot      *telego.Bot

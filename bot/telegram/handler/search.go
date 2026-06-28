@@ -19,6 +19,7 @@ type SearchHandler struct {
 	PlatformManager  platform.Manager
 	Repo             botpkg.SongRepository
 	RateLimiter      *telegram.RateLimiter
+	ResourceLimiter  *ResourceRateLimiter
 	DefaultPlatform  string
 	FallbackPlatform string
 	PageSize         int
@@ -263,7 +264,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	}
 	searchCtx := withSearchFilterContext(ctx, h.PlatformManager, platformName, biliFilter)
 
-	tracks, platformName, usedFallback, err := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
+	tracks, platformName, usedFallback, err := searchTracksWithFallbackLimited(searchCtx, h.PlatformManager, h.ResourceLimiter, searchRequesterID(message), platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
 		errorText := userVisibleSearchError(ctx, err)

@@ -333,6 +333,7 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	rateLimiter := telegram.NewRateLimiterWithGlobal(rateLimitPerSecond, rateLimitBurst, globalRateLimitPerSecond, globalRateLimitBurst)
 	rateLimiter.SetLogger(a.Logger)
+	resourceLimiter := handler.NewResourceRateLimiter(buildResourceRateLimits(a.Config))
 	enableAprilFools := a.Config.GetBool("EnableAprilFools")
 	aprilFoolsTextPrankProbability := a.Config.GetFloat64("AprilFoolsTextPrankProbability")
 	aprilFoolsTrackHijackProbability := a.Config.GetFloat64("AprilFoolsTrackHijackProbability")
@@ -393,6 +394,7 @@ func (a *App) Start(ctx context.Context) error {
 		PlatformManager: a.PlatformManager,
 		Repo:            a.DB,
 		RateLimiter:     rateLimiter,
+		ResourceLimiter: resourceLimiter,
 		DefaultQuality:  defaultQuality,
 		PageSize:        pageSize,
 	}
@@ -422,12 +424,13 @@ func (a *App) Start(ctx context.Context) error {
 		DownloadQueueWaitLimit:   downloadQueueWaitLimit,
 		UploadBot:                a.Telegram.UploadClient(),
 		RateLimiter:              rateLimiter,
+		ResourceLimiter:          resourceLimiter,
 		Playlist:                 playlistHandler,
 		RecognizeEnabled:         a.Config.GetBool("EnableRecognize"),
 		EnableQueueObservability: a.Config.GetBool("BotDebug"),
 		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
-	musicHandler.Artist = &handler.ArtistHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Logger: a.Logger}
+	musicHandler.Artist = &handler.ArtistHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, Logger: a.Logger}
 	musicHandler.StartWorker(ctx)
 
 	settingsHandler := &handler.SettingsHandler{
@@ -439,7 +442,7 @@ func (a *App) Start(ctx context.Context) error {
 		DefaultLyricFormat:       defaultLyricFormat,
 		PluginSettingDefinitions: a.PluginSettingDefinitions,
 	}
-	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
+	searchHandler := &handler.SearchHandler{PlatformManager: a.PlatformManager, Repo: a.DB, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, PageSize: pageSize}
 	favoritesHandler := &handler.FavoritesHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Music: musicHandler, BotName: botName, Logger: a.Logger, PageSize: pageSize}
 	favoriteCallback := &handler.FavoriteCallbackHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Music: musicHandler, Favorites: favoritesHandler, BotName: botName, Logger: a.Logger, PageSize: pageSize}
 	adminHandler := &handler.AdminCommandHandler{
@@ -455,11 +458,11 @@ func (a *App) Start(ctx context.Context) error {
 
 	var recognizeHandler handler.MessageHandler
 	if enableRecognize {
-		recognizeHandler = &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()}
+		recognizeHandler = &handler.RecognizeHandler{CacheDir: cacheDir, Music: musicHandler, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, RecognizeService: a.RecognizeService, Logger: a.Logger, DownloadBot: a.Telegram.DownloadClient()}
 	}
 	chosenInlineHandler := &handler.ChosenInlineMusicHandler{Music: musicHandler, RateLimiter: rateLimiter, InlinePageSize: pageSize}
 
-	guestLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
+	guestLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
 	guestModeHandler := &handler.GuestModeHandler{
 		PlatformManager:  a.PlatformManager,
 		Music:            musicHandler,
@@ -467,6 +470,7 @@ func (a *App) Start(ctx context.Context) error {
 		SearchHandler:    searchHandler,
 		Favorites:        favoritesHandler,
 		RateLimiter:      rateLimiter,
+		ResourceLimiter:  resourceLimiter,
 		RecognizeService: a.RecognizeService,
 		CacheDir:         cacheDir,
 		DownloadBot:      a.Telegram.DownloadClient(),
@@ -476,7 +480,7 @@ func (a *App) Start(ctx context.Context) error {
 		DefaultQuality:   defaultQuality,
 	}
 
-	routerLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
+	routerLyricHandler := &handler.LyricHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, SearchHandler: searchHandler, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()}
 	musicHandler.LyricHandler = routerLyricHandler
 	mentionRouter := &handler.MentionRouter{
 		Music:           musicHandler,
@@ -508,12 +512,12 @@ func (a *App) Start(ctx context.Context) error {
 		SearchCallback:           searchCallback,
 		PlaylistCallback:         playlistCallback,
 		InlineCollectionCallback: &handler.InlineCollectionCallbackHandler{Chosen: chosenInlineHandler, RateLimiter: rateLimiter},
-		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()},
+		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()},
 		FavoriteCallback:         favoriteCallback,
 		DownloadQueueCallback:    &handler.DownloadQueueCallbackHandler{Music: musicHandler, RateLimiter: rateLimiter},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
-		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, Favorites: favoritesHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize},
+		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, Favorites: favoritesHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize, ResourceLimiter: resourceLimiter},
 		ChosenInline:             chosenInlineHandler,
 		PlatformManager:          a.PlatformManager,
 		AdminCommands:            adminCommandNames,
@@ -547,9 +551,9 @@ func (a *App) Start(ctx context.Context) error {
 // localizedCommandSpec describes one bot command whose description is resolved
 // from the i18n catalog per language.
 type localizedCommandSpec struct {
-	command    string
-	descKey    string
-	recognize  bool // only included when audio recognition is enabled
+	command   string
+	descKey   string
+	recognize bool // only included when audio recognition is enabled
 }
 
 // botCommandSpecs is the menu shown in Telegram clients, in display order. The
@@ -955,5 +959,40 @@ func mapGormLogLevel(level, fallback string) gormlogger.LogLevel {
 		return gormlogger.Info
 	default:
 		return mapLogLevel(fallback)
+	}
+}
+
+// buildResourceRateLimits assembles the per-action rate-limit rules for the
+// ResourceRateLimiter from config. Each action has its own window/per-user/
+// per-platform/global quota. A non-positive quota disables that dimension; an
+// action whose three quotas are all zero is effectively unlimited. The defaults
+// (set in config.go) throttle the abusable platform-API entry points: search,
+// lyric fetch, download/decrypt, audio recognition, playlist/album paging,
+// episode listing, and artist lookups.
+func buildResourceRateLimits(c *config.Config) map[string]handler.ResourceLimit {
+	win := func(key string) time.Duration {
+		secs := c.GetInt(key)
+		if secs <= 0 {
+			secs = 60
+		}
+		return time.Duration(secs) * time.Second
+	}
+	window := win("ResourceRateLimitWindowSeconds")
+	rule := func(prefix string) handler.ResourceLimit {
+		return handler.ResourceLimit{
+			Window:      window,
+			PerUser:     c.GetInt(prefix + "PerUser"),
+			PerPlatform: c.GetInt(prefix + "PerPlatform"),
+			Global:      c.GetInt(prefix + "Global"),
+		}
+	}
+	return map[string]handler.ResourceLimit{
+		handler.ActionSearch:    rule("SearchRateLimit"),
+		handler.ActionLyric:     rule("LyricRateLimit"),
+		handler.ActionDownload:  rule("DownloadRateLimit"),
+		handler.ActionRecognize: rule("RecognizeRateLimit"),
+		handler.ActionPlaylist:  rule("PlaylistRateLimit"),
+		handler.ActionEpisode:   rule("EpisodeRateLimit"),
+		handler.ActionArtist:    rule("ArtistRateLimit"),
 	}
 }

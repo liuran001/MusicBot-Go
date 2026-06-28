@@ -39,6 +39,7 @@ type PlaylistHandler struct {
 	PlatformManager platform.Manager
 	Repo            botpkg.SongRepository
 	RateLimiter     *telegram.RateLimiter
+	ResourceLimiter *ResourceRateLimiter
 	DefaultQuality  string
 	PageSize        int
 	playlistMu      sync.Mutex
@@ -107,6 +108,15 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
 		h.editPlaylistMessage(ctx, b, msgResult, tr(ctx, "no_results"), nil)
+		return true
+	}
+
+	playlistUserID := int64(0)
+	if message.From != nil {
+		playlistUserID = message.From.ID
+	}
+	if !h.ResourceLimiter.Allow(ActionPlaylist, playlistUserID, platformName) {
+		h.editPlaylistMessage(ctx, b, msgResult, userVisiblePlaylistError(ctx, platform.ErrRateLimited), nil)
 		return true
 	}
 
@@ -286,6 +296,13 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 		plat := h.Playlist.PlatformManager.Get(state.platform)
 		if plat == nil {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "pl_load_failed", map[string]any{"Label": collectionLabel})})
+			return
+		}
+		// A lazy page turn re-fetches a fresh chunk from the platform, so it is an
+		// API hit and counts against the playlist quota. Non-lazy turns serve from
+		// the already-cached track list and stay free.
+		if !h.Playlist.ResourceLimiter.Allow(ActionPlaylist, requesterID, state.platform) {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "err_rate_limited")})
 			return
 		}
 		var err error

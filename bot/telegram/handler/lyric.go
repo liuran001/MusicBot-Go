@@ -23,6 +23,7 @@ const lyricCaptionMaxChars = 1000
 type LyricHandler struct {
 	PlatformManager  platform.Manager
 	RateLimiter      *telegram.RateLimiter
+	ResourceLimiter  *ResourceRateLimiter
 	Repo             botpkg.SongRepository
 	DefaultPlatform  string
 	FallbackPlatform string
@@ -144,7 +145,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		return
 	}
 
-	lyrics, err := plat.GetLyrics(ctx, trackID)
+	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, searchRequesterID(message), plat, platformName, trackID)
 	if err != nil {
 		errText := h.formatLyricsError(ctx, err)
 		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: errText}
@@ -229,7 +230,7 @@ func (h *LyricHandler) searchFirstTrackForLyric(ctx context.Context, message *te
 		fallbackPlatform = ""
 	}
 
-	tracks, matchedPlatform, _, err := searchTracksWithFallback(ctx, h.PlatformManager, primaryPlatform, fallbackPlatform, keyword, nil, true)
+	tracks, matchedPlatform, _, err := searchTracksWithFallbackLimited(ctx, h.PlatformManager, h.ResourceLimiter, searchRequesterID(message), primaryPlatform, fallbackPlatform, keyword, nil, true)
 	if err != nil || len(tracks) == 0 {
 		return "", "", false
 	}
@@ -330,8 +331,49 @@ func (h *LyricHandler) formatLyricsError(ctx context.Context, err error) string 
 	if errors.Is(err, platform.ErrUnsupported) {
 		return tr(ctx, "guest_platform_no_lyrics")
 	}
+	if errors.Is(err, platform.ErrRateLimited) {
+		return tr(ctx, "err_rate_limited")
+	}
 
 	return tr(ctx, "get_lrc_failed")
+}
+
+// lyricFetchCache memoizes the raw *platform.Lyrics for a platform+track so the
+// lyric format switcher (which re-renders the same lyrics in different formats)
+// never re-hits the platform API. The raw lyric payload is format-independent —
+// all 14 output formats are produced locally from it — so a cache hit serves
+// every subsequent format switch/toggle for free. TTL mirrors the lyric callback
+// payload lifetime so a still-interactive keyboard always has its source cached.
+var lyricFetchCache = newTTLStore[*platform.Lyrics](30 * time.Minute)
+
+func lyricCacheKey(platformName, trackID string) string {
+	return strings.TrimSpace(platformName) + "\x00" + strings.TrimSpace(trackID)
+}
+
+// getLyricsLimited fetches lyrics through the shared resource rate limiter so
+// every lyric-fetch entry point (command, deep link, search-result tap, format
+// switch, guest) shares one per-user/per-platform/global quota.
+//
+// A raw-lyrics cache sits in front of the limiter: a cache hit returns the
+// already-fetched lyrics WITHOUT consuming quota or calling the platform,
+// because switching display format is a free local conversion and must not be
+// throttled (otherwise exploring the 14 formats would trip the limit). Only a
+// genuine fetch (cache miss) is rate-limited; on over-quota it returns
+// platform.ErrRateLimited before hitting the API. A nil limiter (or unconfigured
+// lyric rule) fetches unthrottled. Cache misses populate the cache on success.
+func getLyricsLimited(ctx context.Context, limiter *ResourceRateLimiter, userID int64, plat platform.Platform, platformName, trackID string) (*platform.Lyrics, error) {
+	key := lyricCacheKey(platformName, trackID)
+	if cached, ok := lyricFetchCache.Load(key); ok && cached != nil {
+		return cached, nil
+	}
+	if !limiter.Allow(ActionLyric, userID, platformName) {
+		return nil, platform.ErrRateLimited
+	}
+	lyrics, err := plat.GetLyrics(ctx, trackID)
+	if err == nil && lyrics != nil {
+		lyricFetchCache.Store(key, lyrics)
+	}
+	return lyrics, err
 }
 
 // SendTrackLyrics fetches and sends a track's lyrics as a document to chatID,
@@ -348,9 +390,9 @@ func (h *LyricHandler) SendTrackLyrics(ctx context.Context, b *telego.Bot, chatI
 		sendText(ctx, b, chatID, replyToMessageID, tr(ctx, "guest_platform_no_lyrics"))
 		return
 	}
-	lyrics, err := plat.GetLyrics(ctx, trackID)
+	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, requesterID, plat, platformName, trackID)
 	if err != nil || lyrics == nil {
-		sendText(ctx, b, chatID, replyToMessageID, tr(ctx, "get_lrc_failed"))
+		sendText(ctx, b, chatID, replyToMessageID, h.formatLyricsError(ctx, err))
 		return
 	}
 	baseName := h.buildLyricBaseName(ctx, plat, trackID)

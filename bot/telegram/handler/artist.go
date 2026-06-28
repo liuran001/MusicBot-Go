@@ -18,6 +18,7 @@ type artistDetailProvider interface {
 type ArtistHandler struct {
 	PlatformManager platform.Manager
 	RateLimiter     *telegram.RateLimiter
+	ResourceLimiter *ResourceRateLimiter
 	Logger          interface {
 		Warn(msg string, keysAndValues ...any)
 	}
@@ -58,6 +59,15 @@ func (h *ArtistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *te
 	plat := h.PlatformManager.Get(platformName)
 	if plat == nil {
 		sendText(ctx, b, message.Chat.ID, message.MessageID, tr(ctx, "no_results"))
+		return true
+	}
+
+	var userID int64
+	if message.From != nil {
+		userID = message.From.ID
+	}
+	if !h.ResourceLimiter.Allow(ActionArtist, userID, platformName) {
+		sendText(ctx, b, message.Chat.ID, message.MessageID, userVisibleArtistError(ctx, platform.ErrRateLimited))
 		return true
 	}
 

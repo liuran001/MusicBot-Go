@@ -182,14 +182,36 @@ func parseTrailingOptions(text string, manager platform.Manager) (baseText, plat
 
 type searchLimitFunc func(platformName string) int
 
+// searchRequesterID extracts the initiating user's ID from a message for
+// per-user search rate limiting. Returns 0 when the sender is unknown, which
+// the limiter treats as a single shared bucket.
+func searchRequesterID(message *telego.Message) int64 {
+	if message == nil || message.From == nil {
+		return 0
+	}
+	return message.From.ID
+}
+
 // searchTracksWithFallback runs search on primary platform and optionally falls back
 // to another searchable platform when primary fails (or returns empty, when enabled).
 // Returns tracks, matched platform name, whether fallback was used, and terminal error.
 func searchTracksWithFallback(ctx context.Context, manager platform.Manager, primaryPlatform, fallbackPlatform, keyword string, limitFn searchLimitFunc, fallbackOnEmpty bool) ([]platform.Track, string, bool, error) {
+	return searchTracksWithFallbackLimited(ctx, manager, nil, 0, primaryPlatform, fallbackPlatform, keyword, limitFn, fallbackOnEmpty)
+}
+
+// searchTracksWithFallbackLimited is searchTracksWithFallback with an optional
+// rate limiter. A user-initiated search counts once (against the intended
+// primary platform) regardless of whether it later falls back to another
+// platform. When the limiter rejects the search it returns platform.ErrRateLimited
+// before any platform API call is made; a nil limiter disables throttling.
+func searchTracksWithFallbackLimited(ctx context.Context, manager platform.Manager, limiter *ResourceRateLimiter, userID int64, primaryPlatform, fallbackPlatform, keyword string, limitFn searchLimitFunc, fallbackOnEmpty bool) ([]platform.Track, string, bool, error) {
 	primaryPlatform = strings.TrimSpace(primaryPlatform)
 	fallbackPlatform = strings.TrimSpace(fallbackPlatform)
 	if manager == nil {
 		return nil, primaryPlatform, false, platform.ErrUnavailable
+	}
+	if !limiter.Allow(ActionSearch, userID, primaryPlatform) {
+		return nil, primaryPlatform, false, platform.ErrRateLimited
 	}
 	plat := manager.Get(primaryPlatform)
 	if plat == nil || !plat.SupportsSearch() {

@@ -24,6 +24,7 @@ type RecognizeHandler struct {
 	CacheDir         string
 	Music            *MusicHandler
 	RateLimiter      *telegram.RateLimiter
+	ResourceLimiter  *ResourceRateLimiter
 	RecognizeService recognize.Service
 	Logger           *logpkg.Logger
 	DownloadBot      *telego.Bot
@@ -50,6 +51,19 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 		h.CacheDir = "./cache"
 	}
 	ensureDir(h.CacheDir)
+
+	// Recognition is the single most expensive op (Telegram file download +
+	// ffmpeg transcode + external fingerprint API, then a chained download), so
+	// throttle it before any of that work begins. Platform is unknown until after
+	// recognition, so this keys on user + global only.
+	var recognizeUserID int64
+	if message.From != nil {
+		recognizeUserID = message.From.ID
+	}
+	if !h.ResourceLimiter.Allow(ActionRecognize, recognizeUserID, "") {
+		sendText(ctx, b, chatID, replyID, tr(ctx, "err_rate_limited"))
+		return
+	}
 
 	fileBot := b
 	if h.DownloadBot != nil {

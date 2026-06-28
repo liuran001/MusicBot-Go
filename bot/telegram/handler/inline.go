@@ -22,6 +22,7 @@ type InlineSearchHandler struct {
 	PlatformManager  platform.Manager
 	CollectionChosen *ChosenInlineMusicHandler
 	Favorites        *FavoritesHandler
+	ResourceLimiter  *ResourceRateLimiter
 	BotName          string
 	DefaultPlatform  string
 	DefaultQuality   string
@@ -108,6 +109,10 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 		chunkOffset = pageStart
 		requestCtx = platform.WithPlaylistOffset(requestCtx, chunkOffset)
 		requestCtx = platform.WithPlaylistLimit(requestCtx, pageSize)
+	}
+	if !h.ResourceLimiter.Allow(ActionPlaylist, query.From.ID, platformName) {
+		h.inlineEmpty(ctx, b, query)
+		return
 	}
 	playlist, err := plat.GetPlaylist(requestCtx, collectionID)
 	if err != nil || playlist == nil {
@@ -358,7 +363,7 @@ func (h *InlineSearchHandler) inlineSearch(ctx context.Context, b *telego.Bot, q
 	searchCtx := withSearchFilterContext(ctx, h.PlatformManager, platformName, biliFilter)
 
 	searchWithFallback := func(keyword string) ([]platform.Track, string, error) {
-		tracks, matchedPlatform, _, searchErr := searchTracksWithFallback(searchCtx, h.PlatformManager, platformName, fallbackPlatform, keyword, h.inlineSearchLimit, true)
+		tracks, matchedPlatform, _, searchErr := searchTracksWithFallbackLimited(searchCtx, h.PlatformManager, h.ResourceLimiter, query.From.ID, platformName, fallbackPlatform, keyword, h.inlineSearchLimit, true)
 		return tracks, matchedPlatform, searchErr
 	}
 
@@ -902,6 +907,9 @@ func (h *InlineSearchHandler) tryInlineDirectEpisodes(ctx context.Context, b *te
 	}
 	provider, ok := plat.(platform.EpisodeProvider)
 	if !ok {
+		return false
+	}
+	if !h.ResourceLimiter.Allow(ActionEpisode, query.From.ID, platformName) {
 		return false
 	}
 	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
