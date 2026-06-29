@@ -59,3 +59,5 @@ set_pdef_forward_desc = "Whether to show bottom buttons (send to chat / show lyr
 set_pdef_groupfav_title = "Enable group favorites"
 set_pdef_groupfav_desc = "Whether the group offers shared group favorites"
 set_pdef_groupfav_admin = "Admins only"
+set_pdef_comment_buttons_title = "Repost buttons in channel comments"
+set_pdef_comment_buttons_desc = "When a channel song is forwarded to the linked discussion group, repost the lyrics/favorite buttons in the comment thread"

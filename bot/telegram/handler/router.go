@@ -26,6 +26,7 @@ type Router struct {
 	Admin                    MessageHandler
 	Favorites                MessageHandler
 	GuestMode                MessageHandler
+	CommentButtons           MessageHandler
 	MentionRouter            *MentionRouter
 	GuestSearchCallback      CallbackHandler
 	Callback                 CallbackHandler
@@ -54,6 +55,21 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		return
 	}
 	r.BotName = botName
+
+	// Channel posts auto-forwarded into a linked discussion group arrive as a
+	// plain message with IsAutomaticForward set; Telegram strips the inline
+	// keyboard from the copy. Detect the bot's own song posts (audio with a
+	// "via @bot" caption) and repost the action buttons in the comment thread.
+	// Registered first: such messages carry no Text, so the content routes below
+	// would never match them, but an explicit early route keeps intent clear.
+	if r.CommentButtons != nil {
+		bh.Handle(r.wrapCommentButtons(r.CommentButtons), func(ctx context.Context, update telego.Update) bool {
+			if update.Message == nil {
+				return false
+			}
+			return update.Message.IsAutomaticForward && update.Message.Audio != nil
+		})
+	}
 
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "start"))
 	bh.Handle(r.wrapMessage(r.Music), matchCommandFunc(botName, "help"))
@@ -339,6 +355,32 @@ func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
 						}
 					}
 				}
+				return nil
+			}
+		}
+		handler.Handle(reqCtx, ctx.Bot(), &update)
+		return nil
+	}
+}
+
+// wrapCommentButtons wraps the comment-thread button reposter. Unlike
+// wrapMessage it deliberately skips the isOwnInlineMessage guard: the
+// auto-forwarded channel copy may still carry ViaBot, which wrapMessage would
+// treat as the bot's own inline card and drop. Whitelist and localization are
+// preserved.
+func (r *Router) wrapCommentButtons(handler MessageHandler) th.Handler {
+	return func(ctx *th.Context, update telego.Update) error {
+		if handler == nil {
+			return nil
+		}
+		reqCtx := r.localize(ctx, &update)
+		if r.Whitelist != nil && update.Message != nil {
+			chatID := update.Message.Chat.ID
+			var userID int64
+			if update.Message.From != nil {
+				userID = update.Message.From.ID
+			}
+			if !r.Whitelist.IsAllowed(chatID, userID) {
 				return nil
 			}
 		}

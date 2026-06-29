@@ -241,6 +241,7 @@ func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Log
 
 	pluginSettingDefinitions = append(pluginSettingDefinitions, handler.ForwardButtonSettingDefinition())
 	pluginSettingDefinitions = append(pluginSettingDefinitions, handler.GroupFavoritesSettingDefinition())
+	pluginSettingDefinitions = append(pluginSettingDefinitions, handler.CommentButtonsSettingDefinition())
 
 	if err := dynManager.Load(ctx, conf, platformManager); err != nil {
 		if log != nil {
@@ -519,6 +520,7 @@ func (a *App) Start(ctx context.Context) error {
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, Favorites: favoritesHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize, ResourceLimiter: resourceLimiter},
 		ChosenInline:             chosenInlineHandler,
+		CommentButtons:           &handler.CommentButtonsHandler{Repo: a.DB, PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, BotName: botName, Logger: a.Logger},
 		PlatformManager:          a.PlatformManager,
 		AdminCommands:            adminCommandNames,
 		Whitelist:                whitelist,
