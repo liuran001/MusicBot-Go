@@ -52,20 +52,16 @@ func convertPathfinderTrack(t pathfinderTrack) platform.Track {
 	}
 	artists := make([]platform.Artist, 0, len(pathfinderArtists))
 	for _, artist := range pathfinderArtists {
-		artists = append(artists, platform.Artist{
-			ID:       artist.ID,
-			Platform: platformName,
-			Name:     artist.Profile.Name,
-			URL:      "https://open.spotify.com/artist/" + artist.ID,
-		})
+		artists = append(artists, convertPathfinderArtist(artist))
 	}
 
+	trackID := pathfinderID(t.ID, t.URI)
 	trackURL := strings.TrimSpace(t.SharingInfo.ShareURL)
 	if trackURL == "" {
-		trackURL = "https://open.spotify.com/track/" + t.ID
+		trackURL = "https://open.spotify.com/track/" + trackID
 	}
 	track := platform.Track{
-		ID:          t.ID,
+		ID:          trackID,
 		Platform:    platformName,
 		Title:       t.Name,
 		Artists:     artists,
@@ -74,15 +70,16 @@ func convertPathfinderTrack(t pathfinderTrack) platform.Track {
 		URL:         trackURL,
 	}
 
-	if strings.TrimSpace(t.Album.ID) != "" || strings.TrimSpace(t.Album.Name) != "" {
+	albumID := pathfinderID(t.Album.ID, t.Album.URI)
+	if albumID != "" || strings.TrimSpace(t.Album.Name) != "" {
 		releaseDate := strings.TrimSpace(t.Album.Date.ISOString)
 		precision := strings.ToLower(strings.TrimSpace(t.Album.Date.Precision))
 		albumURL := strings.TrimSpace(t.Album.SharingInfo.ShareURL)
-		if albumURL == "" && t.Album.ID != "" {
-			albumURL = "https://open.spotify.com/album/" + t.Album.ID
+		if albumURL == "" && albumID != "" {
+			albumURL = "https://open.spotify.com/album/" + albumID
 		}
 		album := platform.Album{
-			ID:          t.Album.ID,
+			ID:          albumID,
 			Platform:    platformName,
 			Title:       t.Album.Name,
 			Artists:     artists,
@@ -97,6 +94,113 @@ func convertPathfinderTrack(t pathfinderTrack) platform.Track {
 		track.Year = album.Year
 	}
 	return track
+}
+
+func convertPathfinderArtist(a pathfinderArtist) platform.Artist {
+	id := pathfinderID(a.ID, a.URI)
+	url := ""
+	if id != "" {
+		url = "https://open.spotify.com/artist/" + id
+	}
+	return platform.Artist{
+		ID:       id,
+		Platform: platformName,
+		Name:     a.Profile.Name,
+		URL:      url,
+	}
+}
+
+func convertPathfinderArtistUnion(a pathfinderArtistUnion) platform.Artist {
+	id := pathfinderID(a.ID, a.URI)
+	name := strings.TrimSpace(a.Profile.Name)
+	if name == "" {
+		name = strings.TrimSpace(a.Name)
+	}
+	url := ""
+	if id != "" {
+		url = "https://open.spotify.com/artist/" + id
+	}
+	return platform.Artist{
+		ID:        id,
+		Platform:  platformName,
+		Name:      name,
+		AvatarURL: largestImage(a.Visuals.AvatarImage.Sources),
+		URL:       url,
+	}
+}
+
+func convertPathfinderAlbum(a pathfinderAlbum) platform.Album {
+	albumID := pathfinderID(a.ID, a.URI)
+	artists := make([]platform.Artist, 0, len(a.Artists.Items))
+	for _, artist := range a.Artists.Items {
+		artists = append(artists, convertPathfinderArtist(artist))
+	}
+	return platform.Album{
+		ID:          albumID,
+		Platform:    platformName,
+		Title:       a.Name,
+		Artists:     artists,
+		CoverURL:    largestImage(a.CoverArt.Sources),
+		TrackCount:  firstPositiveInt(a.TracksV2.TotalCount, len(a.TracksV2.Items)),
+		URL:         spotifyOpenURL("album", albumID),
+		Year:        a.Date.Year,
+		ReleaseDate: pathfinderDate(a.Date.ISOString, a.Date.Precision, a.Date.Year, a.Date.Month, a.Date.Day),
+	}
+}
+
+func convertPathfinderAlbumAsPlaylist(a pathfinderAlbum) *platform.Playlist {
+	album := convertPathfinderAlbum(a)
+	pl := &platform.Playlist{
+		ID:         "album:" + album.ID,
+		Platform:   platformName,
+		Title:      album.Title,
+		CoverURL:   album.CoverURL,
+		TrackCount: album.TrackCount,
+		URL:        album.URL,
+	}
+	if len(album.Artists) > 0 {
+		pl.Creator = album.Artists[0].Name
+	}
+	for _, item := range a.TracksV2.Items {
+		track := convertPathfinderTrack(item.Track)
+		if strings.TrimSpace(track.ID) == "" {
+			continue
+		}
+		if track.Album == nil {
+			track.Album = &album
+		}
+		if track.CoverURL == "" {
+			track.CoverURL = album.CoverURL
+		}
+		if track.Year == 0 {
+			track.Year = album.Year
+		}
+		pl.Tracks = append(pl.Tracks, track)
+	}
+	return pl
+}
+
+func convertPathfinderPlaylist(p pathfinderPlaylist) *platform.Playlist {
+	playlistID := pathfinderID(p.ID, p.URI)
+	creator := firstNonEmptyString(p.OwnerV2.Data.DisplayName, p.OwnerV2.Data.Name, p.OwnerV2.Data.Username)
+	pl := &platform.Playlist{
+		ID:          playlistID,
+		Platform:    platformName,
+		Title:       p.Name,
+		Description: p.Description,
+		CoverURL:    firstPathfinderPlaylistImage(p),
+		Creator:     creator,
+		TrackCount:  firstPositiveInt(p.Content.TotalCount, len(p.Content.Items)),
+		URL:         spotifyOpenURL("playlist", playlistID),
+	}
+	for _, item := range p.Content.Items {
+		track := convertPathfinderTrack(item.ItemV2.Data)
+		if strings.TrimSpace(track.ID) == "" {
+			continue
+		}
+		pl.Tracks = append(pl.Tracks, track)
+	}
+	return pl
 }
 
 // convertAlbum maps a Spotify album to the unified Album.
@@ -130,6 +234,69 @@ func largestImage(images []spotifyImage) string {
 		}
 	}
 	return largest.URL
+}
+
+func firstPathfinderPlaylistImage(p pathfinderPlaylist) string {
+	for _, item := range p.Images.Items {
+		if url := largestImage(item.Sources); url != "" {
+			return url
+		}
+	}
+	return ""
+}
+
+func pathfinderID(id, uri string) string {
+	id = strings.TrimSpace(id)
+	if id != "" {
+		return id
+	}
+	if parsedID, _, ok := parseSpotifyURI(uri); ok {
+		return parsedID
+	}
+	return ""
+}
+
+func spotifyOpenURL(kind, id string) string {
+	id = strings.TrimSpace(id)
+	if kind == "" || id == "" {
+		return ""
+	}
+	return "https://open.spotify.com/" + kind + "/" + id
+}
+
+func pathfinderDate(isoString, precision string, year, month, day int) *time.Time {
+	if t := parseReleaseDate(strings.TrimSpace(isoString), strings.ToLower(strings.TrimSpace(precision))); t != nil {
+		return t
+	}
+	if year <= 0 {
+		return nil
+	}
+	if month <= 0 {
+		month = 1
+	}
+	if day <= 0 {
+		day = 1
+	}
+	t := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	return &t
+}
+
+func firstPositiveInt(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // parseReleaseYear extracts the leading year from a Spotify release_date

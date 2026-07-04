@@ -144,3 +144,94 @@ type pathfinderSearchResponse struct {
 	} `json:"data"`
 	Errors []struct{} `json:"errors"`
 }
+
+type pathfinderAlbumResponse struct {
+	Data struct {
+		Album pathfinderAlbum `json:"albumUnion"`
+	} `json:"data"`
+	Errors []struct{} `json:"errors"`
+}
+
+type pathfinderAlbum struct {
+	TypeName string `json:"__typename"`
+	ID       string `json:"id"`
+	URI      string `json:"uri"`
+	Name     string `json:"name"`
+	Date     struct {
+		ISOString string `json:"isoString"`
+		Precision string `json:"precision"`
+		Year      int    `json:"year"`
+		Month     int    `json:"month"`
+		Day       int    `json:"day"`
+	} `json:"date"`
+	CoverArt struct {
+		Sources []spotifyImage `json:"sources"`
+	} `json:"coverArt"`
+	Artists struct {
+		Items []pathfinderArtist `json:"items"`
+	} `json:"artists"`
+	TracksV2 struct {
+		Items []struct {
+			Track pathfinderTrack `json:"track"`
+		} `json:"items"`
+		TotalCount int `json:"totalCount"`
+	} `json:"tracksV2"`
+}
+
+type pathfinderPlaylistResponse struct {
+	Data struct {
+		Playlist pathfinderPlaylist `json:"playlistV2"`
+	} `json:"data"`
+	Errors []struct{} `json:"errors"`
+}
+
+type pathfinderPlaylist struct {
+	TypeName    string `json:"__typename"`
+	ID          string `json:"id"`
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Followers   int    `json:"followers"`
+	Images      struct {
+		Items []struct {
+			Sources []spotifyImage `json:"sources"`
+		} `json:"items"`
+	} `json:"images"`
+	OwnerV2 struct {
+		Data struct {
+			Name        string `json:"name"`
+			Username    string `json:"username"`
+			DisplayName string `json:"displayName"`
+		} `json:"data"`
+	} `json:"ownerV2"`
+	Content struct {
+		Items []struct {
+			ItemV2 struct {
+				Data pathfinderTrack `json:"data"`
+			} `json:"itemV2"`
+		} `json:"items"`
+		TotalCount int `json:"totalCount"`
+	} `json:"content"`
+}
+
+type pathfinderArtistResponse struct {
+	Data struct {
+		Artist pathfinderArtistUnion `json:"artistUnion"`
+	} `json:"data"`
+	Errors []struct{} `json:"errors"`
+}
+
+type pathfinderArtistUnion struct {
+	TypeName string `json:"__typename"`
+	ID       string `json:"id"`
+	URI      string `json:"uri"`
+	Name     string `json:"name"`
+	Profile  struct {
+		Name string `json:"name"`
+	} `json:"profile"`
+	Visuals struct {
+		AvatarImage struct {
+			Sources []spotifyImage `json:"sources"`
+		} `json:"avatarImage"`
+	} `json:"visuals"`
+}
