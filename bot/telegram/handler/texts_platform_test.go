@@ -63,6 +63,26 @@ func TestBuildHelpTextFoldsPlatforms(t *testing.T) {
 	}
 }
 
+func TestBuildHelpTextLocalizesChinesePlatformMetadata(t *testing.T) {
+	m := newStubManager()
+	m.metas["netease"] = platform.Meta{Name: "netease", DisplayName: "网易云音乐", Aliases: []string{"163", "netease"}}
+	m.metas["soda"] = platform.Meta{Name: "soda", DisplayName: "汽水音乐", Aliases: []string{"soda"}}
+	m.platforms["netease"] = nil
+	m.platforms["soda"] = nil
+
+	text := buildHelpText(enCtx(), m, false, nil, true, true)
+	for _, want := range []string{"NetEase Cloud Music", "Soda Music"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected localized platform name %q in help text:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{"网易云音乐", "汽水音乐"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("unexpected Chinese platform name %q in English help text:\n%s", unwanted, text)
+		}
+	}
+}
+
 // TestBuildHelpTextNoDoubledEmoji guards against the section headers carrying a
 // duplicated emoji (the localized strings already include one, so the code must
 // not prepend another).

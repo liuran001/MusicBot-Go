@@ -257,7 +257,7 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 			return "", err
 		}
 		if strings.TrimSpace(line) == "" {
-			return tr(ctx, "adm_renew_cookie_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)}), nil
+			return tr(ctx, "adm_renew_cookie_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)}), nil
 		}
 		return line, nil
 	}
@@ -273,7 +273,7 @@ func renewCookies(ctx context.Context, manager platform.Manager, args string) (s
 		line, err := renewCookieForPlatform(ctx, manager, name)
 		if err != nil {
 			failures++
-			lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+			lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(ctx, manager, name), sanitizeSensitiveText(err.Error())))
 			continue
 		}
 		if strings.TrimSpace(line) != "" {
@@ -322,7 +322,7 @@ func checkCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 		message = tr(ctx, "adm_check_unknown")
 	}
 	message = sanitizeSensitiveText(message)
-	return fmt.Sprintf("%s %s: %s", status, platformDisplayName(manager, platformName), message), nil
+	return fmt.Sprintf("%s %s: %s", status, platformDisplayName(ctx, manager, platformName), message), nil
 }
 
 func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platformName string) (string, error) {
@@ -343,7 +343,7 @@ func renewCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 		message = tr(ctx, "adm_renew_done")
 	}
 	message = sanitizeSensitiveText(message)
-	return fmt.Sprintf("✅ %s: %s", platformDisplayName(manager, platformName), message), nil
+	return fmt.Sprintf("✅ %s: %s", platformDisplayName(ctx, manager, platformName), message), nil
 }
 
 func sanitizeSensitiveText(text string) string {

@@ -375,7 +375,7 @@ func (h *ChosenInlineMusicHandler) renderInlineCollectionPage(ctx context.Contex
 		}
 	}
 	var bld strings.Builder
-	bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(h.Music.PlatformManager, state.platformName), mdV2Replacer.Replace(platformDisplayName(h.Music.PlatformManager, state.platformName)), state.collectionLabel))
+	bld.WriteString(fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(h.Music.PlatformManager, state.platformName), mdV2Replacer.Replace(platformDisplayName(ctx, h.Music.PlatformManager, state.platformName)), state.collectionLabel))
 	bld.WriteString(renderInlineCollectionInfo(ctx, state))
 	if pageCount > 1 {
 		bld.WriteString(tr(ctx, "cb_page_of", map[string]any{"Page": page, "Total": pageCount}) + "\n\n")

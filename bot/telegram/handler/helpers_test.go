@@ -121,6 +121,27 @@ func TestQualityTag(t *testing.T) {
 	}
 }
 
+func TestPlatformDisplayNameAndTagsAreLocalized(t *testing.T) {
+	manager := platform.NewManager()
+	manager.Register(stubSearchPlatform{name: "netease", displayName: "网易云音乐", emoji: "🎵"})
+	manager.Register(stubSearchPlatform{name: "custom", displayName: "自定义平台", emoji: "✨"})
+
+	if got := platformDisplayName(enCtx(), manager, "netease"); got != "NetEase Cloud Music" {
+		t.Fatalf("English platform display name = %q", got)
+	}
+	if got := platformDisplayName(zhCtx(), manager, "netease"); got != "网易云音乐" {
+		t.Fatalf("Chinese platform display name = %q", got)
+	}
+	if got := platformDisplayName(enCtx(), manager, "custom"); got != "自定义平台" {
+		t.Fatalf("custom platform fallback display name = %q", got)
+	}
+
+	tags := formatInfoTags(enCtx(), manager, "netease", "lossless", "flac")
+	if len(tags) == 0 || tags[0] != "#NetEaseCloudMusic" {
+		t.Fatalf("localized platform tag = %v", tags)
+	}
+}
+
 func TestBuildMusicCaptionHidesAlbumLineWhenEmpty(t *testing.T) {
 	info := &botpkg.SongInfo{
 		SongName:    "Song",

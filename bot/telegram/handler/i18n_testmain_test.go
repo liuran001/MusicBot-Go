@@ -20,5 +20,13 @@ func TestMain(m *testing.M) {
 // zhCtx returns a context carrying the Simplified Chinese localizer, used by
 // tests that assert the original (pre-i18n) Chinese strings.
 func zhCtx() context.Context {
-	return i18n.WithLocalizer(context.Background(), i18n.For("zh"))
+	return langCtx("zh")
+}
+
+func enCtx() context.Context {
+	return langCtx("en")
+}
+
+func langCtx(lang string) context.Context {
+	return i18n.WithLocalizer(context.Background(), i18n.For(lang))
 }

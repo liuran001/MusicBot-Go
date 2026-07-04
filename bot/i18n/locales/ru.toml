@@ -4,6 +4,26 @@
 # ИСКЛЮЧЕНИЕ: блок help/about/status написан С разметкой MarkdownV2 и
 # рендерится через T (не Tmd); их билдеры сами экранируют динамические значения.
 
+# --- названия платформ ---
+platform_name_netease = "NetEase Cloud Music"
+platform_name_qqmusic = "QQ Music"
+platform_name_kugou = "KuGou Music"
+platform_name_bilibili = "Bilibili"
+platform_name_soda = "Soda Music"
+platform_name_applemusic = "Apple Music"
+platform_name_spotify = "Spotify"
+platform_name_youtubemusic = "YouTube Music"
+platform_name_amazonmusic = "Amazon Music"
+platform_button_name_netease = "NetEase"
+platform_button_name_qqmusic = "QQ Music"
+platform_button_name_kugou = "KuGou"
+platform_button_name_bilibili = "Bilibili"
+platform_button_name_soda = "Soda"
+platform_button_name_applemusic = "Apple"
+platform_button_name_spotify = "Spotify"
+platform_button_name_youtubemusic = "YouTube"
+platform_button_name_amazonmusic = "Amazon"
+
 # --- статус / прогресс ---
 hit_cache = "Найдено в кэше, отправляю…"
 input_id_or_keyword = "Отправьте ID трека или ключевое слово, либо используйте /rmcache all, чтобы очистить весь кэш"

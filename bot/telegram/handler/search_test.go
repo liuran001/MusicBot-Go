@@ -53,7 +53,7 @@ func TestSearchHandler_searchLimit(t *testing.T) {
 	}
 }
 
-func TestSearchHandler_buildPlatformSwitchRowsWrapAtThree(t *testing.T) {
+func TestPlatformSwitchRowsUseColoredLabelsAndWrapAtThree(t *testing.T) {
 	handler := &SearchHandler{PlatformManager: platform.NewManager()}
 	platforms := []platform.Platform{
 		stubSearchPlatform{name: "netease", displayName: "网易云音乐", emoji: "🎵"},
@@ -66,7 +66,7 @@ func TestSearchHandler_buildPlatformSwitchRowsWrapAtThree(t *testing.T) {
 		handler.PlatformManager.Register(plat)
 	}
 
-	rows := handler.buildPlatformSwitchRows("soda", 12345, 100, nil)
+	rows := handler.buildPlatformSwitchRows(zhCtx(), "soda", 12345, 100, nil)
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows, got %d", len(rows))
 	}
@@ -76,8 +76,64 @@ func TestSearchHandler_buildPlatformSwitchRowsWrapAtThree(t *testing.T) {
 	if len(rows[1]) != 2 {
 		t.Fatalf("expected second row has 2 buttons, got %d", len(rows[1]))
 	}
-	if rows[1][1].Text != "✅ 汽水音乐" {
-		t.Fatalf("expected current platform full label in wrapped row, got %q", rows[1][1].Text)
+	if rows[1][1].Text != "汽水" {
+		t.Fatalf("expected current platform label without emoji, got %q", rows[1][1].Text)
+	}
+	if rows[1][1].Style != telego.ButtonStyleSuccess {
+		t.Fatalf("expected current platform success style, got %q", rows[1][1].Style)
+	}
+	if rows[0][0].Text != "网易云" {
+		t.Fatalf("expected platform label without emoji, got %q", rows[0][0].Text)
+	}
+	if rows[0][0].Style != telego.ButtonStylePrimary {
+		t.Fatalf("expected inactive platform primary style, got %q", rows[0][0].Style)
+	}
+
+	enRows := handler.buildPlatformSwitchRows(enCtx(), "soda", 12345, 100, nil)
+	if enRows[1][1].Text != "Soda" {
+		t.Fatalf("expected English current platform label, got %q", enRows[1][1].Text)
+	}
+	if enRows[0][0].Text != "NetEase" {
+		t.Fatalf("expected English inactive platform label, got %q", enRows[0][0].Text)
+	}
+
+	guest := &GuestModeHandler{
+		PlatformManager: handler.PlatformManager,
+		SearchHandler:   handler,
+	}
+	guestRows := guest.buildGuestPlatformSwitchRows(zhCtx(), &searchState{
+		platform:    "qqmusic",
+		requesterID: 12345,
+	}, "token")
+	if len(guestRows) != 2 {
+		t.Fatalf("expected 2 guest rows, got %d", len(guestRows))
+	}
+	if guestRows[0][1].Text != "QQ音乐" {
+		t.Fatalf("expected guest current platform label without emoji, got %q", guestRows[0][1].Text)
+	}
+	if guestRows[0][1].Style != telego.ButtonStyleSuccess {
+		t.Fatalf("expected guest current platform success style, got %q", guestRows[0][1].Style)
+	}
+	if guestRows[0][0].Style != telego.ButtonStylePrimary {
+		t.Fatalf("expected guest inactive platform primary style, got %q", guestRows[0][0].Style)
+	}
+}
+
+func TestPlatformSwitchRowsAvoidOverlongRows(t *testing.T) {
+	buttons := []telego.InlineKeyboardButton{
+		newPlatformSwitchButton("Very Long Custom Platform", "a", false),
+		newPlatformSwitchButton("Another Long Platform", "b", false),
+		newPlatformSwitchButton("Short", "c", false),
+	}
+
+	rows := platformSwitchRowsFromButtons(buttons)
+	if len(rows) != 3 {
+		t.Fatalf("expected long labels to split into 3 rows, got %d rows: %#v", len(rows), rows)
+	}
+	for i, row := range rows {
+		if len(row) != 1 {
+			t.Fatalf("expected row %d to contain one long button, got %d", i, len(row))
+		}
 	}
 }
 

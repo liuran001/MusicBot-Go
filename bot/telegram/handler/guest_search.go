@@ -178,7 +178,7 @@ func (h *GuestModeHandler) renderGuestSearchPage(ctx context.Context, state *sea
 
 	var bld strings.Builder
 	platformEmojiText := platformEmoji(h.PlatformManager, state.platform)
-	displayName := platformDisplayName(h.PlatformManager, state.platform)
+	displayName := platformDisplayName(ctx, h.PlatformManager, state.platform)
 	isPlaylist := state != nil && state.playlist != nil
 	if isPlaylist {
 		// Playlist/album mode: use the same header style as PlaylistHandler
@@ -246,7 +246,7 @@ func (h *GuestModeHandler) renderGuestSearchPage(ctx context.Context, state *sea
 	}
 
 	if !isPlaylist {
-		if platformRows := h.buildGuestPlatformSwitchRows(state, token); len(platformRows) > 0 {
+		if platformRows := h.buildGuestPlatformSwitchRows(ctx, state, token); len(platformRows) > 0 {
 			rows = append(rows, platformRows...)
 		}
 		if strings.TrimSpace(state.searchFilterText) != "" {
@@ -267,7 +267,7 @@ func (h *GuestModeHandler) renderGuestSearchPage(ctx context.Context, state *sea
 	return bld.String(), &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func (h *GuestModeHandler) buildGuestPlatformSwitchRows(state *searchState, token string) [][]telego.InlineKeyboardButton {
+func (h *GuestModeHandler) buildGuestPlatformSwitchRows(ctx context.Context, state *searchState, token string) [][]telego.InlineKeyboardButton {
 	if h == nil || state == nil || h.SearchHandler == nil {
 		return nil
 	}
@@ -280,26 +280,17 @@ func (h *GuestModeHandler) buildGuestPlatformSwitchRows(state *searchState, toke
 		if state.unavailable != nil && state.unavailable[name] {
 			continue
 		}
-		displayName := platformDisplayName(h.PlatformManager, name)
-		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), displayName)
-		if name == state.platform {
-			text = "✅ " + displayName
-		}
-		buttons = append(buttons, telego.InlineKeyboardButton{Text: text, CallbackData: fmt.Sprintf("guest %s platform %s %d", token, name, state.requesterID)})
+		displayName := platformButtonName(ctx, h.PlatformManager, name)
+		buttons = append(buttons, newPlatformSwitchButton(
+			displayName,
+			fmt.Sprintf("guest %s platform %s %d", token, name, state.requesterID),
+			name == state.platform,
+		))
 	}
 	if len(buttons) <= 1 {
 		return nil
 	}
-	const maxButtonsPerRow = 3
-	rows := make([][]telego.InlineKeyboardButton, 0, (len(buttons)+maxButtonsPerRow-1)/maxButtonsPerRow)
-	for start := 0; start < len(buttons); start += maxButtonsPerRow {
-		end := start + maxButtonsPerRow
-		if end > len(buttons) {
-			end = len(buttons)
-		}
-		rows = append(rows, buttons[start:end])
-	}
-	return rows
+	return platformSwitchRowsFromButtons(buttons)
 }
 
 func (h *GuestModeHandler) editGuestInlineText(ctx context.Context, b *telego.Bot, inlineMessageID, text string, markup *telego.InlineKeyboardMarkup, parseMode string) error {
@@ -450,7 +441,7 @@ func (h *GuestSearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, 
 			}
 			if len(tracks) == 0 {
 				state.setUnavailable(state.platform, true)
-				text := tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(h.Guest.PlatformManager, state.platform)})
+				text := tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(ctx, h.Guest.PlatformManager, state.platform)})
 				_, keyboard := h.Guest.renderGuestSearchPage(ctx, state, token, 1)
 				_ = h.Guest.editGuestInlineText(ctx, b, query.InlineMessageID, text, keyboard, "")
 				_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "no_results")})

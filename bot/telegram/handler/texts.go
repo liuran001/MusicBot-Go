@@ -112,7 +112,7 @@ func buildAdminHelp(ctx context.Context, adminCommands []admincmd.Command) strin
 func buildPlatformBlock(ctx context.Context, manager platform.Manager) string {
 	label := mdV2Replacer.Replace(tr(ctx, "help_platform_label"))
 
-	rows, displays := platformAliasRows(manager)
+	rows, displays := platformAliasRows(ctx, manager)
 	if len(rows) == 0 {
 		// No registered platforms: keep the section useful with a static hint.
 		return label + "：`163` / `qq`\n"
@@ -151,7 +151,7 @@ func buildPlatformBlock(ctx context.Context, manager platform.Manager) string {
 // platformAliasRows returns one MarkdownV2-escaped "DisplayName: `a` / `b`" row
 // per registered platform (sorted by display name), plus the list of escaped
 // display names in the same order for building a summary.
-func platformAliasRows(manager platform.Manager) (rows []string, displays []string) {
+func platformAliasRows(ctx context.Context, manager platform.Manager) (rows []string, displays []string) {
 	if manager == nil {
 		return nil, nil
 	}
@@ -160,14 +160,8 @@ func platformAliasRows(manager platform.Manager) (rows []string, displays []stri
 		return nil, nil
 	}
 	sort.Slice(metaList, func(i, j int) bool {
-		left := strings.TrimSpace(metaList[i].DisplayName)
-		if left == "" {
-			left = strings.TrimSpace(metaList[i].Name)
-		}
-		right := strings.TrimSpace(metaList[j].DisplayName)
-		if right == "" {
-			right = strings.TrimSpace(metaList[j].Name)
-		}
+		left := platformDisplayName(ctx, manager, metaList[i].Name)
+		right := platformDisplayName(ctx, manager, metaList[j].Name)
 		if left == right {
 			return strings.TrimSpace(metaList[i].Name) < strings.TrimSpace(metaList[j].Name)
 		}
@@ -202,10 +196,7 @@ func platformAliasRows(manager platform.Manager) (rows []string, displays []stri
 		for i := range aliasItems {
 			aliasItems[i] = "`" + mdV2Replacer.Replace(aliasItems[i]) + "`"
 		}
-		display := strings.TrimSpace(meta.DisplayName)
-		if display == "" {
-			display = platformName
-		}
+		display := platformDisplayName(ctx, manager, platformName)
 		escDisplay := mdV2Replacer.Replace(display)
 		rows = append(rows, escDisplay+": "+strings.Join(aliasItems, " / "))
 		displays = append(displays, escDisplay)

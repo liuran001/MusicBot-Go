@@ -118,19 +118,39 @@ func TestNoUntranslatedValues(t *testing.T) {
 // intentionallyEnglish lists keys whose value is deliberately identical across
 // languages and must NOT be flagged as untranslated:
 //   - brand/product name (about_title)
+//   - platform brand names that are intentionally rendered in their common
+//     English/Latin form outside Chinese
 //   - the audio-quality technical term "Hi-Res" (kept verbatim everywhere)
 //   - the language selector's own-name labels (each language name is shown in
 //     its native script, so set_lang_name_en is "English" in every catalog)
 //   - proper nouns of Chinese music services with no localized Japanese form
 var intentionallyEnglish = map[string]bool{
-	"about_title":            true,
-	"cb_quality_hires":       true,
-	"set_quality_hires":      true,
-	"set_lang_name_en":       true,
-	"set_lang_name_zh":       true,
-	"set_lang_name_ja":       true,
-	"set_lang_name_ru":       true,
-	"help_default_platforms": true,
+	"about_title":                       true,
+	"cb_quality_hires":                  true,
+	"set_quality_hires":                 true,
+	"platform_name_amazonmusic":         true,
+	"platform_name_applemusic":          true,
+	"platform_name_bilibili":            true,
+	"platform_name_kugou":               true,
+	"platform_name_netease":             true,
+	"platform_name_qqmusic":             true,
+	"platform_name_soda":                true,
+	"platform_name_spotify":             true,
+	"platform_name_youtubemusic":        true,
+	"platform_button_name_amazonmusic":  true,
+	"platform_button_name_applemusic":   true,
+	"platform_button_name_bilibili":     true,
+	"platform_button_name_kugou":        true,
+	"platform_button_name_netease":      true,
+	"platform_button_name_qqmusic":      true,
+	"platform_button_name_soda":         true,
+	"platform_button_name_spotify":      true,
+	"platform_button_name_youtubemusic": true,
+	"set_lang_name_en":                  true,
+	"set_lang_name_zh":                  true,
+	"set_lang_name_ja":                  true,
+	"set_lang_name_ru":                  true,
+	"help_default_platforms":            true,
 }
 
 // hasMeaningfulLatin reports whether s contains a run of 2+ ASCII letters, which

@@ -1,6 +1,26 @@
 # Japanese catalog. Authored as PLAIN text; MarkdownV2 escaping happens at the
 # output boundary via Localizer.Tmd. Missing keys fall back to English.
 
+# --- platform names ---
+platform_name_netease = "NetEase Cloud Music"
+platform_name_qqmusic = "QQ Music"
+platform_name_kugou = "KuGou Music"
+platform_name_bilibili = "Bilibili"
+platform_name_soda = "Soda Music"
+platform_name_applemusic = "Apple Music"
+platform_name_spotify = "Spotify"
+platform_name_youtubemusic = "YouTube Music"
+platform_name_amazonmusic = "Amazon Music"
+platform_button_name_netease = "NetEase"
+platform_button_name_qqmusic = "QQ Music"
+platform_button_name_kugou = "KuGou"
+platform_button_name_bilibili = "Bilibili"
+platform_button_name_soda = "Soda"
+platform_button_name_applemusic = "Apple"
+platform_button_name_spotify = "Spotify"
+platform_button_name_youtubemusic = "YouTube"
+platform_button_name_amazonmusic = "Amazon"
+
 # --- status / progress ---
 hit_cache = "キャッシュヒット、送信中…"
 input_id_or_keyword = "曲の ID かキーワードを送信してください。/rmcache all で全キャッシュを削除できます"

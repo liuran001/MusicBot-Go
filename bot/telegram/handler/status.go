@@ -76,9 +76,9 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		sort.Strings(platformNames)
 		lines := make([]string, 0, len(platformNames))
 		for _, name := range platformNames {
-			display := mdV2Replacer.Replace(platformDisplayName(h.PlatformManager, name))
+			display := mdV2Replacer.Replace(platformDisplayName(ctx, h.PlatformManager, name))
 			if useHTML {
-				display = html.EscapeString(platformDisplayName(h.PlatformManager, name))
+				display = html.EscapeString(platformDisplayName(ctx, h.PlatformManager, name))
 			}
 			lines = append(lines, fmt.Sprintf("%s: %d", display, platformCounts[name]))
 		}
@@ -94,7 +94,7 @@ func (h *StatusHandler) Handle(ctx context.Context, b *telego.Bot, update *teleg
 		if len(platforms) > 0 {
 			displayNames := make([]string, 0, len(platforms))
 			for _, name := range platforms {
-				displayNames = append(displayNames, platformDisplayName(h.PlatformManager, name))
+				displayNames = append(displayNames, platformDisplayName(ctx, h.PlatformManager, name))
 			}
 			platformsEscaped := mdV2Replacer.Replace(strings.Join(displayNames, " / "))
 			if useHTML {
@@ -149,14 +149,12 @@ func (h *StatusHandler) buildAccountStatusSection(ctx context.Context, detailed 
 		if err != nil {
 			statuses = append(statuses, platform.AccountStatus{
 				Platform:    name,
-				DisplayName: platformDisplayName(h.PlatformManager, name),
+				DisplayName: platformDisplayName(ctx, h.PlatformManager, name),
 				Summary:     tr(ctx, "status_check_failed"),
 			})
 			continue
 		}
-		if strings.TrimSpace(status.DisplayName) == "" {
-			status.DisplayName = platformDisplayName(h.PlatformManager, name)
-		}
+		status.DisplayName = platformDisplayName(ctx, h.PlatformManager, name)
 		statuses = append(statuses, status)
 	}
 	if len(statuses) == 0 {

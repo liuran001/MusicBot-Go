@@ -165,7 +165,7 @@ func (h *PlaylistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *
 		qualityValue = resolvePlatformQualityValue(ctx, h.Repo, scopeType, scopeID, platformName, qualityValue, false)
 	}
 	platformEmoji := platformEmoji(h.PlatformManager, platformName)
-	displayName := platformDisplayName(h.PlatformManager, platformName)
+	displayName := platformDisplayName(ctx, h.PlatformManager, platformName)
 	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji, mdV2Replacer.Replace(displayName), collectionLabel)
 	textHeader += formatPlaylistInfo(ctx, playlist, collectionLabel)
 	pageText, keyboard := h.buildPlaylistPage(ctx, pageTracks, effectiveTotal, pageOffset, platformName, qualityValue, requesterID, msgResult.MessageID, 1)
@@ -320,7 +320,7 @@ func (h *PlaylistCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 	}
 
 	manager := h.Playlist.PlatformManager
-	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)), collectionLabel)
+	textHeader := fmt.Sprintf("%s *%s* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(ctx, manager, state.platform)), collectionLabel)
 	textHeader += formatPlaylistInfo(ctx, &state.playlist, collectionLabel)
 	pageText, keyboard := h.Playlist.buildPlaylistPage(ctx, pageTracks, effectiveTotal, pageOffset, state.platform, state.quality, state.requesterID, messageID, page)
 	text := textHeader + pageText

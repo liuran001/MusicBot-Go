@@ -1457,7 +1457,7 @@ func parseInlineCollectionResultID(resultID string) (platformName, collectionID,
 }
 
 func formatInfoTags(ctx context.Context, manager platform.Manager, platformName, quality, fileExt string) []string {
-	tags := []string{"#" + platformTag(manager, platformName)}
+	tags := []string{"#" + platformTag(ctx, manager, platformName)}
 	if qt := qualityTag(ctx, quality); qt != "" {
 		tags = append(tags, "#"+qt)
 	}
@@ -1515,7 +1515,10 @@ func platformEmoji(manager platform.Manager, platformName string) string {
 	return "🎵"
 }
 
-func platformDisplayName(manager platform.Manager, platformName string) string {
+func platformDisplayName(ctx context.Context, manager platform.Manager, platformName string) string {
+	if localized := localizedPlatformName(ctx, manager, platformName, "platform_name_"); localized != "" {
+		return localized
+	}
 	meta := resolvePlatformMeta(manager, platformName)
 	if strings.TrimSpace(meta.DisplayName) != "" {
 		return meta.DisplayName
@@ -1523,8 +1526,30 @@ func platformDisplayName(manager platform.Manager, platformName string) string {
 	return platformName
 }
 
-func platformTag(manager platform.Manager, platformName string) string {
-	display := strings.TrimSpace(platformDisplayName(manager, platformName))
+func platformButtonName(ctx context.Context, manager platform.Manager, platformName string) string {
+	if localized := localizedPlatformName(ctx, manager, platformName, "platform_button_name_"); localized != "" {
+		return localized
+	}
+	return platformDisplayName(ctx, manager, platformName)
+}
+
+func localizedPlatformName(ctx context.Context, manager platform.Manager, platformName, keyPrefix string) string {
+	meta := resolvePlatformMeta(manager, platformName)
+	canonicalName := strings.ToLower(strings.TrimSpace(meta.Name))
+	if canonicalName == "" {
+		canonicalName = strings.ToLower(strings.TrimSpace(platformName))
+	}
+	if canonicalName != "" {
+		messageID := keyPrefix + canonicalName
+		if localized := strings.TrimSpace(tr(ctx, messageID)); localized != "" && localized != messageID {
+			return localized
+		}
+	}
+	return ""
+}
+
+func platformTag(ctx context.Context, manager platform.Manager, platformName string) string {
+	display := strings.TrimSpace(platformDisplayName(ctx, manager, platformName))
 	if display == "" {
 		return "music"
 	}

@@ -57,7 +57,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 	case "sign":
 		signer, ok := plat.(platform.SignInProvider)
 		if !ok {
-			return &admincmd.Response{Text: tr(ctx, "adm_sign_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)})}, nil
+			return &admincmd.Response{Text: tr(ctx, "adm_sign_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})}, nil
 		}
 		message, err := signer.SignIn(ctx)
 		if err != nil {
@@ -65,7 +65,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 		}
 		message = strings.TrimSpace(message)
 		if message == "" {
-			message = tr(ctx, "adm_sign_done", map[string]any{"Platform": platformDisplayName(manager, platformName)})
+			message = tr(ctx, "adm_sign_done", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})
 		}
 		return &admincmd.Response{Text: sanitizeSensitiveText(message)}, nil
 	case "renew":
@@ -74,7 +74,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 			return nil, err
 		}
 		if strings.TrimSpace(message) == "" {
-			message = tr(ctx, "adm_renew_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)})
+			message = tr(ctx, "adm_renew_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})
 		}
 		return &admincmd.Response{Text: message}, nil
 	case "check":
@@ -83,7 +83,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 			return nil, err
 		}
 		if strings.TrimSpace(message) == "" {
-			message = tr(ctx, "adm_check_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)})
+			message = tr(ctx, "adm_check_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})
 		}
 		return &admincmd.Response{Text: message}, nil
 	case "auto":
@@ -95,7 +95,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 	case "lang", "language":
 		provider, ok := plat.(platform.LanguageProvider)
 		if !ok {
-			return &admincmd.Response{Text: tr(ctx, "adm_lang_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)})}, nil
+			return &admincmd.Response{Text: tr(ctx, "adm_lang_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})}, nil
 		}
 		if strings.TrimSpace(payload) == "" {
 			message, err := provider.ShowLanguage(ctx)
@@ -112,7 +112,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 	case "cookie":
 		importer, ok := plat.(platform.CookieImporter)
 		if !ok {
-			return &admincmd.Response{Text: tr(ctx, "adm_cookie_import_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)})}, nil
+			return &admincmd.Response{Text: tr(ctx, "adm_cookie_import_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})}, nil
 		}
 		if strings.TrimSpace(payload) == "" {
 			return &admincmd.Response{Text: tr(ctx, "adm_cookie_usage", map[string]any{"Platform": platformName})}, nil
@@ -129,7 +129,7 @@ func handleAccountLogin(ctx context.Context, manager platform.Manager, args stri
 	case "qr":
 		provider, ok := plat.(platform.QRLoginProvider)
 		if !ok {
-			return &admincmd.Response{Text: tr(ctx, "adm_qr_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)})}, nil
+			return &admincmd.Response{Text: tr(ctx, "adm_qr_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})}, nil
 		}
 		session, err := provider.StartQRLogin(ctx)
 		if err != nil {
@@ -212,7 +212,7 @@ func handleGlobalLoginActions(ctx context.Context, manager platform.Manager, arg
 			}
 			signer, ok := plat.(platform.SignInProvider)
 			if !ok {
-				return tr(ctx, "adm_sign_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)}), true, nil
+				return tr(ctx, "adm_sign_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)}), true, nil
 			}
 			text, err := signer.SignIn(ctx)
 			if err != nil {
@@ -220,7 +220,7 @@ func handleGlobalLoginActions(ctx context.Context, manager platform.Manager, arg
 			}
 			text = strings.TrimSpace(text)
 			if text == "" {
-				text = tr(ctx, "adm_sign_done", map[string]any{"Platform": platformDisplayName(manager, platformName)})
+				text = tr(ctx, "adm_sign_done", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)})
 			}
 			return sanitizeSensitiveText(text), true, nil
 		}
@@ -366,7 +366,7 @@ func buildPlatformLoginHelp(ctx context.Context, manager platform.Manager, plat 
 		examples = append(examples, fmt.Sprintf("/login %s lang", name), fmt.Sprintf("/login %s lang <%s>", name, tr(ctx, "adm_lang_arg")))
 	}
 	return tr(ctx, "adm_login_help", map[string]any{
-		"Platform": platformDisplayName(manager, name),
+		"Platform": platformDisplayName(ctx, manager, name),
 		"Methods":  strings.Join(methods, ", "),
 		"Examples": strings.Join(examples, "\n"),
 	})
@@ -401,7 +401,7 @@ func handlePlatformAutoRenew(ctx context.Context, manager platform.Manager, plat
 	plat := manager.Get(platformName)
 	autoRenewer, ok := plat.(platform.AutoRenewer)
 	if !ok {
-		return tr(ctx, "adm_auto_unsupported", map[string]any{"Platform": platformDisplayName(manager, platformName)}), nil
+		return tr(ctx, "adm_auto_unsupported", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName)}), nil
 	}
 	fields := strings.Fields(strings.TrimSpace(payload))
 	if len(fields) == 0 || strings.EqualFold(fields[0], "status") {
@@ -426,13 +426,13 @@ func handlePlatformAutoRenew(ctx context.Context, manager platform.Manager, plat
 		if err != nil {
 			return "", err
 		}
-		return tr(ctx, "adm_auto_on", map[string]any{"Platform": platformDisplayName(manager, platformName), "Seconds": int(status.Interval / time.Second)}), nil
+		return tr(ctx, "adm_auto_on", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName), "Seconds": int(status.Interval / time.Second)}), nil
 	case "off":
 		status, err := autoRenewer.SetAutoRenew(ctx, false, 0)
 		if err != nil {
 			return "", err
 		}
-		return tr(ctx, "adm_auto_off", map[string]any{"Platform": platformDisplayName(manager, platformName), "Seconds": int(status.Interval / time.Second)}), nil
+		return tr(ctx, "adm_auto_off", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName), "Seconds": int(status.Interval / time.Second)}), nil
 	default:
 		return tr(ctx, "adm_auto_usage_platform", map[string]any{"Platform": platformName}), nil
 	}
@@ -465,7 +465,7 @@ func handleAllPlatformAutoRenew(ctx context.Context, manager platform.Manager, p
 			status, err := autoRenewer.GetAutoRenewStatus(ctx)
 			if err != nil {
 				failures++
-				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(ctx, manager, name), sanitizeSensitiveText(err.Error())))
 				continue
 			}
 			lines = append(lines, formatAutoRenewStatus(ctx, manager, name, status))
@@ -481,18 +481,18 @@ func handleAllPlatformAutoRenew(ctx context.Context, manager platform.Manager, p
 			status, err := autoRenewer.SetAutoRenew(ctx, true, interval)
 			if err != nil {
 				failures++
-				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(ctx, manager, name), sanitizeSensitiveText(err.Error())))
 				continue
 			}
-			lines = append(lines, tr(ctx, "adm_auto_on_batch", map[string]any{"Platform": platformDisplayName(manager, name), "Seconds": int(status.Interval / time.Second)}))
+			lines = append(lines, tr(ctx, "adm_auto_on_batch", map[string]any{"Platform": platformDisplayName(ctx, manager, name), "Seconds": int(status.Interval / time.Second)}))
 		case "off":
 			status, err := autoRenewer.SetAutoRenew(ctx, false, 0)
 			if err != nil {
 				failures++
-				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(manager, name), sanitizeSensitiveText(err.Error())))
+				lines = append(lines, fmt.Sprintf("❌ %s: %s", platformDisplayName(ctx, manager, name), sanitizeSensitiveText(err.Error())))
 				continue
 			}
-			lines = append(lines, tr(ctx, "adm_auto_off_batch", map[string]any{"Platform": platformDisplayName(manager, name), "Seconds": int(status.Interval / time.Second)}))
+			lines = append(lines, tr(ctx, "adm_auto_off_batch", map[string]any{"Platform": platformDisplayName(ctx, manager, name), "Seconds": int(status.Interval / time.Second)}))
 		default:
 			return tr(ctx, "adm_auto_usage_batch"), nil
 		}
@@ -511,7 +511,7 @@ func formatAutoRenewStatus(ctx context.Context, manager platform.Manager, platfo
 	if status.Enabled {
 		state = tr(ctx, "adm_auto_state_on")
 	}
-	return tr(ctx, "adm_auto_status", map[string]any{"Platform": platformDisplayName(manager, platformName), "State": state, "Seconds": int(status.Interval / time.Second)})
+	return tr(ctx, "adm_auto_status", map[string]any{"Platform": platformDisplayName(ctx, manager, platformName), "State": state, "Seconds": int(status.Interval / time.Second)})
 }
 
 func parsePositiveSeconds(raw string) (int, error) {

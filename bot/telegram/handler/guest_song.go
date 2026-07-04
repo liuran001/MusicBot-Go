@@ -233,7 +233,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 		token := h.guestSearchStore().store(state)
 		text := tr(ctx, "no_results")
 		if state.platform != "" {
-			text = tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(h.PlatformManager, state.platform)})
+			text = tr(ctx, "guest_no_results_platform", map[string]any{"Platform": platformDisplayName(ctx, h.PlatformManager, state.platform)})
 		}
 		_, keyboard := h.renderGuestSearchPage(ctx, state, token, 1)
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, text, keyboard, "")

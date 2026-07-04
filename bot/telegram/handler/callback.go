@@ -784,7 +784,7 @@ func buildInlineEpisodePickerPage(ctx context.Context, platformName, trackID, qu
 	}
 	visible := episodes[start:end]
 	textLines := make([]string, 0, len(visible)+8)
-	textLines = append(textLines, fmt.Sprintf("%s *%s* %s", platformEmoji(nil, platformName), mdV2Replacer.Replace(platformDisplayName(nil, platformName)), tr(ctx, "cb_episodes_label")), "")
+	textLines = append(textLines, fmt.Sprintf("%s *%s* %s", platformEmoji(nil, platformName), mdV2Replacer.Replace(platformDisplayName(ctx, nil, platformName)), tr(ctx, "cb_episodes_label")), "")
 	textLines = append(textLines, buildEpisodeHeaderLines(ctx, episodes)...)
 	textLines = append(textLines, tr(ctx, "cb_page_of", map[string]any{"Page": page, "Total": totalPages}), "")
 	for _, ep := range visible {

@@ -104,7 +104,7 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 		qualityValue = settings.DefaultQuality
 	}
 	platformEmoji := h.getPlatformEmoji(platformName)
-	sb.WriteString(fmt.Sprintf("🎵 %s：%s %s\n", tr(ctx, "set_platform_label"), platformEmoji, h.getPlatformDisplayName(platformName)))
+	sb.WriteString(fmt.Sprintf("🎵 %s：%s %s\n", tr(ctx, "set_platform_label"), platformEmoji, h.getPlatformDisplayName(ctx, platformName)))
 
 	qualityEmoji := h.getQualityEmoji(qualityValue)
 	sb.WriteString(fmt.Sprintf("🎧 %s：%s %s\n", tr(ctx, "set_quality_label"), qualityEmoji, h.getQualityDisplayName(ctx, qualityValue)))
@@ -153,7 +153,7 @@ func (h *SettingsHandler) buildSettingsText(ctx context.Context, chatType string
 		sb.WriteString("\n💡 " + tr(ctx, "set_available_platforms") + "\n")
 		var platformNames []string
 		for _, p := range platforms {
-			platformNames = append(platformNames, h.getPlatformDisplayName(p))
+			platformNames = append(platformNames, h.getPlatformDisplayName(ctx, p))
 		}
 		sb.WriteString(strings.Join(platformNames, " / "))
 		sb.WriteString("\n")
@@ -187,7 +187,7 @@ func (h *SettingsHandler) buildSettingsKeyboard(ctx context.Context, chatType st
 	if len(platforms) > 1 {
 		var platformButtons []telego.InlineKeyboardButton
 		for _, p := range platforms {
-			displayName := h.getPlatformDisplayName(p)
+			displayName := h.getPlatformDisplayName(ctx, p)
 			callbackData := fmt.Sprintf("settings platform %s", p)
 
 			text := displayName
@@ -521,8 +521,8 @@ func (h *SettingsHandler) getPlatformEmoji(platform string) string {
 	return platformEmoji(h.PlatformManager, platform)
 }
 
-func (h *SettingsHandler) getPlatformDisplayName(platform string) string {
-	return platformDisplayName(h.PlatformManager, platform)
+func (h *SettingsHandler) getPlatformDisplayName(ctx context.Context, platform string) string {
+	return platformDisplayName(ctx, h.PlatformManager, platform)
 }
 
 func (h *SettingsHandler) getQualityEmoji(quality string) string {
@@ -722,12 +722,12 @@ func (h *SettingsCallbackHandler) Handle(ctx context.Context, b *telego.Bot, upd
 				if groupSettings != nil && groupSettings.DefaultPlatform != settingValue {
 					groupSettings.DefaultPlatform = settingValue
 					changed = true
-					responseText = "✅ " + tr(ctx, "set_resp_platform_switched", map[string]any{"Name": h.SettingsHandler.getPlatformDisplayName(settingValue)})
+					responseText = "✅ " + tr(ctx, "set_resp_platform_switched", map[string]any{"Name": h.SettingsHandler.getPlatformDisplayName(ctx, settingValue)})
 				}
 			} else if settings != nil && settings.DefaultPlatform != settingValue {
 				settings.DefaultPlatform = settingValue
 				changed = true
-				responseText = "✅ " + tr(ctx, "set_resp_platform_switched", map[string]any{"Name": h.SettingsHandler.getPlatformDisplayName(settingValue)})
+				responseText = "✅ " + tr(ctx, "set_resp_platform_switched", map[string]any{"Name": h.SettingsHandler.getPlatformDisplayName(ctx, settingValue)})
 			}
 		}
 

@@ -120,7 +120,7 @@ func formatArtistMessage(ctx context.Context, manager platform.Manager, platform
 	if name == "" {
 		name = tr(ctx, "guest_artist_unknown")
 	}
-	platformText := platformDisplayName(manager, platformName)
+	platformText := platformDisplayName(ctx, manager, platformName)
 	var lines []string
 	lines = append(lines, fmt.Sprintf("%s %s", platformEmoji(manager, platformName), tr(ctx, "guest_artist_info")))
 	lines = append(lines, tr(ctx, "guest_artist_platform_label", map[string]any{"Platform": platformText}))

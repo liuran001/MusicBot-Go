@@ -2,6 +2,26 @@
 # Authored as PLAIN text. MarkdownV2 escaping happens at the output boundary
 # (Localizer.Tmd), so do NOT hand-escape reserved characters here.
 
+# --- 平台名称 ---
+platform_name_netease = "网易云音乐"
+platform_name_qqmusic = "QQ音乐"
+platform_name_kugou = "酷狗音乐"
+platform_name_bilibili = "哔哩哔哩"
+platform_name_soda = "汽水音乐"
+platform_name_applemusic = "Apple Music"
+platform_name_spotify = "Spotify"
+platform_name_youtubemusic = "YouTube Music"
+platform_name_amazonmusic = "Amazon Music"
+platform_button_name_netease = "网易云"
+platform_button_name_qqmusic = "QQ音乐"
+platform_button_name_kugou = "酷狗"
+platform_button_name_bilibili = "B站"
+platform_button_name_soda = "汽水"
+platform_button_name_applemusic = "Apple"
+platform_button_name_spotify = "Spotify"
+platform_button_name_youtubemusic = "YouTube"
+platform_button_name_amazonmusic = "Amazon"
+
 # --- status / progress (texts.go package vars) ---
 hit_cache = "已命中缓存，正在发送…"
 input_id_or_keyword = "请发送歌曲 ID 或关键词，或使用 /rmcache all 清空全部缓存"

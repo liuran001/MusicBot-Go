@@ -327,7 +327,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	var textMessage strings.Builder
 
 	platformEmoji := platformEmoji(h.PlatformManager, platformName)
-	displayName := platformDisplayName(h.PlatformManager, platformName)
+	displayName := platformDisplayName(ctx, h.PlatformManager, platformName)
 
 	if usedFallback {
 		textMessage.WriteString(tr(ctx, "srch_fallback_switched", map[string]any{"Name": displayName}))
@@ -559,7 +559,7 @@ func (h *SearchCallbackHandler) Handle(ctx context.Context, b *telego.Bot, updat
 		hasMore = state.hasMore(state.platform)
 	}
 	manager := h.Search.PlatformManager
-	textHeader := fmt.Sprintf("%s *%s* %s\n\\* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(manager, state.platform)), trMd(ctx, "srch_results"), trMd(ctx, "srch_pick_number_hint"))
+	textHeader := fmt.Sprintf("%s *%s* %s\n\\* %s\n\n", platformEmoji(manager, state.platform), mdV2Replacer.Replace(platformDisplayName(ctx, manager, state.platform)), trMd(ctx, "srch_results"), trMd(ctx, "srch_pick_number_hint"))
 	pageText, keyboard := h.Search.buildSearchPage(ctx, tracks, state.platform, state.keyword, state.quality, state.requesterID, messageID, page, state.unavailable, hasMore, state.limit, state.biliFilter, state.searchFilterText, state.resultAction())
 	text := textHeader + pageText
 	disablePreview := true
@@ -797,7 +797,7 @@ func (h *SearchHandler) buildSearchPage(ctx context.Context, tracks []platform.T
 		rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "srch_close"), CallbackData: fmt.Sprintf("search %d close %d", messageID, requesterID)}})
 	}
 
-	if switchRows := h.buildPlatformSwitchRows(platformName, requesterID, messageID, unavailable); len(switchRows) > 0 {
+	if switchRows := h.buildPlatformSwitchRows(ctx, platformName, requesterID, messageID, unavailable); len(switchRows) > 0 {
 		rows = append(rows, switchRows...)
 	}
 
@@ -826,17 +826,17 @@ func (h *SearchHandler) buildNoResultsPage(ctx context.Context, state *searchSta
 	}
 	text := tr(ctx, "no_results")
 	if state.platform != "" {
-		text = tr(ctx, "srch_no_results_platform", map[string]any{"Platform": platformDisplayName(h.PlatformManager, state.platform)})
+		text = tr(ctx, "srch_no_results_platform", map[string]any{"Platform": platformDisplayName(ctx, h.PlatformManager, state.platform)})
 	}
 	rows := make([][]telego.InlineKeyboardButton, 0, 2)
-	if switchRows := h.buildPlatformSwitchRows(state.platform, state.requesterID, messageID, state.unavailable); len(switchRows) > 0 {
+	if switchRows := h.buildPlatformSwitchRows(ctx, state.platform, state.requesterID, messageID, state.unavailable); len(switchRows) > 0 {
 		rows = append(rows, switchRows...)
 	}
 	rows = append(rows, []telego.InlineKeyboardButton{{Text: tr(ctx, "srch_close"), CallbackData: fmt.Sprintf("search %d close %d", messageID, state.requesterID)}})
 	return text, &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func (h *SearchHandler) buildPlatformSwitchRows(currentPlatform string, requesterID int64, messageID int, unavailable map[string]bool) [][]telego.InlineKeyboardButton {
+func (h *SearchHandler) buildPlatformSwitchRows(ctx context.Context, currentPlatform string, requesterID int64, messageID int, unavailable map[string]bool) [][]telego.InlineKeyboardButton {
 	platforms := h.searchPlatforms()
 	if len(platforms) <= 1 {
 		return nil
@@ -846,29 +846,61 @@ func (h *SearchHandler) buildPlatformSwitchRows(currentPlatform string, requeste
 		if unavailable != nil && unavailable[name] {
 			continue
 		}
-		displayName := platformDisplayName(h.PlatformManager, name)
-		text := fmt.Sprintf("%s %s", platformEmoji(h.PlatformManager, name), displayName)
-		if name == currentPlatform {
-			text = "✅ " + displayName
-		}
-		buttons = append(buttons, telego.InlineKeyboardButton{
-			Text:         text,
-			CallbackData: fmt.Sprintf("search %d platform %s %d", messageID, name, requesterID),
-		})
+		displayName := platformButtonName(ctx, h.PlatformManager, name)
+		buttons = append(buttons, newPlatformSwitchButton(
+			displayName,
+			fmt.Sprintf("search %d platform %s %d", messageID, name, requesterID),
+			name == currentPlatform,
+		))
 	}
 	if len(buttons) <= 1 {
 		return nil
 	}
+	return platformSwitchRowsFromButtons(buttons)
+}
+
+func platformSwitchRowsFromButtons(buttons []telego.InlineKeyboardButton) [][]telego.InlineKeyboardButton {
 	const maxButtonsPerRow = 3
 	rows := make([][]telego.InlineKeyboardButton, 0, (len(buttons)+maxButtonsPerRow-1)/maxButtonsPerRow)
-	for start := 0; start < len(buttons); start += maxButtonsPerRow {
-		end := start + maxButtonsPerRow
-		if end > len(buttons) {
-			end = len(buttons)
+	for start := 0; start < len(buttons); {
+		rowWidth := 0
+		end := start
+		for end < len(buttons) && end-start < maxButtonsPerRow {
+			width := platformButtonTextWidth(buttons[end].Text)
+			if end > start && rowWidth+width > 24 {
+				break
+			}
+			rowWidth += width
+			end++
 		}
 		rows = append(rows, buttons[start:end])
+		start = end
 	}
 	return rows
+}
+
+func platformButtonTextWidth(text string) int {
+	width := 0
+	for _, r := range text {
+		if r > 0x7f {
+			width += 2
+		} else {
+			width++
+		}
+	}
+	return width
+}
+
+func newPlatformSwitchButton(text, callbackData string, current bool) telego.InlineKeyboardButton {
+	style := telego.ButtonStylePrimary
+	if current {
+		style = telego.ButtonStyleSuccess
+	}
+	return telego.InlineKeyboardButton{
+		Text:         text,
+		Style:        style,
+		CallbackData: callbackData,
+	}
 }
 
 func (h *SearchHandler) searchPlatforms() []string {

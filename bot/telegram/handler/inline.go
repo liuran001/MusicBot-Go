@@ -133,11 +133,11 @@ func (h *InlineSearchHandler) inlineCollection(ctx context.Context, b *telego.Bo
 	if title == "" {
 		title = collectionLabel
 	}
-	desc := fmt.Sprintf("%s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel)
+	desc := fmt.Sprintf("%s · %s", platformDisplayName(ctx, h.PlatformManager, platformName), collectionLabel)
 	if playlist.TrackCount > 0 {
-		desc = fmt.Sprintf("%s · %s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel, tr(ctx, "cb_track_count", map[string]any{"Count": playlist.TrackCount}))
+		desc = fmt.Sprintf("%s · %s · %s", platformDisplayName(ctx, h.PlatformManager, platformName), collectionLabel, tr(ctx, "cb_track_count", map[string]any{"Count": playlist.TrackCount}))
 	} else if len(playlist.Tracks) > 0 {
-		desc = fmt.Sprintf("%s · %s · %s", platformDisplayName(h.PlatformManager, platformName), collectionLabel, tr(ctx, "cb_track_count", map[string]any{"Count": len(playlist.Tracks)}))
+		desc = fmt.Sprintf("%s · %s · %s", platformDisplayName(ctx, h.PlatformManager, platformName), collectionLabel, tr(ctx, "cb_track_count", map[string]any{"Count": len(playlist.Tracks)}))
 	}
 	thumb := buildInlineThumbnailURL(platformName, strings.TrimSpace(playlist.CoverURL), 150)
 	collectionArticle := &telego.InlineQueryResultArticle{
@@ -243,13 +243,13 @@ func (h *InlineSearchHandler) inlineEmpty(ctx context.Context, b *telego.Bot, qu
 func (h *InlineSearchHandler) inlineHelp(ctx context.Context, b *telego.Bot, query *telego.InlineQuery) {
 	platformName := h.resolveDefaultPlatform(ctx, query.From.ID)
 	qualityValue := h.resolveDefaultQuality(ctx, query.From.ID)
-	settingTitle := tr(ctx, "cb_setting_title", map[string]any{"Platform": platformDisplayName(h.PlatformManager, platformName), "Quality": qualityDisplayName(ctx, qualityValue)})
+	settingTitle := tr(ctx, "cb_setting_title", map[string]any{"Platform": platformDisplayName(ctx, h.PlatformManager, platformName), "Quality": qualityDisplayName(ctx, qualityValue)})
 	settingCard := &telego.InlineQueryResultArticle{
 		Type:                telego.ResultTypeArticle,
 		ID:                  inlineStableID("help_settings", fmt.Sprintf("%d|%s|%s", query.From.ID, platformName, qualityValue)),
 		Title:               settingTitle,
 		Description:         tr(ctx, "cb_tap_edit_settings"),
-		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "cb_settings_message", map[string]any{"Platform": platformDisplayName(h.PlatformManager, platformName), "Quality": qualityDisplayName(ctx, qualityValue)})},
+		InputMessageContent: &telego.InputTextMessageContent{MessageText: tr(ctx, "cb_settings_message", map[string]any{"Platform": platformDisplayName(ctx, h.PlatformManager, platformName), "Quality": qualityDisplayName(ctx, qualityValue)})},
 		ReplyMarkup:         buildInlineSettingsKeyboard(ctx, h.BotName),
 	}
 	randomCard := h.buildInlineRandomCard(ctx, query.From.ID, query.From.ID)
@@ -496,7 +496,7 @@ func (h *InlineSearchHandler) inlineCommand(ctx context.Context, b *telego.Bot, 
 }
 
 func buildInlineSearchHeader(ctx context.Context, h *InlineSearchHandler, platformName, qualityValue string) telego.InlineQueryResult {
-	platformText := platformDisplayName(h.PlatformManager, platformName)
+	platformText := platformDisplayName(ctx, h.PlatformManager, platformName)
 	if strings.TrimSpace(platformText) == "" {
 		platformText = platformName
 	}
