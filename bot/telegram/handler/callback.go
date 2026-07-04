@@ -119,7 +119,7 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		}
 		accepted := true
 		if h.Music != nil {
-			accepted = h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
+			accepted = h.Music.dispatch(withSuppressDownloadRejectedMessage(withDisableFallback(withForceNonSilent(ctx))), b, msgToUse, platformName, trackID, qualityOverride)
 		}
 		if !accepted {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "err_download_overloaded"), ShowAlert: true})
@@ -152,7 +152,7 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 	autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
 	accepted := true
 	if h.Music != nil {
-		accepted = h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
+		accepted = h.Music.dispatch(withSuppressDownloadRejectedMessage(withDisableFallback(withForceNonSilent(ctx))), b, msgToUse, platformName, trackID, qualityOverride)
 	}
 	if !accepted {
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "err_download_overloaded"), ShowAlert: true})

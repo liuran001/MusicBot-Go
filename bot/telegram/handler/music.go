@@ -34,6 +34,7 @@ type musicDispatchContextKey string
 const forceNonSilentKey musicDispatchContextKey = "force_non_silent"
 const disableFallbackKey musicDispatchContextKey = "disable_fallback"
 const downloadWorkAdmissionKey musicDispatchContextKey = "download_work_admission"
+const suppressDownloadRejectedMessageKey musicDispatchContextKey = "suppress_download_rejected_message"
 
 const downloadProgressMinInterval = 2 * time.Second
 const defaultMusicProcessTimeout = 15 * time.Minute
@@ -86,6 +87,21 @@ func hasDownloadWorkAdmission(ctx context.Context) bool {
 		return false
 	}
 	value, ok := ctx.Value(downloadWorkAdmissionKey).(bool)
+	return ok && value
+}
+
+func withSuppressDownloadRejectedMessage(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, suppressDownloadRejectedMessageKey, true)
+}
+
+func suppressDownloadRejectedMessage(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, ok := ctx.Value(suppressDownloadRejectedMessageKey).(bool)
 	return ok && value
 }
 
@@ -529,7 +545,9 @@ func (h *MusicHandler) dispatch(ctx context.Context, b *telego.Bot, message *tel
 	userID, chatID := downloadRequestIdentity(message)
 	releaseAdmission, admitted := h.enterDownloadWork(userID, chatID)
 	if !admitted {
-		h.notifyDownloadRejected(ctx, b, message, errDownloadQueueOverloaded)
+		if !suppressDownloadRejectedMessage(ctx) {
+			h.notifyDownloadRejected(ctx, b, message, errDownloadQueueOverloaded)
+		}
 		return false
 	}
 
