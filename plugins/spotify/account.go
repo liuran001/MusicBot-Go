@@ -41,7 +41,7 @@ func (p *SpotifyPlatform) AccountStatus(ctx context.Context) (platform.AccountSt
 	if p.client.hasClientCredentials() {
 		lines = append(lines, "- Web API: 已配置 client credentials")
 	} else {
-		lines = append(lines, "- Web API: 未配置 client credentials（直链元数据走 sp_dc fallback）")
+		lines = append(lines, "- Web API: 未配置 client credentials（元数据和歌词走 sp_dc fallback）")
 	}
 
 	src, ok := p.native.(spotifyAudioProbeSource)

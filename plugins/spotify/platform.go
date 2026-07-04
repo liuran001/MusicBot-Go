@@ -38,14 +38,14 @@ func (p *SpotifyPlatform) SupportsDownload() bool {
 	return p != nil && p.native != nil
 }
 func (p *SpotifyPlatform) SupportsSearch() bool      { return true }
-func (p *SpotifyPlatform) SupportsLyrics() bool      { return false }
+func (p *SpotifyPlatform) SupportsLyrics() bool      { return true }
 func (p *SpotifyPlatform) SupportsRecognition() bool { return false }
 
 func (p *SpotifyPlatform) Capabilities() platform.Capabilities {
 	return platform.Capabilities{
 		Download:    p.SupportsDownload(),
 		Search:      true,
-		Lyrics:      false,
+		Lyrics:      true,
 		Recognition: false,
 		HiRes:       false,
 	}
@@ -75,7 +75,10 @@ func (p *SpotifyPlatform) Search(ctx context.Context, query string, limit int) (
 }
 
 func (p *SpotifyPlatform) GetLyrics(ctx context.Context, trackID string) (*platform.Lyrics, error) {
-	return nil, platform.NewUnsupportedError(platformName, "lyrics")
+	if p == nil || p.client == nil {
+		return nil, platform.NewUnavailableError(platformName, "lyrics", trackID)
+	}
+	return p.client.GetLyrics(ctx, trackID)
 }
 
 func (p *SpotifyPlatform) RecognizeAudio(ctx context.Context, audioData io.Reader) (*platform.Track, error) {

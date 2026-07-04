@@ -73,6 +73,18 @@ type spotifyPlaylist struct {
 	} `json:"tracks"`
 }
 
+type spotifyLyricsResponse struct {
+	Lyrics struct {
+		SyncType string              `json:"syncType"`
+		Lines    []spotifyLyricsLine `json:"lines"`
+	} `json:"lyrics"`
+}
+
+type spotifyLyricsLine struct {
+	StartTimeMs string `json:"startTimeMs"`
+	Words       string `json:"words"`
+}
+
 type pathfinderArtist struct {
 	ID      string `json:"id"`
 	URI     string `json:"uri"`
