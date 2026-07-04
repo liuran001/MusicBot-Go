@@ -92,6 +92,9 @@ type pathfinderTrack struct {
 	SharingInfo struct {
 		ShareURL string `json:"shareUrl"`
 	} `json:"sharingInfo"`
+	Artists struct {
+		Items []pathfinderArtist `json:"items"`
+	} `json:"artists"`
 	FirstArtist struct {
 		Items []pathfinderArtist `json:"items"`
 	} `json:"firstArtist"`
@@ -122,6 +125,22 @@ type pathfinderTrack struct {
 type pathfinderTrackResponse struct {
 	Data struct {
 		Track pathfinderTrack `json:"trackUnion"`
+	} `json:"data"`
+	Errors []struct{} `json:"errors"`
+}
+
+type pathfinderSearchResponse struct {
+	Data struct {
+		SearchV2 struct {
+			TracksV2 struct {
+				Items []struct {
+					Item struct {
+						Data pathfinderTrack `json:"data"`
+					} `json:"item"`
+				} `json:"items"`
+				TotalCount int `json:"totalCount"`
+			} `json:"tracksV2"`
+		} `json:"searchV2"`
 	} `json:"data"`
 	Errors []struct{} `json:"errors"`
 }

@@ -47,6 +47,9 @@ func convertTrack(t spotifyTrack) platform.Track {
 func convertPathfinderTrack(t pathfinderTrack) platform.Track {
 	pathfinderArtists := append([]pathfinderArtist(nil), t.FirstArtist.Items...)
 	pathfinderArtists = append(pathfinderArtists, t.OtherArtists.Items...)
+	if len(pathfinderArtists) == 0 {
+		pathfinderArtists = append(pathfinderArtists, t.Artists.Items...)
+	}
 	artists := make([]platform.Artist, 0, len(pathfinderArtists))
 	for _, artist := range pathfinderArtists {
 		artists = append(artists, platform.Artist{

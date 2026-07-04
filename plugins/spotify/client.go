@@ -26,6 +26,8 @@ const (
 	spotifyPathfinderURL  = "https://api-partner.spotify.com/pathfinder/v2/query"
 	getTrackOperation     = "getTrack"
 	getTrackPersistedHash = "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294"
+	findTracksOperation   = "findTracks"
+	findTracksPersistHash = "755858df4daab8d212980b02a81dcf8c9a58447de318b59d07c4651a1d0450b9"
 )
 
 // Client talks to the Spotify Web API using the Client Credentials flow (no user
@@ -218,6 +220,10 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]platfor
 	if limit > 50 {
 		limit = 50
 	}
+	if !c.hasClientCredentials() && c.webAuth != nil {
+		return c.searchPathfinder(ctx, query, limit)
+	}
+
 	q := url.Values{}
 	q.Set("q", query)
 	q.Set("type", "track")
@@ -225,6 +231,11 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]platfor
 	q.Set("market", c.market)
 	var resp spotifySearchResponse
 	if err := c.apiGet(ctx, "/search", q, &resp); err != nil {
+		if c.webAuth != nil {
+			if tracks, fallbackErr := c.searchPathfinder(ctx, query, limit); fallbackErr == nil {
+				return tracks, nil
+			}
+		}
 		return nil, err
 	}
 	tracks := make([]platform.Track, 0, len(resp.Tracks.Items))
@@ -233,6 +244,80 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]platfor
 			continue
 		}
 		tracks = append(tracks, convertTrack(it))
+	}
+	return tracks, nil
+}
+
+func (c *Client) searchPathfinder(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+	if c.webAuth == nil {
+		return nil, platform.NewAuthRequiredError(platformName)
+	}
+	auth, err := c.webAuth(ctx)
+	if err != nil || auth.Bearer == "" {
+		return nil, platform.NewAuthRequiredError(platformName)
+	}
+	payload := map[string]any{
+		"variables": map[string]any{
+			"query":  strings.TrimSpace(query),
+			"limit":  limit,
+			"offset": 0,
+		},
+		"operationName": findTracksOperation,
+		"extensions": map[string]any{
+			"persistedQuery": map[string]any{
+				"version":    1,
+				"sha256Hash": findTracksPersistHash,
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, spotifyPathfinderURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	native.ApplyWebAuthHeaders(req, auth)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, platform.ErrNotFound
+	case http.StatusTooManyRequests:
+		return nil, platform.ErrRateLimited
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, platform.NewAuthRequiredError(platformName)
+	default:
+		return nil, fmt.Errorf("spotify: pathfinder findTracks status %d", resp.StatusCode)
+	}
+
+	var result pathfinderSearchResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("spotify: pathfinder findTracks returned errors")
+	}
+
+	items := result.Data.SearchV2.TracksV2.Items
+	tracks := make([]platform.Track, 0, len(items))
+	for _, item := range items {
+		t := item.Item.Data
+		if strings.TrimSpace(t.ID) == "" {
+			continue
+		}
+		tracks = append(tracks, convertPathfinderTrack(t))
 	}
 	return tracks, nil
 }
