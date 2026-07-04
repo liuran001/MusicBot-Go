@@ -143,15 +143,17 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			var replyMarkup *telego.InlineKeyboardMarkup
 			if resolveShowBottomButtons(ctx, music.Repo, userID, chatID, isGroup) {
 				replyMarkup = buildSongBottomKeyboard(ctx, music.Repo, songButtonOptions{
-					platformName:  songInfo.Platform,
-					trackID:       songInfo.TrackID,
-					trackURL:      songInfo.TrackURL,
-					quality:       qualityOverride,
-					requesterID:   userID,
-					botName:       music.BotName,
-					inlineContext: true,
-					chatID:        chatID,
-					isGroup:       isGroup,
+					platformName:    songInfo.Platform,
+					trackID:         songInfo.TrackID,
+					trackURL:        songInfo.TrackURL,
+					quality:         qualityOverride,
+					requesterID:     userID,
+					botName:         music.BotName,
+					platformManager: music.PlatformManager,
+					lyricsAvailable: songInfo.LyricsAvailable,
+					inlineContext:   true,
+					chatID:          chatID,
+					isGroup:         isGroup,
 				})
 			}
 			params := &telego.EditMessageMediaParams{

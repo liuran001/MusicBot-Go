@@ -49,14 +49,16 @@ func TestRepositoryCRUD(t *testing.T) {
 		t.Fatalf("expected empty db")
 	}
 
+	noLyrics := false
 	song := &bot.SongInfo{
-		MusicID:     1,
-		SongName:    "Song",
-		SongArtists: "Artist",
-		SongAlbum:   "Album",
-		FileExt:     "mp3",
-		MusicSize:   123,
-		Duration:    10,
+		MusicID:         1,
+		SongName:        "Song",
+		SongArtists:     "Artist",
+		SongAlbum:       "Album",
+		FileExt:         "mp3",
+		MusicSize:       123,
+		Duration:        10,
+		LyricsAvailable: &noLyrics,
 	}
 	if err := repo.Create(ctx, song); err != nil {
 		t.Fatalf("create: %v", err)
@@ -83,6 +85,9 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 	if loaded.Quality != "hires" {
 		t.Fatalf("unexpected default song quality: %s", loaded.Quality)
+	}
+	if loaded.LyricsAvailable == nil || *loaded.LyricsAvailable {
+		t.Fatalf("expected lyrics availability false, got %v", loaded.LyricsAvailable)
 	}
 
 	loaded.SongName = "Song Updated"

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
+	"github.com/liuran001/MusicBot-Go/bot/platform"
 	"github.com/mymmrac/telego"
 )
 
@@ -13,23 +14,27 @@ import (
 // under a sent song. The same row appears in three places — a normal chat audio
 // message, an inline cached-document result, and an inline/guest edit-to-audio —
 // which differ mainly in whether the lyrics button can post a new message
-// (normal) or must deep-link to the bot's private chat (inline/guest), and
-// whether a group favorite button is available (group chat with a known chat ID).
+// (private chat) or must deep-link to the bot's private chat
+// (groups/channels/inline/guest), and whether a group favorite button is
+// available (group chat with a known chat ID).
 type songButtonOptions struct {
-	platformName string
-	trackID      string
-	trackURL     string
-	quality      string
-	requesterID  int64
-	botName      string
+	platformName    string
+	trackID         string
+	trackURL        string
+	quality         string
+	requesterID     int64
+	botName         string
+	platformManager platform.Manager
+	// lyricsAvailable is nil when unknown. A false value means the platform
+	// explicitly reported that this track has no lyrics.
+	lyricsAvailable *bool
 	// inlineContext is true for inline-mode and guest-mode messages, where the
-	// bot cannot send a new message to the chat: the lyrics button deep-links to
-	// the private chat instead of posting lyrics inline.
+	// bot cannot send a new message to the chat.
 	inlineContext bool
 	// chatID is the originating chat (0 when unknown, e.g. inline mode). Required
 	// for the group favorite button.
 	chatID int64
-	// isGroup reports whether the chat is a group/supergroup.
+	// isGroup reports whether the originating chat is not private.
 	isGroup bool
 }
 
@@ -50,13 +55,15 @@ func buildSongBottomKeyboard(ctx context.Context, repo botpkg.SongRepository, op
 
 	// Row 2: lyrics + favorites.
 	var actionRow []telego.InlineKeyboardButton
-	if opts.inlineContext {
-		if link := buildLyricDeepLink(opts.botName, opts.platformName, opts.trackID); link != "" {
-			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_lyric_btn"), URL: link})
-		}
-	} else {
-		if data := buildLyricButtonCallbackData(opts.platformName, opts.trackID, opts.quality, opts.requesterID); data != "" {
-			actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_lyric_btn"), CallbackData: data})
+	if songLyricsButtonAvailable(opts) {
+		if songLyricsButtonUsesDeepLink(opts) {
+			if link := buildLyricDeepLink(opts.botName, opts.platformName, opts.trackID); link != "" {
+				actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_lyric_btn"), URL: link})
+			}
+		} else {
+			if data := buildLyricButtonCallbackData(opts.platformName, opts.trackID, opts.quality, opts.requesterID); data != "" {
+				actionRow = append(actionRow, telego.InlineKeyboardButton{Text: tr(ctx, "cb_lyric_btn"), CallbackData: data})
+			}
 		}
 	}
 	if data := buildFavoriteToggleData(botpkg.FavoriteScopeUser, opts.platformName, opts.trackID, 0); data != "" {
@@ -75,6 +82,19 @@ func buildSongBottomKeyboard(ctx context.Context, repo botpkg.SongRepository, op
 		return nil
 	}
 	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func songLyricsButtonAvailable(opts songButtonOptions) bool {
+	if opts.platformManager != nil {
+		if plat := opts.platformManager.Get(opts.platformName); plat != nil && !plat.SupportsLyrics() {
+			return false
+		}
+	}
+	return opts.lyricsAvailable == nil || *opts.lyricsAvailable
+}
+
+func songLyricsButtonUsesDeepLink(opts songButtonOptions) bool {
+	return opts.inlineContext || opts.isGroup
 }
 
 // buildLyricButtonCallbackData builds the callback data for the in-chat lyrics

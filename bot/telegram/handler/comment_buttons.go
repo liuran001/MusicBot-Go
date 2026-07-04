@@ -67,14 +67,20 @@ func (h *CommentButtonsHandler) Handle(ctx context.Context, b *telego.Bot, updat
 	}
 
 	opts := songButtonOptions{
-		platformName:  platformName,
-		trackID:       trackID,
-		trackURL:      trackURL,
-		quality:       quality,
-		botName:       h.BotName,
-		inlineContext: true,
-		chatID:        chatID,
-		isGroup:       true,
+		platformName:    platformName,
+		trackID:         trackID,
+		trackURL:        trackURL,
+		quality:         quality,
+		botName:         h.BotName,
+		platformManager: h.PlatformManager,
+		inlineContext:   true,
+		chatID:          chatID,
+		isGroup:         true,
+	}
+	if h.Repo != nil && message.Audio != nil && message.Audio.FileID != "" {
+		if song, err := h.Repo.FindByFileID(ctx, message.Audio.FileID); err == nil && song != nil {
+			opts.lyricsAvailable = song.LyricsAvailable
+		}
 	}
 	keyboard := buildSongBottomKeyboard(ctx, h.Repo, opts)
 	if keyboard == nil || len(keyboard.InlineKeyboard) == 0 {

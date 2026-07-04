@@ -43,6 +43,10 @@ type Track struct {
 
 	// DiscNumber is the disc number within multi-disc album (if available).
 	DiscNumber int `json:"disc_number,omitempty"`
+
+	// LyricsAvailable reports whether the platform explicitly says this track has
+	// lyrics. Nil means the platform did not provide this metadata.
+	LyricsAvailable *bool `json:"lyrics_available,omitempty"`
 }
 
 // Artist represents a music artist from any platform.

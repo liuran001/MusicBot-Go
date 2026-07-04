@@ -1034,13 +1034,15 @@ func (h *InlineSearchHandler) inlineCached(ctx context.Context, b *telego.Bot, q
 	var keyboard *telego.InlineKeyboardMarkup
 	if resolveForwardButtonEnabledForUser(ctx, h.Repo, query.From.ID) {
 		keyboard = buildSongBottomKeyboard(ctx, h.Repo, songButtonOptions{
-			platformName:  platformName,
-			trackID:       trackID,
-			trackURL:      songInfo.TrackURL,
-			quality:       qualityValue,
-			requesterID:   query.From.ID,
-			botName:       h.BotName,
-			inlineContext: true,
+			platformName:    platformName,
+			trackID:         trackID,
+			trackURL:        songInfo.TrackURL,
+			quality:         qualityValue,
+			requesterID:     query.From.ID,
+			botName:         h.BotName,
+			platformManager: h.PlatformManager,
+			lyricsAvailable: songInfo.LyricsAvailable,
+			inlineContext:   true,
 		})
 	}
 

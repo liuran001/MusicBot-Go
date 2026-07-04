@@ -1657,6 +1657,7 @@ func fillSongInfoFromTrack(songInfo *botpkg.SongInfo, track *platform.Track, pla
 	if strings.TrimSpace(track.URL) != "" {
 		songInfo.TrackURL = track.URL
 	}
+	songInfo.LyricsAvailable = track.LyricsAvailable
 
 	if message != nil {
 		songInfo.FromChatID = message.Chat.ID

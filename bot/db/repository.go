@@ -567,6 +567,7 @@ func (r *Repository) Create(ctx context.Context, song *bot.SongInfo) error {
 				"from_user_name",
 				"from_chat_id",
 				"from_chat_name",
+				"lyrics_available",
 			}),
 		}).Create(model).Error; err != nil {
 			return err

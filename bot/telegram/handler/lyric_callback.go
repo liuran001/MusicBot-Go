@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -293,6 +294,7 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 	}
 	platformName := strings.TrimSpace(args[1])
 	trackID := strings.TrimSpace(args[2])
+	quality := strings.TrimSpace(args[3])
 	requesterID := int64(0)
 	if len(args) >= 5 {
 		requesterID, _ = strconv.ParseInt(strings.TrimSpace(args[4]), 10, 64)
@@ -306,8 +308,14 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 		return
 	}
 	plat := h.PlatformManager.Get(platformName)
-	if plat == nil || !plat.SupportsLyrics() {
-		h.answer(ctx, b, query.ID, tr(ctx, "guest_platform_no_lyrics"))
+	if plat == nil {
+		h.answerAlert(ctx, b, query.ID, tr(ctx, "get_lrc_failed"))
+		return
+	}
+	if !plat.SupportsLyrics() {
+		h.markSongLyricsUnavailable(ctx, platformName, trackID, quality)
+		h.removeSongLyricsButton(ctx, b, query)
+		h.answerAlert(ctx, b, query.ID, tr(ctx, "guest_platform_no_lyrics"))
 		return
 	}
 
@@ -317,9 +325,14 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 		return
 	}
 
-	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_fetching"))
-
 	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, query.From.ID, plat, platformName, trackID)
+	if lyricUnavailableResult(lyrics, err) {
+		h.markSongLyricsUnavailable(ctx, platformName, trackID, quality)
+		h.removeSongLyricsButton(ctx, b, query)
+		h.answerAlert(ctx, b, query.ID, tr(ctx, "lyr_err_lyric_unavailable"))
+		return
+	}
+	h.answer(ctx, b, query.ID, tr(ctx, "guest_lyric_fetching"))
 	if err != nil || lyrics == nil {
 		if inlineMessageID != "" {
 			h.editInlineError(ctx, b, inlineMessageID, tr(ctx, "get_lrc_failed"))
@@ -346,6 +359,87 @@ func (h *LyricCallbackHandler) handleSearchResultCallback(ctx context.Context, b
 		return
 	}
 	lh.sendLyricDocumentState(ctx, b, chatID, messageID, lyrics, baseName, platformName, trackID, state, requesterID)
+}
+
+func lyricUnavailableResult(lyrics *platform.Lyrics, err error) bool {
+	if err == nil {
+		return lyrics == nil
+	}
+	return errors.Is(err, platform.ErrUnavailable) ||
+		errors.Is(err, platform.ErrNotFound) ||
+		errors.Is(err, platform.ErrUnsupported)
+}
+
+func (h *LyricCallbackHandler) markSongLyricsUnavailable(ctx context.Context, platformName, trackID, quality string) {
+	if h == nil || h.Repo == nil {
+		return
+	}
+	noLyrics := false
+	for _, q := range qualityFallbacks(quality) {
+		song, err := h.Repo.FindByPlatformTrackID(ctx, platformName, trackID, q)
+		if err != nil || song == nil {
+			continue
+		}
+		song.LyricsAvailable = &noLyrics
+		_ = h.Repo.Update(ctx, song)
+	}
+}
+
+func (h *LyricCallbackHandler) removeSongLyricsButton(ctx context.Context, b *telego.Bot, query *telego.CallbackQuery) {
+	if b == nil || query == nil || query.Message == nil || strings.TrimSpace(query.InlineMessageID) != "" {
+		return
+	}
+	msg := query.Message.Message()
+	if msg == nil || msg.Audio == nil {
+		return
+	}
+	keyboard, changed := removeSongLyricsButtons(msg.ReplyMarkup)
+	if !changed {
+		return
+	}
+	params := &telego.EditMessageReplyMarkupParams{
+		ChatID:      telego.ChatID{ID: msg.Chat.ID},
+		MessageID:   msg.MessageID,
+		ReplyMarkup: keyboard,
+	}
+	if h != nil && h.RateLimiter != nil {
+		_, _ = telegram.EditMessageReplyMarkupWithRetry(ctx, h.RateLimiter, b, params)
+		return
+	}
+	_, _ = b.EditMessageReplyMarkup(ctx, params)
+}
+
+func removeSongLyricsButtons(keyboard *telego.InlineKeyboardMarkup) (*telego.InlineKeyboardMarkup, bool) {
+	if keyboard == nil {
+		return nil, false
+	}
+	rows := make([][]telego.InlineKeyboardButton, 0, len(keyboard.InlineKeyboard))
+	changed := false
+	for _, row := range keyboard.InlineKeyboard {
+		nextRow := make([]telego.InlineKeyboardButton, 0, len(row))
+		for _, button := range row {
+			if isSongLyricsButton(button) {
+				changed = true
+				continue
+			}
+			nextRow = append(nextRow, button)
+		}
+		if len(nextRow) > 0 {
+			rows = append(rows, nextRow)
+		}
+	}
+	if !changed {
+		return keyboard, false
+	}
+	if len(rows) == 0 {
+		return nil, true
+	}
+	return &telego.InlineKeyboardMarkup{InlineKeyboard: rows}, true
+}
+
+func isSongLyricsButton(button telego.InlineKeyboardButton) bool {
+	return strings.HasPrefix(button.CallbackData, "lyric ") ||
+		strings.Contains(button.URL, "start=lyric_")
 }
 
 // handleFormatCallback handles the format-switch/toggle/save-default callbacks.

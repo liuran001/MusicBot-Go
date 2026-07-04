@@ -36,6 +36,9 @@ type SongInfo struct {
 	FromUserName    string
 	FromChatID      int64
 	FromChatName    string
+	// LyricsAvailable is nil when unknown. When false, the platform explicitly
+	// reported that this track has no lyrics.
+	LyricsAvailable *bool
 }
 
 // Favorite scope constants identify whether a favorite belongs to a single user

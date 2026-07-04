@@ -2243,14 +2243,16 @@ func (h *MusicHandler) sendMusicDirect(ctx context.Context, b *telego.Bot, messa
 	}
 	if resolveForwardButtonEnabledForMessage(ctx, h.Repo, message) {
 		params.ReplyMarkup = buildSongBottomKeyboard(ctx, h.Repo, songButtonOptions{
-			platformName: songInfo.Platform,
-			trackID:      songInfo.TrackID,
-			trackURL:     songInfo.TrackURL,
-			quality:      songInfo.Quality,
-			requesterID:  requesterID,
-			botName:      h.BotName,
-			chatID:       message.Chat.ID,
-			isGroup:      message.Chat.Type != "private",
+			platformName:    songInfo.Platform,
+			trackID:         songInfo.TrackID,
+			trackURL:        songInfo.TrackURL,
+			quality:         songInfo.Quality,
+			requesterID:     requesterID,
+			botName:         h.BotName,
+			platformManager: h.PlatformManager,
+			lyricsAvailable: songInfo.LyricsAvailable,
+			chatID:          message.Chat.ID,
+			isGroup:         message.Chat.Type != "private",
 		})
 	}
 

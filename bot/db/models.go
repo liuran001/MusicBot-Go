@@ -35,6 +35,7 @@ type SongInfoModel struct {
 	FromUserName    string
 	FromChatID      int64
 	FromChatName    string
+	LyricsAvailable *bool
 }
 
 func (SongInfoModel) TableName() string {
@@ -83,6 +84,7 @@ func toInternal(model SongInfoModel) *bot.SongInfo {
 		FromUserName:    model.FromUserName,
 		FromChatID:      model.FromChatID,
 		FromChatName:    model.FromChatName,
+		LyricsAvailable: model.LyricsAvailable,
 	}
 }
 
@@ -117,6 +119,7 @@ func toModel(info *bot.SongInfo) *SongInfoModel {
 		FromUserName:    info.FromUserName,
 		FromChatID:      info.FromChatID,
 		FromChatName:    info.FromChatName,
+		LyricsAvailable: info.LyricsAvailable,
 	}
 
 	if info.ID != 0 {
