@@ -254,6 +254,15 @@ func webHeaders(req *http.Request, token string) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
 }
 
+// ApplyWebAuthHeaders applies the headers used by Spotify's web player,
+// including the client-token required by Pathfinder and spclient endpoints.
+func ApplyWebAuthHeaders(req *http.Request, auth WebAuth) {
+	webHeaders(req, auth.Bearer)
+	if auth.ClientToken != "" {
+		req.Header.Set("Client-Token", auth.ClientToken)
+	}
+}
+
 func getJSON(ctx context.Context, hc *http.Client, url, token string, out any) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	webHeaders(req, token)

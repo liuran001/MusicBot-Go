@@ -1,9 +1,7 @@
 package spotify
 
-// Spotify Web API response types. We bind only the fields the bot needs. The
-// Web API serves metadata + search only (no full audio); the actual audio is
-// fetched and decrypted via the embedded librespot path in the native/
-// subpackage, so there is deliberately no streaming/format type here.
+// Spotify metadata response types. Full audio is fetched and decrypted by the
+// native Widevine subpackage, so there is no streaming/format type here.
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -73,4 +71,57 @@ type spotifyPlaylist struct {
 			Track spotifyTrack `json:"track"`
 		} `json:"items"`
 	} `json:"tracks"`
+}
+
+type pathfinderArtist struct {
+	ID      string `json:"id"`
+	URI     string `json:"uri"`
+	Profile struct {
+		Name string `json:"name"`
+	} `json:"profile"`
+}
+
+type pathfinderTrack struct {
+	ID       string `json:"id"`
+	URI      string `json:"uri"`
+	Name     string `json:"name"`
+	Duration struct {
+		TotalMilliseconds int `json:"totalMilliseconds"`
+	} `json:"duration"`
+	TrackNumber int `json:"trackNumber"`
+	SharingInfo struct {
+		ShareURL string `json:"shareUrl"`
+	} `json:"sharingInfo"`
+	FirstArtist struct {
+		Items []pathfinderArtist `json:"items"`
+	} `json:"firstArtist"`
+	OtherArtists struct {
+		Items []pathfinderArtist `json:"items"`
+	} `json:"otherArtists"`
+	Album struct {
+		ID   string `json:"id"`
+		URI  string `json:"uri"`
+		Name string `json:"name"`
+		Date struct {
+			ISOString string `json:"isoString"`
+			Precision string `json:"precision"`
+			Year      int    `json:"year"`
+		} `json:"date"`
+		SharingInfo struct {
+			ShareURL string `json:"shareUrl"`
+		} `json:"sharingInfo"`
+		Tracks struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"tracks"`
+		CoverArt struct {
+			Sources []spotifyImage `json:"sources"`
+		} `json:"coverArt"`
+	} `json:"albumOfTrack"`
+}
+
+type pathfinderTrackResponse struct {
+	Data struct {
+		Track pathfinderTrack `json:"trackUnion"`
+	} `json:"data"`
+	Errors []struct{} `json:"errors"`
 }

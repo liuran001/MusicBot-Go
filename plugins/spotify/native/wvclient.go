@@ -28,6 +28,8 @@ type WidevineClient struct {
 	token       string
 	clientToken string
 	tokenExpiry time.Time
+	product     string
+	productAt   time.Time
 }
 
 // WidevineOptions configures a WidevineClient.
@@ -59,6 +61,53 @@ func NewWidevineClient(opts WidevineOptions) *WidevineClient {
 // Configured reports whether an sp_dc cookie is present.
 func (c *WidevineClient) Configured() bool {
 	return c != nil && c.spDC != ""
+}
+
+// HasDevice reports whether a Widevine device was supplied at construction.
+func (c *WidevineClient) HasDevice() bool {
+	return c != nil && c.device != nil
+}
+
+// WebAuth returns a cached, refreshable web-player bearer/client-token pair.
+// Metadata clients can share the exact same authenticated web session as the
+// audio downloader instead of minting and caching a second token.
+func (c *WidevineClient) WebAuth(ctx context.Context) (WebAuth, error) {
+	if !c.Configured() {
+		return WebAuth{}, ErrNotAuthenticated
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ensureToken(ctx)
+}
+
+// AccountProduct returns the current account tier (for example "free" or
+// "premium"). The value is cached briefly so resolving download metadata does
+// not add a product-state request for every track in a playlist.
+func (c *WidevineClient) AccountProduct(ctx context.Context) (string, error) {
+	if c == nil {
+		return "", ErrNotAuthenticated
+	}
+	c.mu.Lock()
+	if c.product != "" && time.Since(c.productAt) < 10*time.Minute {
+		product := c.product
+		c.mu.Unlock()
+		return product, nil
+	}
+	c.mu.Unlock()
+
+	auth, err := c.WebAuth(ctx)
+	if err != nil {
+		return "", err
+	}
+	product, err := fetchProductState(ctx, c.httpClient, auth)
+	if err != nil {
+		return "", err
+	}
+	c.mu.Lock()
+	c.product = product
+	c.productAt = time.Now()
+	c.mu.Unlock()
+	return product, nil
 }
 
 // ensureToken returns a valid web-player auth (Bearer + client-token),
@@ -94,21 +143,14 @@ func (c *WidevineClient) ensureDevice() (*widevine.Device, error) {
 // preferredBitrate selects the tier in kbps (0 = highest available, ~256). On a
 // token-expiry error the cached token is dropped so the next call refreshes.
 func (c *WidevineClient) Download(ctx context.Context, trackID string, preferredBitrate int) (*WidevineResult, error) {
-	if !c.Configured() {
-		return nil, ErrNotAuthenticated
-	}
-	c.mu.Lock()
-	auth, err := c.ensureToken(ctx)
+	auth, err := c.WebAuth(ctx)
 	if err != nil {
-		c.mu.Unlock()
 		return nil, err
 	}
 	device, err := c.ensureDevice()
 	if err != nil {
-		c.mu.Unlock()
 		return nil, err
 	}
-	c.mu.Unlock()
 
 	res, err := DownloadWidevineMP4(ctx, c.httpClient, auth, device, trackID, preferredBitrate)
 	if err != nil {

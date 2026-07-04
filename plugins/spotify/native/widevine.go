@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,10 +32,7 @@ type WebAuth struct {
 // returning the raw body and status without treating non-200 as an error.
 func getRawAuth(ctx context.Context, hc *http.Client, url string, auth WebAuth) ([]byte, int, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	webHeaders(req, auth.Bearer)
-	if auth.ClientToken != "" {
-		req.Header.Set("Client-Token", auth.ClientToken)
-	}
+	ApplyWebAuthHeaders(req, auth)
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, 0, err
@@ -133,6 +131,24 @@ func selectMP4(files []wvFile, preferredBitrate int) wvFile {
 		best = f
 	}
 	return best
+}
+
+// selectMP4Candidates returns the preferred file followed by lower-bitrate
+// fallbacks. Spotify Free accounts can obtain AAC 128k licenses but reject
+// AAC 256k, so callers requesting the highest tier must be able to retry 128k.
+func selectMP4Candidates(files []wvFile, preferredBitrate int) []wvFile {
+	if len(files) == 0 {
+		return nil
+	}
+	selected := selectMP4(files, preferredBitrate)
+	candidates := []wvFile{selected}
+	for _, file := range files {
+		if file.FileID == selected.FileID || file.Bitrate >= selected.Bitrate {
+			continue
+		}
+		candidates = append(candidates, file)
+	}
+	return candidates
 }
 
 // storageResolveMP4 resolves an MP4 file_id to a CDN URL via storage-resolve v2.
@@ -234,10 +250,7 @@ var widevineSystemID = []byte{
 func postLicense(ctx context.Context, hc *http.Client, auth WebAuth, payload []byte) ([]byte, int, http.Header, error) {
 	licURL := fmt.Sprintf("%s/widevine-license/v1/audio/license", spclientHost)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, licURL, bytes.NewReader(payload))
-	webHeaders(req, auth.Bearer)
-	if auth.ClientToken != "" {
-		req.Header.Set("Client-Token", auth.ClientToken)
-	}
+	ApplyWebAuthHeaders(req, auth)
 	// votify (which works) posts the raw protobuf challenge but REUSES the
 	// default web-player client headers — httpx does NOT override a preset
 	// content-type when you pass raw bytes, so the binary challenge actually
@@ -275,9 +288,8 @@ func fetchSpotifyServiceCert(ctx context.Context, hc *http.Client, auth WebAuth)
 }
 
 // fetchProductState queries Spotify's product_state endpoint and returns the
-// account's product tier ("free", "premium", ...). Used only as a 403
-// diagnostic: a free account cannot obtain a Widevine license for encrypted
-// interactive audio, which is the most common cause of a bare license 403.
+// account tier ("free", "premium", ...). It is used for quality selection and
+// to explain license failures.
 func fetchProductState(ctx context.Context, hc *http.Client, auth WebAuth) (string, error) {
 	url := spclientHost + "/melody/v1/product_state"
 	body, status, err := getRawAuth(ctx, hc, url, auth)
@@ -302,7 +314,7 @@ func fetchProductState(ctx context.Context, hc *http.Client, auth WebAuth) (stri
 // so pywidevine's default privacy_mode=True is a no-op) and a STREAMING license
 // type. The decisive variable that was wrong before was the PSSH shape, not the
 // privacy mode: the seektable PSSH lacked provider/content_id/protection_scheme.
-func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, psshBytes []byte) ([]*widevine.Key, error) {
+func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, psshBytes []byte, bitrate int) ([]*widevine.Key, error) {
 	pssh, err := widevine.NewPSSH(psshBytes)
 	if err != nil {
 		return nil, fmt.Errorf("parse pssh: %w", err)
@@ -329,20 +341,18 @@ func acquireContentKey(ctx context.Context, hc *http.Client, auth WebAuth, devic
 			diag += " | body=" + snippet(body)
 		}
 		if status == 403 && len(body) == 0 {
-			// A bare 403 has three possible causes, in order of likelihood as
-			// established by live testing (2026-06): (1) a FREE account — Spotify
-			// only grants Widevine licenses for encrypted interactive audio to
-			// Premium; (2) a blocklisted/revoked Widevine device; (3) a token/scope
-			// issue. Probe product_state to tell (1) apart from (2)/(3) so the
-			// caller gets actionable advice instead of guessing at the device.
 			if prod, perr := fetchProductState(ctx, hc, auth); perr == nil && prod != "" {
 				if prod != "premium" {
-					diag += fmt.Sprintf(" — account product=%q (NOT premium). Spotify only issues Widevine licenses for encrypted audio to Premium accounts; a free account always gets a bare 403 here regardless of device. Use a Premium account's sp_dc.", prod)
+					if bitrate > 128000 {
+						diag += fmt.Sprintf(" — account product=%q; AAC %dk requires Premium. Retrying AAC 128k may succeed.", prod, bitrate/1000)
+					} else {
+						diag += fmt.Sprintf(" — account product=%q. AAC %dk is normally available to free accounts; the Widevine device may be revoked or the token may be rejected.", prod, bitrate/1000)
+					}
 				} else {
 					diag += " — account is premium, so this is a blocklisted/revoked Widevine device. Supply a non-revoked .wvd (KeyDive from a physical Android 13/14+ device) via [plugins.spotify] wvd_path."
 				}
 			} else {
-				diag += " — bare 403; likely a free (non-Premium) account, or a blocklisted Widevine device. Confirm the sp_dc belongs to a Premium account, then supply a non-revoked .wvd via [plugins.spotify] wvd_path."
+				diag += " — bare 403; the requested quality may be unavailable for this account, or the Widevine device/token was rejected."
 			}
 		}
 		return nil, fmt.Errorf("license %s", diag)
@@ -394,53 +404,155 @@ func BatchTryDevices(ctx context.Context, hc *http.Client, auth WebAuth, trackID
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	// One-time resolution (device-independent).
+	if len(wvdPaths) == 0 {
+		return "", nil, "", 0, fmt.Errorf("no Widevine devices provided")
+	}
 	files, rerr := resolveMP4Files(ctx, hc, auth, trackID)
 	if rerr != nil {
 		return "", nil, "", 0, fmt.Errorf("resolve: %w", rerr)
 	}
-	file := selectMP4(files, preferredBitrate)
-	cdnURL, rerr := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
-	if rerr != nil {
-		return "", nil, "", 0, fmt.Errorf("storage-resolve: %w", rerr)
-	}
-	psshBytes, rerr := buildSpotifyPSSH(file.FileID)
-	if rerr != nil {
-		return "", nil, "", 0, fmt.Errorf("build pssh: %w", rerr)
+	candidates := selectMP4Candidates(files, preferredBitrate)
+	totalAttempts := len(candidates) * len(wvdPaths)
+	var attemptErrs []error
+
+	for candidateIdx, file := range candidates {
+		cdnURL, resolveErr := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
+		if resolveErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk storage-resolve: %w", file.Bitrate/1000, resolveErr))
+			continue
+		}
+		psshBytes, psshErr := buildSpotifyPSSH(file.FileID)
+		if psshErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk build pssh: %w", file.Bitrate/1000, psshErr))
+			continue
+		}
+
+		for deviceIdx, path := range wvdPaths {
+			if ctx.Err() != nil {
+				return "", nil, "", 0, ctx.Err()
+			}
+			progressIdx := candidateIdx*len(wvdPaths) + deviceIdx + 1
+			device, loadErr := LoadWVDeviceFile(path)
+			if loadErr != nil {
+				attemptErrs = append(attemptErrs, fmt.Errorf("%s: %w", path, loadErr))
+				if onProgress != nil {
+					onProgress(progressIdx, totalAttempts, path, fmt.Sprintf("%dk load-error: %v", file.Bitrate/1000, loadErr))
+				}
+				continue
+			}
+			keys, keyErr := acquireContentKey(ctx, hc, auth, device, psshBytes, file.Bitrate)
+			if keyErr != nil {
+				attemptErrs = append(attemptErrs, fmt.Errorf("%s %dk: %w", path, file.Bitrate/1000, keyErr))
+				if onProgress != nil {
+					onProgress(progressIdx, totalAttempts, path, fmt.Sprintf("%dk rejected: %v", file.Bitrate/1000, keyErr))
+				}
+				continue
+			}
+			dec, decryptErr := downloadAndDecryptMP4(ctx, hc, cdnURL, keys)
+			if decryptErr != nil {
+				attemptErrs = append(attemptErrs, fmt.Errorf("%s %dk: %w", path, file.Bitrate/1000, decryptErr))
+				if onProgress != nil {
+					onProgress(progressIdx, totalAttempts, path, fmt.Sprintf("%dk license OK but decrypt failed: %v", file.Bitrate/1000, decryptErr))
+				}
+				continue
+			}
+			if onProgress != nil {
+				onProgress(progressIdx, totalAttempts, path, fmt.Sprintf("WORKS at %dk — %d bytes decrypted", file.Bitrate/1000, len(dec)))
+			}
+			return path, dec, file.FileID, file.Bitrate, nil
+		}
 	}
 
-	for i, path := range wvdPaths {
-		if ctx.Err() != nil {
-			return "", nil, "", 0, ctx.Err()
-		}
-		device, derr := LoadWVDeviceFile(path)
-		if derr != nil {
-			if onProgress != nil {
-				onProgress(i+1, len(wvdPaths), path, "load-error: "+derr.Error())
-			}
-			continue
-		}
-		keys, kerr := acquireContentKey(ctx, hc, auth, device, psshBytes)
-		if kerr != nil {
-			if onProgress != nil {
-				onProgress(i+1, len(wvdPaths), path, "rejected: "+kerr.Error())
-			}
-			continue
-		}
-		// Device accepted — download + decrypt with these keys.
-		dec, derr2 := downloadAndDecryptMP4(ctx, hc, cdnURL, keys)
-		if derr2 != nil {
-			if onProgress != nil {
-				onProgress(i+1, len(wvdPaths), path, "license OK but decrypt failed: "+derr2.Error())
-			}
-			continue
-		}
-		if onProgress != nil {
-			onProgress(i+1, len(wvdPaths), path, fmt.Sprintf("WORKS — %d bytes decrypted", len(dec)))
-		}
-		return path, dec, file.FileID, file.Bitrate, nil
+	return "", nil, "", 0, fmt.Errorf("all %d device/quality attempts failed: %w", totalAttempts, errors.Join(attemptErrs...))
+}
+
+// WidevineProbeResult carries the outcome of a lightweight Widevine health
+// check. It resolves the MP4 candidate and obtains a CONTENT key, but does not
+// fetch or decrypt the full audio file.
+type WidevineProbeResult struct {
+	FileID  string
+	Format  string
+	Bitrate int
+	CDNURL  string
+	CDNHost string
+	NumKeys int
+	Steps   []string
+}
+
+// ProbeWidevineMP4 runs the Spotify AAC/Widevine chain through the license
+// step without downloading the encrypted MP4. It is suitable for account health
+// checks where pulling a whole song would be unnecessarily heavy.
+func ProbeWidevineMP4(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, trackID string, preferredBitrate int) (*WidevineProbeResult, error) {
+	res := &WidevineProbeResult{}
+	add := func(f string, a ...any) { res.Steps = append(res.Steps, fmt.Sprintf(f, a...)) }
+
+	if hc == nil {
+		hc = http.DefaultClient
 	}
-	return "", nil, "", 0, fmt.Errorf("all %d devices rejected by Spotify license server", len(wvdPaths))
+	if device == nil {
+		return res, fmt.Errorf("widevine device not configured")
+	}
+
+	files, err := resolveMP4Files(ctx, hc, auth, trackID)
+	if err != nil {
+		return res, err
+	}
+	var brs []int
+	for _, f := range files {
+		brs = append(brs, f.Bitrate)
+	}
+	add("track-playback ok: %d mp4 file(s), bitrates=%v", len(files), brs)
+
+	candidates := selectMP4Candidates(files, preferredBitrate)
+	var attemptErrs []error
+	for idx, file := range candidates {
+		res.FileID, res.Format, res.Bitrate = file.FileID, file.Format, file.Bitrate
+		add("trying candidate %d/%d: file_id=%s bitrate=%d", idx+1, len(candidates), file.FileID, file.Bitrate)
+
+		cdnURL, resolveErr := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
+		if resolveErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk storage-resolve: %w", file.Bitrate/1000, resolveErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, resolveErr)
+			continue
+		}
+		res.CDNURL = cdnURL
+		res.CDNHost = hostOf(cdnURL)
+		add("storage-resolve ok: host=%s", res.CDNHost)
+
+		psshBytes, psshErr := buildSpotifyPSSH(file.FileID)
+		if psshErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk build pssh: %w", file.Bitrate/1000, psshErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, psshErr)
+			continue
+		}
+		add("built pssh locally: %d bytes", len(psshBytes))
+
+		keys, keyErr := acquireContentKey(ctx, hc, auth, device, psshBytes, file.Bitrate)
+		if keyErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk license: %w", file.Bitrate/1000, keyErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, keyErr)
+			continue
+		}
+		res.NumKeys = len(keys)
+		add("widevine license ok: %d key(s)", len(keys))
+		return res, nil
+	}
+
+	return res, fmt.Errorf("widevine probe failed for all quality candidates: %w", errors.Join(attemptErrs...))
+}
+
+// Probe resolves the web-player token and configured Widevine device, then runs
+// ProbeWidevineMP4.
+func (c *WidevineClient) Probe(ctx context.Context, trackID string, preferredBitrate int) (*WidevineProbeResult, error) {
+	auth, err := c.WebAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	device, err := c.ensureDevice()
+	if err != nil {
+		return nil, err
+	}
+	return ProbeWidevineMP4(ctx, c.httpClient, auth, device, trackID, preferredBitrate)
 }
 
 // WidevineResult carries the outcome of a full Widevine download chain plus a
@@ -457,8 +569,9 @@ type WidevineResult struct {
 // DownloadWidevineMP4 runs the complete Widevine AAC chain for a track using a
 // web-player token, returning decrypted, playable MP4 (AAC) bytes.
 //
-// preferredBitrate selects the tier in kbps (0 = highest, typically 256). The
-// step trace is populated for diagnostics regardless of success.
+// preferredBitrate selects the initial tier in kbps (0 = highest). Lower
+// available tiers are tried when a higher tier is unavailable for the account.
+// The step trace is populated for diagnostics regardless of success.
 func DownloadWidevineMP4(ctx context.Context, hc *http.Client, auth WebAuth, device *widevine.Device, trackID string, preferredBitrate int) (*WidevineResult, error) {
 	res := &WidevineResult{}
 	add := func(f string, a ...any) { res.Steps = append(res.Steps, fmt.Sprintf(f, a...)) }
@@ -481,41 +594,48 @@ func DownloadWidevineMP4(ctx context.Context, hc *http.Client, auth WebAuth, dev
 	}
 	add("track-playback ok: %d mp4 file(s), bitrates=%v", len(files), brs)
 
-	file := selectMP4(files, preferredBitrate)
-	res.FileID, res.Bitrate = file.FileID, file.Bitrate
-	add("selected file_id=%s bitrate=%d", file.FileID, file.Bitrate)
+	candidates := selectMP4Candidates(files, preferredBitrate)
+	var attemptErrs []error
+	for idx, file := range candidates {
+		res.FileID, res.Bitrate = file.FileID, file.Bitrate
+		add("trying candidate %d/%d: file_id=%s bitrate=%d", idx+1, len(candidates), file.FileID, file.Bitrate)
 
-	// 2) Resolve the CDN URL for the encrypted MP4.
-	cdnURL, err := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
-	if err != nil {
-		return res, err
-	}
-	res.CDNURL = cdnURL
-	add("storage-resolve ok: host=%s", hostOf(cdnURL))
+		cdnURL, resolveErr := storageResolveMP4(ctx, hc, auth, file.FileID, file.Format)
+		if resolveErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk storage-resolve: %w", file.Bitrate/1000, resolveErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, resolveErr)
+			continue
+		}
+		res.CDNURL = cdnURL
+		add("storage-resolve ok: host=%s", hostOf(cdnURL))
 
-	// 3) Build the PSSH (Widevine init data) locally from the file_id,
-	// matching votify's approach exactly. This includes all 5 fields
-	// (algorithm, key_ids, provider, content_id, protection_scheme).
-	psshBytes, err := buildSpotifyPSSH(file.FileID)
-	if err != nil {
-		return res, fmt.Errorf("build pssh: %w", err)
-	}
-	add("built pssh locally: %d bytes", len(psshBytes))
+		psshBytes, psshErr := buildSpotifyPSSH(file.FileID)
+		if psshErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk build pssh: %w", file.Bitrate/1000, psshErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, psshErr)
+			continue
+		}
+		add("built pssh locally: %d bytes", len(psshBytes))
 
-	// 4) Run the Widevine license flow to get the CONTENT key.
-	keys, err := acquireContentKey(ctx, hc, auth, device, psshBytes)
-	if err != nil {
-		return res, err
-	}
-	res.NumKeys = len(keys)
-	add("widevine license ok: %d key(s)", len(keys))
+		keys, keyErr := acquireContentKey(ctx, hc, auth, device, psshBytes, file.Bitrate)
+		if keyErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk license: %w", file.Bitrate/1000, keyErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, keyErr)
+			continue
+		}
+		res.NumKeys = len(keys)
+		add("widevine license ok: %d key(s)", len(keys))
 
-	// 5) Download the encrypted MP4 and decrypt it in pure Go.
-	mp4, err := downloadAndDecryptMP4(ctx, hc, cdnURL, keys)
-	if err != nil {
-		return res, err
+		mp4, decryptErr := downloadAndDecryptMP4(ctx, hc, cdnURL, keys)
+		if decryptErr != nil {
+			attemptErrs = append(attemptErrs, fmt.Errorf("%dk decrypt: %w", file.Bitrate/1000, decryptErr))
+			add("candidate %dk failed: %v", file.Bitrate/1000, decryptErr)
+			continue
+		}
+		res.MP4 = mp4
+		add("decrypt ok: %d bytes of playable MP4/AAC", len(mp4))
+		return res, nil
 	}
-	res.MP4 = mp4
-	add("decrypt ok: %d bytes of playable MP4/AAC", len(mp4))
-	return res, nil
+
+	return res, fmt.Errorf("widevine download failed for all quality candidates: %w", errors.Join(attemptErrs...))
 }

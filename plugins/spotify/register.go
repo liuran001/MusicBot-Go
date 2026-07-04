@@ -82,6 +82,7 @@ func buildContribution(cfg *config.Config, logger *logpkg.Logger) (*platformplug
 		HTTPClient: nativeHTTP,
 		Device:     wvDevice,
 	})
+	client.WithWebAuthProvider(nativeClient.WebAuth)
 	plat.WithNativeSource(newNativeSource(nativeClient))
 
 	return &platformplugins.Contribution{Platform: plat}, nil

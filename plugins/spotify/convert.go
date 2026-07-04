@@ -22,9 +22,7 @@ func convertArtists(in []spotifyArtist) []platform.Artist {
 	return out
 }
 
-// convertTrack maps a Spotify track to the unified Track, carrying the ISRC,
-// which is the high-precision key used to find the same recording on the
-// delegated audio platform (YouTube Music).
+// convertTrack maps a Spotify Web API track to the unified Track.
 func convertTrack(t spotifyTrack) platform.Track {
 	track := platform.Track{
 		ID:          t.ID,
@@ -39,6 +37,58 @@ func convertTrack(t spotifyTrack) platform.Track {
 	}
 	if strings.TrimSpace(t.Album.ID) != "" || strings.TrimSpace(t.Album.Name) != "" {
 		album := convertAlbum(t.Album)
+		track.Album = &album
+		track.CoverURL = album.CoverURL
+		track.Year = album.Year
+	}
+	return track
+}
+
+func convertPathfinderTrack(t pathfinderTrack) platform.Track {
+	pathfinderArtists := append([]pathfinderArtist(nil), t.FirstArtist.Items...)
+	pathfinderArtists = append(pathfinderArtists, t.OtherArtists.Items...)
+	artists := make([]platform.Artist, 0, len(pathfinderArtists))
+	for _, artist := range pathfinderArtists {
+		artists = append(artists, platform.Artist{
+			ID:       artist.ID,
+			Platform: platformName,
+			Name:     artist.Profile.Name,
+			URL:      "https://open.spotify.com/artist/" + artist.ID,
+		})
+	}
+
+	trackURL := strings.TrimSpace(t.SharingInfo.ShareURL)
+	if trackURL == "" {
+		trackURL = "https://open.spotify.com/track/" + t.ID
+	}
+	track := platform.Track{
+		ID:          t.ID,
+		Platform:    platformName,
+		Title:       t.Name,
+		Artists:     artists,
+		Duration:    time.Duration(t.Duration.TotalMilliseconds) * time.Millisecond,
+		TrackNumber: t.TrackNumber,
+		URL:         trackURL,
+	}
+
+	if strings.TrimSpace(t.Album.ID) != "" || strings.TrimSpace(t.Album.Name) != "" {
+		releaseDate := strings.TrimSpace(t.Album.Date.ISOString)
+		precision := strings.ToLower(strings.TrimSpace(t.Album.Date.Precision))
+		albumURL := strings.TrimSpace(t.Album.SharingInfo.ShareURL)
+		if albumURL == "" && t.Album.ID != "" {
+			albumURL = "https://open.spotify.com/album/" + t.Album.ID
+		}
+		album := platform.Album{
+			ID:          t.Album.ID,
+			Platform:    platformName,
+			Title:       t.Album.Name,
+			Artists:     artists,
+			CoverURL:    largestImage(t.Album.CoverArt.Sources),
+			TrackCount:  t.Album.Tracks.TotalCount,
+			URL:         albumURL,
+			Year:        t.Album.Date.Year,
+			ReleaseDate: parseReleaseDate(releaseDate, precision),
+		}
 		track.Album = &album
 		track.CoverURL = album.CoverURL
 		track.Year = album.Year
@@ -67,6 +117,16 @@ func firstImage(images []spotifyImage) string {
 		return ""
 	}
 	return images[0].URL
+}
+
+func largestImage(images []spotifyImage) string {
+	var largest spotifyImage
+	for _, image := range images {
+		if image.Width*image.Height > largest.Width*largest.Height {
+			largest = image
+		}
+	}
+	return largest.URL
 }
 
 // parseReleaseYear extracts the leading year from a Spotify release_date

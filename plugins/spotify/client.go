@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,11 +17,15 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot"
 	"github.com/liuran001/MusicBot-Go/bot/httpproxy"
 	"github.com/liuran001/MusicBot-Go/bot/platform"
+	"github.com/liuran001/MusicBot-Go/plugins/spotify/native"
 )
 
 const (
-	spotifyTokenURL = "https://accounts.spotify.com/api/token"
-	spotifyAPIBase  = "https://api.spotify.com/v1"
+	spotifyTokenURL       = "https://accounts.spotify.com/api/token"
+	spotifyAPIBase        = "https://api.spotify.com/v1"
+	spotifyPathfinderURL  = "https://api-partner.spotify.com/pathfinder/v2/query"
+	getTrackOperation     = "getTrack"
+	getTrackPersistedHash = "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294"
 )
 
 // Client talks to the Spotify Web API using the Client Credentials flow (no user
@@ -32,6 +37,7 @@ type Client struct {
 	clientSecret string
 	market       string
 	logger       bot.Logger
+	webAuth      func(context.Context) (native.WebAuth, error)
 
 	mu          sync.Mutex
 	token       string
@@ -57,9 +63,22 @@ func NewClient(clientID, clientSecret, market string, timeout time.Duration, log
 	}
 }
 
+// WithWebAuthProvider enables web-player token fallback for direct track
+// metadata. It is used when no Spotify developer client credentials are set.
+func (c *Client) WithWebAuthProvider(provider func(context.Context) (native.WebAuth, error)) *Client {
+	if c != nil {
+		c.webAuth = provider
+	}
+	return c
+}
+
+func (c *Client) hasClientCredentials() bool {
+	return c != nil && c.clientID != "" && c.clientSecret != ""
+}
+
 // Configured reports whether credentials are present.
 func (c *Client) Configured() bool {
-	return c != nil && c.clientID != "" && c.clientSecret != ""
+	return c != nil && (c.hasClientCredentials() || c.webAuth != nil)
 }
 
 // SetAPIProxy routes API calls through the configured platform proxy.
@@ -87,6 +106,13 @@ func (c *Client) SetAPIProxy(cfg httpproxy.Config) error {
 func (c *Client) accessToken(ctx context.Context) (string, error) {
 	if !c.Configured() {
 		return "", platform.NewAuthRequiredError(platformName)
+	}
+	if !c.hasClientCredentials() {
+		auth, err := c.webAuth(ctx)
+		if err != nil || auth.Bearer == "" {
+			return "", platform.NewAuthRequiredError(platformName)
+		}
+		return auth.Bearer, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -211,18 +237,91 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]platfor
 	return tracks, nil
 }
 
-// GetTrack fetches a single track's full metadata (including ISRC).
+// GetTrack fetches a single track's metadata. Developer credentials use the
+// Web API; otherwise the authenticated web-player Pathfinder query is used.
 func (c *Client) GetTrack(ctx context.Context, trackID string) (*platform.Track, error) {
+	if !c.hasClientCredentials() && c.webAuth != nil {
+		return c.getTrackPathfinder(ctx, trackID)
+	}
+
 	q := url.Values{}
 	q.Set("market", c.market)
 	var t spotifyTrack
 	if err := c.apiGet(ctx, "/tracks/"+url.PathEscape(trackID), q, &t); err != nil {
+		if c.webAuth != nil && (errors.Is(err, platform.ErrRateLimited) || errors.Is(err, platform.ErrAuthRequired)) {
+			return c.getTrackPathfinder(ctx, trackID)
+		}
 		return nil, err
 	}
 	if strings.TrimSpace(t.ID) == "" {
 		return nil, platform.ErrNotFound
 	}
 	track := convertTrack(t)
+	return &track, nil
+}
+
+func (c *Client) getTrackPathfinder(ctx context.Context, trackID string) (*platform.Track, error) {
+	if c.webAuth == nil {
+		return nil, platform.NewAuthRequiredError(platformName)
+	}
+	auth, err := c.webAuth(ctx)
+	if err != nil || auth.Bearer == "" {
+		return nil, platform.NewAuthRequiredError(platformName)
+	}
+
+	payload := map[string]any{
+		"variables":     map[string]any{"uri": "spotify:track:" + trackID},
+		"operationName": getTrackOperation,
+		"extensions": map[string]any{
+			"persistedQuery": map[string]any{
+				"version":    1,
+				"sha256Hash": getTrackPersistedHash,
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, spotifyPathfinderURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	native.ApplyWebAuthHeaders(req, auth)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, platform.ErrNotFound
+	case http.StatusTooManyRequests:
+		return nil, platform.ErrRateLimited
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return nil, platform.NewAuthRequiredError(platformName)
+	default:
+		return nil, fmt.Errorf("spotify: pathfinder getTrack status %d", resp.StatusCode)
+	}
+
+	var result pathfinderTrackResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("spotify: pathfinder getTrack returned errors")
+	}
+	if strings.TrimSpace(result.Data.Track.ID) == "" {
+		return nil, platform.ErrNotFound
+	}
+	track := convertPathfinderTrack(result.Data.Track)
 	return &track, nil
 }
 

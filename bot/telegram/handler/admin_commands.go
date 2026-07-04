@@ -321,6 +321,7 @@ func checkCookieForPlatform(ctx context.Context, manager platform.Manager, platf
 	if message == "" {
 		message = tr(ctx, "adm_check_unknown")
 	}
+	message = sanitizeSensitiveText(message)
 	return fmt.Sprintf("%s %s: %s", status, platformDisplayName(manager, platformName), message), nil
 }
 

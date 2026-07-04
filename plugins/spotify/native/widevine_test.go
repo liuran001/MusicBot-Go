@@ -38,6 +38,38 @@ func TestSelectMP4(t *testing.T) {
 	}
 }
 
+func TestSelectMP4Candidates(t *testing.T) {
+	files := []wvFile{
+		{FileID: "high", Format: "11", Bitrate: 256000},
+		{FileID: "standard", Format: "10", Bitrate: 128000},
+	}
+	cases := []struct {
+		name      string
+		preferKbs int
+		want      []string
+	}{
+		{"highest falls back to standard", 0, []string{"high", "standard"}},
+		{"high falls back to standard", 256, []string{"high", "standard"}},
+		{"above ceiling falls back to standard", 320, []string{"high", "standard"}},
+		{"standard does not upgrade", 128, []string{"standard"}},
+		{"middle tier selects standard", 192, []string{"standard"}},
+		{"below floor selects standard", 96, []string{"standard"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := selectMP4Candidates(files, tc.preferKbs)
+			if len(got) != len(tc.want) {
+				t.Fatalf("candidate count = %d, want %d: %+v", len(got), len(tc.want), got)
+			}
+			for i, want := range tc.want {
+				if got[i].FileID != want {
+					t.Fatalf("candidate %d = %q, want %q", i, got[i].FileID, want)
+				}
+			}
+		})
+	}
+}
+
 func TestMP4FormatBitrate(t *testing.T) {
 	cases := map[string]int{"11": 256000, "10": 128000, "0": 0, "": 0}
 	for format, want := range cases {

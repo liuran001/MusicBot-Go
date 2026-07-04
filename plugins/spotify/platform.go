@@ -7,12 +7,9 @@ import (
 	"github.com/liuran001/MusicBot-Go/bot/platform"
 )
 
-// SpotifyPlatform implements platform.Platform. Metadata + search come from the
-// Spotify Web API. Audio is REAL Spotify audio (decrypted Ogg Vorbis) via the
-// embedded librespot path — there is deliberately no cross-platform fallback:
-// if native audio is unavailable for a track (not logged in, DRM-locked, or
-// region-blocked) the download fails with a clear error rather than silently
-// substituting a different platform's recording.
+// SpotifyPlatform implements platform.Platform. Metadata comes from the Web API
+// or authenticated web-player Pathfinder queries. Audio is decrypted AAC/MP4
+// from Spotify's CDN; there is deliberately no cross-platform fallback.
 type SpotifyPlatform struct {
 	client *Client
 	native directAudioSource
@@ -57,11 +54,9 @@ func (p *SpotifyPlatform) Capabilities() platform.Capabilities {
 // Metadata exposes display/alias info (optional MetadataProvider interface).
 func (p *SpotifyPlatform) Metadata() platform.Meta { return metadata() }
 
-// GetDownloadInfo returns real Spotify audio (decrypted Ogg Vorbis) via the
-// native librespot path. There is no cross-platform fallback by design: if the
-// track can't be served natively (operator not logged in, DRM-locked, or
-// region-blocked), it fails with a clear error rather than substituting another
-// platform's recording.
+// GetDownloadInfo returns real Spotify AAC audio via the native Widevine path.
+// Failures are returned directly rather than substituting another platform's
+// recording.
 func (p *SpotifyPlatform) GetDownloadInfo(ctx context.Context, trackID string, quality platform.Quality) (*platform.DownloadInfo, error) {
 	if p == nil || p.client == nil {
 		return nil, platform.NewUnavailableError(platformName, "track", trackID)
