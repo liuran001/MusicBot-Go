@@ -74,13 +74,14 @@ type translationEntry struct {
 	Text string
 }
 
+var lrcDotLineRe = regexp.MustCompile(`^\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\](.*)$`)
+
 // parseTranslationEntries parses a track into non-empty time-sorted entries,
 // using "." fraction separator semantics. Mirrors parseTranslationEntries.
 func parseTranslationEntries(track string) []translationEntry {
 	var entries []translationEntry
-	dotRe := regexp.MustCompile(`^\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\](.*)$`)
 	for _, row := range splitLines(track) {
-		m := dotRe.FindStringSubmatch(strings.TrimSpace(row))
+		m := lrcDotLineRe.FindStringSubmatch(strings.TrimSpace(row))
 		if m == nil {
 			continue
 		}

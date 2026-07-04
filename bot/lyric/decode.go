@@ -86,13 +86,15 @@ func decodeQRCBlob(hexStr string) (string, error) {
 	return inflateZlib(decrypted)
 }
 
+var qrcExtraContentRes = []*regexp.Regexp{
+	regexp.MustCompile(`(?s)<Lyric_2\s+[^>]*LyricContent="([^"]*)"`),
+	regexp.MustCompile(`(?s)<Lyric_3\s+[^>]*LyricContent="([^"]*)"`),
+}
+
 // DecodeQRCExtra extracts the romanization track from a decrypted QRC XML, which
 // some songs store in Lyric_2 / Lyric_3 nodes. Returns "" if absent.
 func DecodeQRCExtra(xmlContent string) string {
-	for _, re := range []*regexp.Regexp{
-		regexp.MustCompile(`(?s)<Lyric_2\s+[^>]*LyricContent="([^"]*)"`),
-		regexp.MustCompile(`(?s)<Lyric_3\s+[^>]*LyricContent="([^"]*)"`),
-	} {
+	for _, re := range qrcExtraContentRes {
 		if m := re.FindStringSubmatch(xmlContent); m != nil {
 			return htmlUnescape(m[1])
 		}

@@ -208,6 +208,8 @@ type enhancedHLSMedia struct {
 
 var reMediaKey = regexp.MustCompile(`#EXT-X-KEY:[^\n]*URI="(skd://[^"]+)"`)
 
+var reMapURI = regexp.MustCompile(`URI="([^"]+)"`)
+
 // parseEnhancedHLSMedia parses a variant's media playlist. EXT-X-KEY lines set
 // the "current" FairPlay key; each subsequent segment (a non-comment line, or
 // an EXT-X-MAP init reference) inherits the most recent key. We record the key
@@ -233,7 +235,7 @@ func parseEnhancedHLSMedia(mediaURL, content string) (enhancedHLSMedia, error) {
 		}
 		if strings.HasPrefix(line, "#EXT-X-MAP") {
 			// init segment; capture the mp4 file name from its URI.
-			if im := regexp.MustCompile(`URI="([^"]+)"`).FindStringSubmatch(line); im != nil {
+			if im := reMapURI.FindStringSubmatch(line); im != nil {
 				mp4Name = im[1]
 			}
 			continue

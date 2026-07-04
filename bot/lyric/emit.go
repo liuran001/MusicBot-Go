@@ -205,22 +205,25 @@ func lrcToSrt(lrc string) string {
 	return strings.Join(out, "\n")
 }
 
+var (
+	tlyricTagOnlyRe  = regexp.MustCompile(`^\[[0-9]{1,2}:[0-9]{1,2}(?:[.:][0-9]{1,3})?\].*$`)
+	tlyricEmptyTagRe = regexp.MustCompile(`^\[[0-9]{1,2}:[0-9]{1,2}(?:[.:][0-9]{1,3})?\]\s*//$`)
+)
+
 func translationOnly(tlyric string) string {
 	if strings.TrimSpace(tlyric) == "" {
 		return ""
 	}
-	tagOnly := regexp.MustCompile(`^\[[0-9]{1,2}:[0-9]{1,2}(?:[.:][0-9]{1,3})?\].*$`)
-	emptyTag := regexp.MustCompile(`^\[[0-9]{1,2}:[0-9]{1,2}(?:[.:][0-9]{1,3})?\]\s*//$`)
 	var out []string
 	for _, row := range splitLines(tlyric) {
 		line := strings.TrimSpace(row)
 		if line == "" || line == "//" {
 			continue
 		}
-		if !tagOnly.MatchString(line) {
+		if !tlyricTagOnlyRe.MatchString(line) {
 			continue
 		}
-		if emptyTag.MatchString(line) {
+		if tlyricEmptyTagRe.MatchString(line) {
 			continue
 		}
 		out = append(out, line)
@@ -279,12 +282,13 @@ func mergeLrcTracks(lyric, tlyric, roma string, romaFirst bool) string {
 // lrcTagPrefixMap maps each line's bracketed tag prefix (e.g. "[00:12.34]") to
 // its text, collapsing runs of whitespace. Lines without a leading tag are
 // skipped. Mirrors the explode(']') maps in PHP mergeLrcTracks.
+var multiSpaceRe = regexp.MustCompile(`\s\s+`)
+
 func lrcTagPrefixMap(track string) map[string]string {
 	m := map[string]string{}
 	if strings.TrimSpace(track) == "" {
 		return m
 	}
-	spaceRe := regexp.MustCompile(`\s\s+`)
 	for _, raw := range strings.Split(track, "\n") {
 		if raw == "" {
 			continue
@@ -293,7 +297,7 @@ func lrcTagPrefixMap(track string) map[string]string {
 		if !ok {
 			continue
 		}
-		text := strings.TrimSpace(spaceRe.ReplaceAllString(raw[len(key):], " "))
+		text := strings.TrimSpace(multiSpaceRe.ReplaceAllString(raw[len(key):], " "))
 		m[key] = text
 	}
 	return m
@@ -354,14 +358,14 @@ func isLqePrefaceLikeLine(text string) bool {
 	return lqePrefaceDashRe.MatchString(text) || lqePrefaceWordRe.MatchString(text)
 }
 
+var romaPrefixTagRe = regexp.MustCompile(`^(\[[0-9]{1,2}:[0-9]{2}(?:[.:][0-9]{1,3})?\])(.*)$`)
+
 // normalizeRomaLyric strips secondary inline timestamps from roma content.
 // Mirrors normalizeRomaLyric.
 func normalizeRomaLyric(roma string) string {
 	if strings.TrimSpace(roma) == "" {
 		return ""
 	}
-	prefixRe := regexp.MustCompile(`^(\[[0-9]{1,2}:[0-9]{2}(?:[.:][0-9]{1,3})?\])(.*)$`)
-	multiSpace := regexp.MustCompile(`\s{2,}`)
 	var out []string
 	for _, line := range splitLines(roma) {
 		if line == "" {
@@ -370,12 +374,12 @@ func normalizeRomaLyric(roma string) string {
 		}
 		prefix := ""
 		content := line
-		if m := prefixRe.FindStringSubmatch(line); m != nil {
+		if m := romaPrefixTagRe.FindStringSubmatch(line); m != nil {
 			prefix = m[1]
 			content = m[2]
 		}
 		content = lrcAnyTagRe.ReplaceAllString(content, " ")
-		content = strings.TrimSpace(multiSpace.ReplaceAllString(content, " "))
+		content = strings.TrimSpace(multiSpaceRe.ReplaceAllString(content, " "))
 		out = append(out, prefix+content)
 	}
 	return strings.Join(out, "\n")

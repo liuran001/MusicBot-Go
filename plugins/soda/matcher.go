@@ -9,7 +9,8 @@ import (
 type URLMatcher struct{}
 
 var (
-	sodaTrackPatterns = []*regexp.Regexp{
+	sodaAlbumPathPattern = regexp.MustCompile(`^album/(\d+)$`)
+	sodaTrackPatterns    = []*regexp.Regexp{
 		regexp.MustCompile(`^track/(\d+)$`),
 		regexp.MustCompile(`^song/(\d+)$`),
 		regexp.MustCompile(`^qishui/share/track$`),
@@ -19,7 +20,7 @@ var (
 		regexp.MustCompile(`^sheet/(\d+)$`),
 		regexp.MustCompile(`^qishui/share/playlist$`),
 		regexp.MustCompile(`^qishui/share/album$`),
-		regexp.MustCompile(`^album/(\d+)$`),
+		sodaAlbumPathPattern,
 	}
 	sodaArtistPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`^artist/(\d+)$`),
@@ -56,7 +57,7 @@ func (m *URLMatcher) MatchPlaylistURL(rawURL string) (playlistID string, matched
 		return "", false
 	}
 	pathValue := strings.Trim(parsed.Path, "/")
-	if match := regexp.MustCompile(`^album/(\d+)$`).FindStringSubmatch(pathValue); len(match) == 2 {
+	if match := sodaAlbumPathPattern.FindStringSubmatch(pathValue); len(match) == 2 {
 		if encoded := encodeAlbumCollectionID(match[1]); encoded != "" {
 			return encoded, true
 		}

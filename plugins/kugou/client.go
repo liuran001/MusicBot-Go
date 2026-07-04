@@ -1475,15 +1475,9 @@ func isGlobalCollectionID(value string) bool {
 }
 
 func extractPlaylistGlobalCollectionID(text string) string {
-	patterns := []string{
-		`global_collection_id["'=: ]+(collection_[A-Za-z0-9_\-]+)`,
-	}
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
-		match := re.FindStringSubmatch(text)
-		if len(match) == 2 {
-			return strings.TrimSpace(match[1])
-		}
+	match := playlistGlobalCollectionIDRe.FindStringSubmatch(text)
+	if len(match) == 2 {
+		return strings.TrimSpace(match[1])
 	}
 	return ""
 }
@@ -1999,9 +1993,9 @@ func (c *Client) resolveShareChainURL(ctx context.Context, chain string) (string
 		return "", err
 	}
 	text := string(bodyBytes)
-	hash := extractHTMLValue(text, `"hash":"([A-Fa-f0-9]{32})"`)
-	albumID := extractHTMLValue(text, `"album_id":"?(\d+)"?`)
-	albumAudioID := extractHTMLValue(text, `"(?:encode_)?album_audio_id":"?([A-Za-z0-9]+)"?`)
+	hash := extractHTMLValue(text, shareHTMLHashRe)
+	albumID := extractHTMLValue(text, shareHTMLAlbumIDRe)
+	albumAudioID := extractHTMLValue(text, shareHTMLAlbumAudioIDRe)
 	values := url.Values{}
 	if hash != "" {
 		values.Set("hash", strings.ToLower(hash))
@@ -2041,8 +2035,27 @@ func buildShareTrackLink(chain, hash, albumID, albumAudioID string) string {
 	return buildTrackLinkWithAlbum(hash, albumID)
 }
 
-func extractHTMLValue(text, pattern string) string {
-	re := regexp.MustCompile(pattern)
+var (
+	shareHTMLHashRe         = regexp.MustCompile(`"hash":"([A-Fa-f0-9]{32})"`)
+	shareHTMLAlbumIDRe      = regexp.MustCompile(`"album_id":"?(\d+)"?`)
+	shareHTMLAlbumAudioIDRe = regexp.MustCompile(`"(?:encode_)?album_audio_id":"?([A-Za-z0-9]+)"?`)
+
+	playlistGlobalCollectionIDRe = regexp.MustCompile(`global_collection_id["'=: ]+(collection_[A-Za-z0-9_\-]+)`)
+
+	playlistGCIDRes = []*regexp.Regexp{
+		regexp.MustCompile(`gcid_[A-Za-z0-9]+`),
+		regexp.MustCompile(`"encode_gic"\s*:\s*"(gcid_[A-Za-z0-9]+)"`),
+		regexp.MustCompile(`"encode_src_gid"\s*:\s*"(gcid_[A-Za-z0-9]+)"`),
+	}
+
+	playlistSpecialIDRes = []*regexp.Regexp{
+		regexp.MustCompile(`specialid[^\d]{0,16}(\d{3,})`),
+		regexp.MustCompile(`"special_id"\s*:\s*"?(\d{3,})"?`),
+		regexp.MustCompile(`"specialid"\s*:\s*"?(\d{3,})"?`),
+	}
+)
+
+func extractHTMLValue(text string, re *regexp.Regexp) string {
 	match := re.FindStringSubmatch(text)
 	if len(match) == 2 {
 		return strings.TrimSpace(match[1])
@@ -2051,13 +2064,7 @@ func extractHTMLValue(text, pattern string) string {
 }
 
 func extractPlaylistGCID(text string) string {
-	patterns := []string{
-		`gcid_[A-Za-z0-9]+`,
-		`"encode_gic"\s*:\s*"(gcid_[A-Za-z0-9]+)"`,
-		`"encode_src_gid"\s*:\s*"(gcid_[A-Za-z0-9]+)"`,
-	}
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range playlistGCIDRes {
 		match := re.FindStringSubmatch(text)
 		if len(match) == 1 {
 			return strings.TrimSpace(match[0])
@@ -2070,13 +2077,7 @@ func extractPlaylistGCID(text string) string {
 }
 
 func extractPlaylistSpecialID(text string) string {
-	patterns := []string{
-		`specialid[^\d]{0,16}(\d{3,})`,
-		`"special_id"\s*:\s*"?(\d{3,})"?`,
-		`"specialid"\s*:\s*"?(\d{3,})"?`,
-	}
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
+	for _, re := range playlistSpecialIDRes {
 		match := re.FindStringSubmatch(text)
 		if len(match) == 2 {
 			return strings.TrimSpace(match[1])

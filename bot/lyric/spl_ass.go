@@ -97,18 +97,19 @@ func tokenToSpl(token, tlyric, roma string, romaFirst bool) string {
 	return strings.Join(out, "\n")
 }
 
+var adjTagPrefixRe = regexp.MustCompile(`^\[([0-9]{1,2}):([0-9]{1,2})(?:[.:]([0-9]{1,3}))?\]`)
+
 // parseAdjacentTranslationMap maps a line's tag to the following untimed line,
 // used as a translation fallback. Mirrors parseAdjacentTranslationMapFromLyric.
 func parseAdjacentTranslationMap(lrc string) map[string]string {
 	m := map[string]string{}
 	rows := splitLines(lrc)
-	tagPrefixRe := regexp.MustCompile(`^\[([0-9]{1,2}):([0-9]{1,2})(?:[.:]([0-9]{1,3}))?\]`)
 	for i := 0; i < len(rows); i++ {
 		current := strings.TrimSpace(rows[i])
 		if current == "" {
 			continue
 		}
-		hm := tagPrefixRe.FindStringSubmatch(current)
+		hm := adjTagPrefixRe.FindStringSubmatch(current)
 		if hm == nil {
 			continue
 		}
@@ -128,7 +129,7 @@ func parseAdjacentTranslationMap(lrc string) map[string]string {
 		if next == "" {
 			continue
 		}
-		if tagPrefixRe.MatchString(next) {
+		if adjTagPrefixRe.MatchString(next) {
 			continue
 		}
 		m[tag] = next
