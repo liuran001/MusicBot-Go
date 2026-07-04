@@ -82,6 +82,14 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 	} else if cid, grp := lookupInlineChat(inlineMessageID); cid != 0 {
 		chatID, isGroup = cid, grp
 	}
+	if !hasDownloadWorkAdmission(ctx) {
+		music.submitInlineDownloadWork(ctx, userID, chatID, func(processCtx context.Context) {
+			runInlineMediaFlow(processCtx, b, deps, inlineMessageID, userID, userName, platformName, trackID, qualityOverride, chatID, isGroup)
+		}, func(rejectCtx context.Context) {
+			editInlineDownloadRejected(rejectCtx, b, deps.RateLimiter, inlineMessageID, platformName, trackID, qualityOverride, userID)
+		})
+		return
+	}
 	rl := deps.RateLimiter
 	withInlineMessageLock(inlineMessageID, func() {
 		lastInlineText := ""
@@ -185,7 +193,10 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 		}
 		clearInlineReplyMarkup()
 		setInlineText(tr(ctx, "wait_for_down"), nil)
-		songInfo, err := music.prepareInlineSongWithTimeout(ctx, b, userID, userName, platformName, trackID, qualityOverride, progress)
+		onQueued := func() {
+			setInlineText(tr(ctx, "download_queued"), downloadQueueButton(ctx))
+		}
+		songInfo, err := music.prepareInlineSongWithTimeoutFor(ctx, b, userID, chatID, userName, platformName, trackID, qualityOverride, progress, onQueued)
 		if err != nil {
 			if music.Logger != nil {
 				music.Logger.Error("failed to prepare inline song", "platform", platformName, "trackID", trackID, "error", err)
@@ -207,4 +218,20 @@ func runInlineMediaFlow(ctx context.Context, b *telego.Bot, deps inlineMediaFlow
 			}
 		}
 	})
+}
+
+func editInlineDownloadRejected(ctx context.Context, b *telego.Bot, rateLimiter *telegram.RateLimiter, inlineMessageID, platformName, trackID, qualityOverride string, userID int64) {
+	if b == nil || strings.TrimSpace(inlineMessageID) == "" {
+		return
+	}
+	params := &telego.EditMessageTextParams{
+		InlineMessageID: inlineMessageID,
+		Text:            buildMusicInfoText(ctx, "", "", "", userVisibleDownloadError(ctx, errDownloadQueueOverloaded)),
+		ReplyMarkup:     buildInlineSendKeyboard(ctx, platformName, trackID, qualityOverride, userID),
+	}
+	if rateLimiter != nil {
+		_, _ = telegram.EditMessageTextWithRetry(ctx, rateLimiter, b, params)
+		return
+	}
+	_, _ = b.EditMessageText(ctx, params)
 }

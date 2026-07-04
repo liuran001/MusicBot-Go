@@ -33,6 +33,7 @@ type musicDispatchContextKey string
 
 const forceNonSilentKey musicDispatchContextKey = "force_non_silent"
 const disableFallbackKey musicDispatchContextKey = "disable_fallback"
+const downloadWorkAdmissionKey musicDispatchContextKey = "download_work_admission"
 
 const downloadProgressMinInterval = 2 * time.Second
 const defaultMusicProcessTimeout = 15 * time.Minute
@@ -73,6 +74,21 @@ func isFallbackDisabled(ctx context.Context) bool {
 	return ok && value
 }
 
+func withDownloadWorkAdmission(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, downloadWorkAdmissionKey, true)
+}
+
+func hasDownloadWorkAdmission(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, ok := ctx.Value(downloadWorkAdmissionKey).(bool)
+	return ok && value
+}
+
 var errDownloadQueueOverloaded = errors.New("download queue overloaded")
 
 // MusicHandler handles /music and related commands.
@@ -98,6 +114,7 @@ type MusicHandler struct {
 	Artist             *ArtistHandler
 	LyricHandler       *LyricHandler
 	RecognizeEnabled   bool
+	DownloadPool       botpkg.WorkerPool
 	Limiter            chan struct{}
 	UploadLimiter      chan struct{}
 	UploadQueue        chan uploadTask
@@ -127,6 +144,14 @@ type MusicHandler struct {
 	downloadWaiting int
 	// downloadRunning counts tasks actively holding a global download slot.
 	downloadRunning int
+	// downloadActive counts admitted download work items that have not yet
+	// finished, including tasks waiting in DownloadPool, waiting for a slot,
+	// actively downloading, preparing metadata, or uploading the result. The
+	// per-user/per-chat/global admission limits below are enforced here so one
+	// requester cannot fill the whole internal download queue.
+	downloadActive       int
+	downloadActiveByUser map[int64]int
+	downloadActiveByChat map[int64]int
 
 	// serialGateMu protects the serialGates map.
 	serialGateMu sync.Mutex
@@ -139,9 +164,32 @@ type MusicHandler struct {
 	// at once; the next request beyond it is rejected with a "server busy" error.
 	// 0 or less means unlimited.
 	DownloadQueueWaitLimit int
+	// DownloadQueuePerUserLimit caps all not-yet-finished download work admitted
+	// from one user. This is stricter than DownloadRateLimitPerUser because it
+	// protects the live queue from being monopolized by one requester.
+	DownloadQueuePerUserLimit int
+	// DownloadQueuePerChatLimit caps live download work admitted from one chat.
+	DownloadQueuePerChatLimit int
+	// DownloadQueueGlobalLimit caps all live download work before it enters the
+	// internal download worker pool. 0 or less means unlimited.
+	DownloadQueueGlobalLimit int
 
 	EnableQueueObservability bool
 	PluginSettingDefinitions []botpkg.PluginSettingDefinition
+}
+
+type DownloadQueueSnapshot struct {
+	Waiting          int
+	Running          int
+	WaitLimit        int
+	Active           int
+	ActiveLimit      int
+	PerUserLimit     int
+	PerChatLimit     int
+	UploadWaiting    int
+	UploadRunning    int
+	UploadQueueLimit int
+	UploadLimit      int
 }
 
 type uploadTask struct {
@@ -392,6 +440,10 @@ func (h *MusicHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 				h.dispatch(ctx, b, message, platformName, trackID, qualityOverride)
 				return
 			}
+			if resolvedPlatform, resolvedTrackID, ok := h.resolveTrackFromQuery(ctx, message, baseText+" "+platformName); ok {
+				h.dispatch(ctx, b, message, resolvedPlatform, resolvedTrackID, qualityOverride)
+				return
+			}
 		}
 	}
 
@@ -473,19 +525,32 @@ func (h *MusicHandler) findPluginSettingDefinition(plugin string, key string) (b
 	return botpkg.PluginSettingDefinition{}, false
 }
 
-func (h *MusicHandler) dispatch(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID string, qualityOverride string) {
+func (h *MusicHandler) dispatch(ctx context.Context, b *telego.Bot, message *telego.Message, platformName, trackID string, qualityOverride string) bool {
+	userID, chatID := downloadRequestIdentity(message)
+	releaseAdmission, admitted := h.enterDownloadWork(userID, chatID)
+	if !admitted {
+		h.notifyDownloadRejected(ctx, b, message, errDownloadQueueOverloaded)
+		return false
+	}
+
 	processCtx, cancel := h.processContext(detachContext(ctx))
-	if h.Pool == nil {
+	pool := h.DownloadPool
+	if pool == nil {
+		pool = h.Pool
+	}
+	if pool == nil {
 		go func() {
 			defer cancel()
+			defer releaseAdmission()
 			_ = h.processMusic(processCtx, b, message, platformName, trackID, qualityOverride)
 		}()
-		return
+		return true
 	}
 
 	go func() {
-		if err := h.Pool.Submit(func() {
+		if err := pool.Submit(func() {
 			defer cancel()
+			defer releaseAdmission()
 			defer func() {
 				if err := recover(); err != nil {
 					if h.Logger != nil {
@@ -496,11 +561,98 @@ func (h *MusicHandler) dispatch(ctx context.Context, b *telego.Bot, message *tel
 			_ = h.processMusic(processCtx, b, message, platformName, trackID, qualityOverride)
 		}); err != nil {
 			cancel()
+			releaseAdmission()
 			if h.Logger != nil {
 				h.Logger.Error("failed to enqueue music task", "platform", platformName, "trackID", trackID, "error", err)
 			}
+			h.notifyDownloadRejected(ctx, b, message, errDownloadQueueOverloaded)
 		}
 	}()
+	return true
+}
+
+func (h *MusicHandler) submitInlineDownloadWork(ctx context.Context, userID, chatID int64, task func(context.Context), onRejected func(context.Context)) bool {
+	if h == nil || task == nil {
+		return false
+	}
+	releaseAdmission, admitted := h.enterDownloadWork(userID, chatID)
+	if !admitted {
+		if onRejected != nil {
+			onRejected(ctx)
+		}
+		return false
+	}
+
+	processCtx, cancel := h.processContext(detachContext(ctx))
+	run := func() {
+		defer cancel()
+		defer releaseAdmission()
+		task(withDownloadWorkAdmission(processCtx))
+	}
+
+	pool := h.DownloadPool
+	if pool == nil {
+		pool = h.Pool
+	}
+	if pool == nil {
+		go run()
+		return true
+	}
+
+	rejectCtx := detachContext(ctx)
+	go func() {
+		if err := pool.Submit(run); err != nil {
+			cancel()
+			releaseAdmission()
+			if h.Logger != nil {
+				h.Logger.Error("failed to enqueue inline download task", "error", err)
+			}
+			if onRejected != nil {
+				onRejected(rejectCtx)
+			}
+		}
+	}()
+	return true
+}
+
+func downloadRequestIdentity(message *telego.Message) (userID, chatID int64) {
+	if message == nil {
+		return 0, 0
+	}
+	chatID = message.Chat.ID
+	if message.From != nil {
+		userID = message.From.ID
+	}
+	return userID, chatID
+}
+
+func (h *MusicHandler) notifyDownloadRejected(ctx context.Context, b *telego.Bot, message *telego.Message, err error) {
+	if h == nil || b == nil || message == nil {
+		return
+	}
+	silent := h.shouldSilentAutoFetch(message)
+	if isForceNonSilent(ctx) {
+		silent = false
+	}
+	if silent {
+		return
+	}
+	text := userVisibleDownloadError(ctx, err)
+	params := &telego.SendMessageParams{
+		ChatID:          telego.ChatID{ID: message.Chat.ID},
+		MessageThreadID: message.MessageThreadID,
+		Text:            text,
+		ReplyParameters: buildReplyParams(message),
+	}
+	if h.RateLimiter != nil {
+		if _, sendErr := telegram.SendMessageWithRetry(ctx, h.RateLimiter, b, params); sendErr != nil && h.Logger != nil {
+			h.Logger.Warn("failed to send download rejection", "chatID", message.Chat.ID, "error", sendErr)
+		}
+		return
+	}
+	if _, sendErr := b.SendMessage(ctx, params); sendErr != nil && h.Logger != nil {
+		h.Logger.Warn("failed to send download rejection", "chatID", message.Chat.ID, "error", sendErr)
+	}
 }
 
 func (h *MusicHandler) processContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -603,7 +755,7 @@ func (h *MusicHandler) processMusic(ctx context.Context, b *telego.Bot, message 
 	// URL resolve / decrypt, expensive for Apple/Spotify) plus the transfer, so
 	// it is the heaviest per-user platform op and is rate-limited per user /
 	// platform / global. Cache hits never reach here and stay free.
-	if !h.ResourceLimiter.Allow(ActionDownload, userID, platformName) {
+	if !h.ResourceLimiter.AllowFor(ActionDownload, userID, message.Chat.ID, platformName) {
 		err := platform.ErrRateLimited
 		sendFailed(err)
 		return err
@@ -723,7 +875,7 @@ func (h *MusicHandler) tryPresentDirectEpisodes(ctx context.Context, b *telego.B
 	if message.From != nil {
 		episodeUserID = message.From.ID
 	}
-	if !h.ResourceLimiter.Allow(ActionEpisode, episodeUserID, platformName) {
+	if !h.ResourceLimiter.AllowFor(ActionEpisode, episodeUserID, message.Chat.ID, platformName) {
 		return false, nil
 	}
 	episodes, err := provider.ListEpisodes(ctx, baseTrackID)
@@ -1209,14 +1361,23 @@ func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *teleg
 	fields := strings.Fields(baseText)
 	if len(fields) >= 2 {
 		if platformName, ok := resolvePlatformAlias(h.PlatformManager, fields[0]); ok {
-			if plat := h.PlatformManager.Get(platformName); plat != nil {
-				return platformName, fields[1], true
+			candidate := strings.TrimSpace(strings.Join(fields[1:], " "))
+			if trackID, matched := matchPlatformTrack(ctx, h.PlatformManager, platformName, candidate); matched {
+				return platformName, trackID, true
 			}
+			if candidate == "" {
+				return "", "", false
+			}
+			baseText = candidate
+			platformSuffix = platformName
+			fields = strings.Fields(baseText)
 		}
 	}
 	if platformSuffix != "" && len(fields) == 1 {
-		if h.PlatformManager.Get(platformSuffix) != nil && isLikelyIDToken(fields[0]) {
-			return platformSuffix, fields[0], true
+		if h.PlatformManager.Get(platformSuffix) != nil && !isBareNumericText(fields[0]) {
+			if trackID, matched := matchPlatformTrack(ctx, h.PlatformManager, platformSuffix, fields[0]); matched {
+				return platformSuffix, trackID, true
+			}
 		}
 	}
 
@@ -1230,7 +1391,7 @@ func (h *MusicHandler) resolveTrackFromQuery(ctx context.Context, message *teleg
 		}
 	}
 
-	if plat, id, matched := h.PlatformManager.MatchText(resolvedText); matched {
+	if plat, id, matched := matchTextTrack(h.PlatformManager, resolvedText); matched {
 		return plat, id, true
 	}
 
@@ -2424,9 +2585,11 @@ func (h *MusicHandler) prepareInlineSong(
 	ctx context.Context,
 	b *telego.Bot,
 	userID int64,
+	chatID int64,
 	userName string,
 	platformName, trackID, qualityOverride string,
 	progress func(text string),
+	onQueued func(),
 ) (*botpkg.SongInfo, error) {
 	if h == nil {
 		return nil, errors.New("music handler not configured")
@@ -2447,6 +2610,17 @@ func (h *MusicHandler) prepareInlineSong(
 	if cached, _ := findCached(); cached != nil {
 		copy := *cached
 		return &copy, nil
+	}
+
+	if !h.ResourceLimiter.AllowFor(ActionDownload, userID, chatID, platformName) {
+		return nil, platform.ErrRateLimited
+	}
+	if !hasDownloadWorkAdmission(ctx) {
+		releaseAdmission, admitted := h.enterDownloadWork(userID, chatID)
+		if !admitted {
+			return nil, errDownloadQueueOverloaded
+		}
+		defer releaseAdmission()
 	}
 
 	key := fmt.Sprintf("inline:%s:%s:%s", strings.TrimSpace(platformName), strings.TrimSpace(trackID), strings.TrimSpace(qualityValue))
@@ -2556,14 +2730,18 @@ func (h *MusicHandler) prepareInlineSong(
 	songInfo.BitRate = info.Bitrate * 1000
 
 	// Inline placeholder: when the task has to wait, show the static "queued"
-	// text once (no live-count button — inline messages are edited via a
-	// different path and there is no per-chat status message to attach one to).
-	onQueued := func() {
+	// text once. Inline/guest messages can carry the same queue-inspection
+	// callback button as ordinary chat status messages.
+	notifyQueued := func() {
+		if onQueued != nil {
+			onQueued()
+			return
+		}
 		if progress != nil {
 			progress(tr(ctx, "wait_for_down"))
 		}
 	}
-	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, platformName, trackID, quality, onQueued)
+	releaseDownloadSlot, err := h.acquireDownloadSlot(ctx, platformName, trackID, quality, notifyQueued)
 	if err != nil {
 		call.err = err
 		return nil, err
@@ -2693,9 +2871,21 @@ func (h *MusicHandler) prepareInlineSongWithTimeout(
 	platformName, trackID, qualityOverride string,
 	progress func(text string),
 ) (*botpkg.SongInfo, error) {
+	return h.prepareInlineSongWithTimeoutFor(ctx, b, userID, 0, userName, platformName, trackID, qualityOverride, progress, nil)
+}
+
+func (h *MusicHandler) prepareInlineSongWithTimeoutFor(
+	ctx context.Context,
+	b *telego.Bot,
+	userID, chatID int64,
+	userName string,
+	platformName, trackID, qualityOverride string,
+	progress func(text string),
+	onQueued func(),
+) (*botpkg.SongInfo, error) {
 	processCtx, cancel := h.processContext(detachContext(ctx))
 	defer cancel()
-	return h.prepareInlineSong(processCtx, b, userID, userName, platformName, trackID, qualityOverride, progress)
+	return h.prepareInlineSong(processCtx, b, userID, chatID, userName, platformName, trackID, qualityOverride, progress, onQueued)
 }
 
 // acquireDownloadSlot admits one download into the global concurrency pool.
@@ -2825,6 +3015,92 @@ func (h *MusicHandler) enterWaiting() bool {
 	return true
 }
 
+func (h *MusicHandler) enterDownloadWork(userID, chatID int64) (func(), bool) {
+	if h == nil {
+		return func() {}, true
+	}
+	h.downloadQueueMu.Lock()
+	defer h.downloadQueueMu.Unlock()
+
+	if userID != 0 && h.downloadActiveByUser == nil {
+		h.downloadActiveByUser = make(map[int64]int)
+	}
+	if chatID != 0 && h.downloadActiveByChat == nil {
+		h.downloadActiveByChat = make(map[int64]int)
+	}
+
+	if h.DownloadQueueGlobalLimit > 0 && h.downloadActive >= h.DownloadQueueGlobalLimit {
+		h.logDownloadAdmissionRejectedLocked("global", userID, chatID)
+		return nil, false
+	}
+	if userID != 0 && h.DownloadQueuePerUserLimit > 0 && h.downloadActiveByUser[userID] >= h.DownloadQueuePerUserLimit {
+		h.logDownloadAdmissionRejectedLocked("user", userID, chatID)
+		return nil, false
+	}
+	if chatID != 0 && h.DownloadQueuePerChatLimit > 0 && h.downloadActiveByChat[chatID] >= h.DownloadQueuePerChatLimit {
+		h.logDownloadAdmissionRejectedLocked("chat", userID, chatID)
+		return nil, false
+	}
+
+	h.downloadActive++
+	if userID != 0 {
+		h.downloadActiveByUser[userID]++
+	}
+	if chatID != 0 {
+		h.downloadActiveByChat[chatID]++
+	}
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			h.leaveDownloadWork(userID, chatID)
+		})
+	}, true
+}
+
+func (h *MusicHandler) logDownloadAdmissionRejectedLocked(scope string, userID, chatID int64) {
+	if h == nil || h.Logger == nil || !h.EnableQueueObservability {
+		return
+	}
+	h.Logger.Warn("download admission rejected",
+		"scope", scope,
+		"user_id", userID,
+		"chat_id", chatID,
+		"active", h.downloadActive,
+		"global_limit", h.DownloadQueueGlobalLimit,
+		"user_active", h.downloadActiveByUser[userID],
+		"user_limit", h.DownloadQueuePerUserLimit,
+		"chat_active", h.downloadActiveByChat[chatID],
+		"chat_limit", h.DownloadQueuePerChatLimit,
+	)
+}
+
+func (h *MusicHandler) leaveDownloadWork(userID, chatID int64) {
+	if h == nil {
+		return
+	}
+	h.downloadQueueMu.Lock()
+	defer h.downloadQueueMu.Unlock()
+
+	if h.downloadActive > 0 {
+		h.downloadActive--
+	}
+	if userID != 0 && h.downloadActiveByUser != nil {
+		if h.downloadActiveByUser[userID] > 1 {
+			h.downloadActiveByUser[userID]--
+		} else {
+			delete(h.downloadActiveByUser, userID)
+		}
+	}
+	if chatID != 0 && h.downloadActiveByChat != nil {
+		if h.downloadActiveByChat[chatID] > 1 {
+			h.downloadActiveByChat[chatID]--
+		} else {
+			delete(h.downloadActiveByChat, chatID)
+		}
+	}
+}
+
 func (h *MusicHandler) leaveWaiting() {
 	h.downloadQueueMu.Lock()
 	if h.downloadWaiting > 0 {
@@ -2867,6 +3143,33 @@ func (h *MusicHandler) DownloadQueueStats() (waiting, running, limit int) {
 	h.downloadQueueMu.Lock()
 	defer h.downloadQueueMu.Unlock()
 	return h.downloadWaiting, h.downloadRunning, h.DownloadQueueWaitLimit
+}
+
+func (h *MusicHandler) DownloadQueueSnapshot() DownloadQueueSnapshot {
+	if h == nil {
+		return DownloadQueueSnapshot{}
+	}
+	h.downloadQueueMu.Lock()
+	snapshot := DownloadQueueSnapshot{
+		Waiting:      h.downloadWaiting,
+		Running:      h.downloadRunning,
+		WaitLimit:    h.DownloadQueueWaitLimit,
+		Active:       h.downloadActive,
+		ActiveLimit:  h.DownloadQueueGlobalLimit,
+		PerUserLimit: h.DownloadQueuePerUserLimit,
+		PerChatLimit: h.DownloadQueuePerChatLimit,
+	}
+	h.downloadQueueMu.Unlock()
+
+	if h.UploadQueue != nil {
+		snapshot.UploadWaiting = len(h.UploadQueue)
+		snapshot.UploadQueueLimit = cap(h.UploadQueue)
+	}
+	if h.UploadLimiter != nil {
+		snapshot.UploadRunning = len(h.UploadLimiter)
+		snapshot.UploadLimit = cap(h.UploadLimiter)
+	}
+	return snapshot
 }
 
 func isInlineStartToken(value string) bool {

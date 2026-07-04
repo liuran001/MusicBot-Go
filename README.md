@@ -93,6 +93,7 @@ media_user_token = YOUR_TOKEN      # 登录 music.apple.com 后从浏览器 Cook
 | `/recognize` | 回复一条语音消息识别歌曲（需 `EnableRecognize`） |
 | `/settings` | 设置默认平台与音质（支持私聊 / 群聊维度） |
 | `/status` | 查看统计与各平台账号状态 |
+| `/queue` | 查看当前下载、发送和 Telegram API 队列 |
 | `/about` · `/help` | 关于 / 帮助 |
 
 也支持 Inline 模式（`@bot 关键词`）和直接粘贴链接。

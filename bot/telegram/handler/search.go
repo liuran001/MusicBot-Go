@@ -264,7 +264,7 @@ func (h *SearchHandler) runSearch(ctx context.Context, b *telego.Bot, message *t
 	}
 	searchCtx := withSearchFilterContext(ctx, h.PlatformManager, platformName, biliFilter)
 
-	tracks, platformName, usedFallback, err := searchTracksWithFallbackLimited(searchCtx, h.PlatformManager, h.ResourceLimiter, searchRequesterID(message), platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
+	tracks, platformName, usedFallback, err := searchTracksWithFallbackLimitedFor(searchCtx, h.PlatformManager, h.ResourceLimiter, searchRequesterID(message), message.Chat.ID, platformName, fallbackPlatform, keyword, h.initialSearchLimit, true)
 	searchLimit := h.searchLimit(platformName)
 	if err != nil {
 		errorText := userVisibleSearchError(ctx, err)

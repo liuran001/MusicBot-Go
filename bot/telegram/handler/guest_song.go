@@ -35,11 +35,11 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 		return
 	}
 	resolvedText := resolveShortLinkText(ctx, h.PlatformManager, baseText)
-	if platformName, trackID, matched := h.PlatformManager.MatchText(resolvedText); matched {
+	if platformName, trackID, matched := h.PlatformManager.MatchURL(resolvedText); matched {
 		h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
 		return
 	}
-	if platformName, trackID, matched := h.PlatformManager.MatchURL(resolvedText); matched {
+	if platformName, trackID, matched := matchTextTrack(h.PlatformManager, resolvedText); matched {
 		h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, platformName, trackID, qualityOverride)
 		return
 	}
@@ -48,9 +48,11 @@ func (h *GuestModeHandler) handleGuestSong(ctx context.Context, b *telego.Bot, m
 		h.handleGuestPlaylist(ctx, b, message, guestQueryID, platformName, playlistID, userID, qualityOverride)
 		return
 	}
-	if strings.TrimSpace(requestedPlatform) != "" && isLikelyIDToken(strings.TrimSpace(baseText)) {
-		h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, requestedPlatform, strings.TrimSpace(baseText), qualityOverride)
-		return
+	if strings.TrimSpace(requestedPlatform) != "" && !isBareNumericText(baseText) {
+		if trackID, matched := matchPlatformTrack(ctx, h.PlatformManager, requestedPlatform, baseText); matched {
+			h.answerAndRunGuestTrack(ctx, b, message, guestQueryID, userID, userName, requestedPlatform, trackID, qualityOverride)
+			return
+		}
 	}
 
 	h.answerAndRenderGuestSearch(ctx, b, message, guestQueryID, baseText, requestedPlatform, qualityOverride)
@@ -96,7 +98,7 @@ func (h *GuestModeHandler) fetchAndRenderGuestPlaylist(ctx context.Context, b *t
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_unsupported_platform"), nil, "")
 		return
 	}
-	if !h.ResourceLimiter.Allow(ActionPlaylist, userID, platformName) {
+	if !h.ResourceLimiter.AllowFor(ActionPlaylist, userID, message.Chat.ID, platformName) {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "err_rate_limited"), nil, "")
 		return
 	}
@@ -197,7 +199,7 @@ func (h *GuestModeHandler) renderGuestSearch(ctx context.Context, b *telego.Bot,
 	}
 	searchCtx := withSearchFilterContext(ctx, h.PlatformManager, platformName, biliFilter)
 	primaryPlatform := platformName
-	tracks, platformName, usedFallback, err := searchTracksWithFallbackLimited(searchCtx, h.PlatformManager, h.ResourceLimiter, userID, platformName, fallbackPlatform, keyword, h.guestSearchLimit, true)
+	tracks, platformName, usedFallback, err := searchTracksWithFallbackLimitedFor(searchCtx, h.PlatformManager, h.ResourceLimiter, userID, message.Chat.ID, platformName, fallbackPlatform, keyword, h.guestSearchLimit, true)
 	if err != nil {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, userVisibleSearchError(ctx, err), nil, "")
 		return
@@ -281,7 +283,7 @@ func (h *GuestModeHandler) fetchAndEditGuestLyric(ctx context.Context, b *telego
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_platform_no_lyrics"), nil, "")
 		return
 	}
-	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, requesterID, plat, platformName, trackID)
+	lyrics, err := getLyricsLimitedFor(ctx, h.ResourceLimiter, requesterID, message.Chat.ID, plat, platformName, trackID)
 	if err != nil || lyrics == nil {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "guest_get_lyric_failed"), nil, "")
 		return
@@ -310,10 +312,10 @@ func (h *GuestModeHandler) resolveGuestLyricTrack(ctx context.Context, message *
 		return "", "", false
 	}
 	resolvedText := resolveShortLinkText(ctx, h.LyricHandler.PlatformManager, keyword)
-	if platformName, trackID, matched := h.LyricHandler.PlatformManager.MatchText(resolvedText); matched {
+	if platformName, trackID, matched := h.LyricHandler.PlatformManager.MatchURL(resolvedText); matched {
 		return platformName, trackID, true
 	}
-	if platformName, trackID, matched := h.LyricHandler.PlatformManager.MatchURL(resolvedText); matched {
+	if platformName, trackID, matched := matchTextTrack(h.LyricHandler.PlatformManager, resolvedText); matched {
 		return platformName, trackID, true
 	}
 	if h.SearchHandler != nil && h.SearchHandler.PlatformManager != nil {
@@ -330,7 +332,7 @@ func (h *GuestModeHandler) resolveGuestLyricTrack(ctx context.Context, message *
 			platformName = requestedPlatform
 			fallbackPlatform = ""
 		}
-		tracks, matchedPlatform, _, err := searchTracksWithFallbackLimited(ctx, h.LyricHandler.PlatformManager, h.ResourceLimiter, guestUserID(message), platformName, fallbackPlatform, base, h.guestSearchLimit, true)
+		tracks, matchedPlatform, _, err := searchTracksWithFallbackLimitedFor(ctx, h.LyricHandler.PlatformManager, h.ResourceLimiter, guestUserID(message), message.Chat.ID, platformName, fallbackPlatform, base, h.guestSearchLimit, true)
 		if err != nil || len(tracks) == 0 {
 			return "", "", false
 		}
@@ -372,7 +374,7 @@ func (h *GuestModeHandler) runGuestRecognize(ctx context.Context, b *telego.Bot,
 			return
 		}
 	}
-	if requesterID, _ := guestRequester(message); !h.ResourceLimiter.Allow(ActionRecognize, requesterID, "") {
+	if requesterID, _ := guestRequester(message); !h.ResourceLimiter.AllowFor(ActionRecognize, requesterID, message.Chat.ID, "") {
 		_ = h.editGuestInlineText(ctx, b, inlineMessageID, tr(ctx, "err_rate_limited"), nil, "")
 		return
 	}

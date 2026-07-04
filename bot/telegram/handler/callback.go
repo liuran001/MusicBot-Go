@@ -117,10 +117,15 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_select_episode")})
 			return
 		}
-		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_success")})
+		accepted := true
 		if h.Music != nil {
-			h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
+			accepted = h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
 		}
+		if !accepted {
+			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "err_download_overloaded"), ShowAlert: true})
+			return
+		}
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_success")})
 		if h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil) {
 			deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
 			if h.RateLimiter != nil {
@@ -141,14 +146,19 @@ func (h *CallbackMusicHandler) Handle(ctx context.Context, b *telego.Bot, update
 		return
 	}
 
-	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_success")})
 	if h.tryPresentEpisodePicker(ctx, b, query, msg, msgToUse, platformName, trackID, qualityOverride, query.From.ID, requesterID) {
 		return
 	}
 	autoDelete := h.shouldAutoDeleteListMessage(ctx, msg, query.From.ID, nil, nil)
+	accepted := true
 	if h.Music != nil {
-		h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
+		accepted = h.Music.dispatch(withDisableFallback(withForceNonSilent(ctx)), b, msgToUse, platformName, trackID, qualityOverride)
 	}
+	if !accepted {
+		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "err_download_overloaded"), ShowAlert: true})
+		return
+	}
+	_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_success")})
 	if autoDelete {
 		deleteParams := &telego.DeleteMessageParams{ChatID: telego.ChatID{ID: msg.Chat.ID}, MessageID: msg.MessageID}
 		if h.RateLimiter != nil {
@@ -296,7 +306,7 @@ func (h *CallbackMusicHandler) tryPresentInlineEpisodePicker(ctx context.Context
 	if !ok || hasExplicitPage || strings.TrimSpace(baseTrackID) == "" {
 		return false
 	}
-	episodes, err := h.fetchEpisodes(ctx, requesterID, platformName, baseTrackID)
+	episodes, err := h.fetchEpisodes(ctx, requesterID, 0, platformName, baseTrackID)
 	if err != nil || len(episodes) <= 1 {
 		return false
 	}
@@ -326,7 +336,7 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	if reqID == 0 {
 		reqID = operatorID
 	}
-	episodes, err := h.fetchEpisodes(ctx, reqID, platformName, baseTrackID)
+	episodes, err := h.fetchEpisodes(ctx, reqID, listMsg.Chat.ID, platformName, baseTrackID)
 	if err != nil || len(episodes) <= 1 {
 		return false
 	}
@@ -352,7 +362,7 @@ func (h *CallbackMusicHandler) tryPresentEpisodePicker(ctx context.Context, b *t
 	return true
 }
 
-func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, userID int64, platformName, trackID string) ([]platform.Episode, error) {
+func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, userID, chatID int64, platformName, trackID string) ([]platform.Episode, error) {
 	if h == nil || h.Music == nil || h.Music.PlatformManager == nil {
 		return nil, platform.ErrUnavailable
 	}
@@ -364,7 +374,7 @@ func (h *CallbackMusicHandler) fetchEpisodes(ctx context.Context, userID int64, 
 	if !ok {
 		return nil, platform.ErrUnsupported
 	}
-	if !h.Music.ResourceLimiter.Allow(ActionEpisode, userID, strings.TrimSpace(platformName)) {
+	if !h.Music.ResourceLimiter.AllowFor(ActionEpisode, userID, chatID, strings.TrimSpace(platformName)) {
 		return nil, platform.ErrRateLimited
 	}
 	return provider.ListEpisodes(ctx, strings.TrimSpace(trackID))
@@ -613,7 +623,7 @@ func (h *CallbackMusicHandler) handleEpisodeCallback(ctx context.Context, b *tel
 		}
 		return
 	case "s", "n":
-		episodes, err := h.fetchEpisodes(ctx, query.From.ID, platformName, trackID)
+		episodes, err := h.fetchEpisodes(ctx, query.From.ID, msg.Chat.ID, platformName, trackID)
 		if err != nil || len(episodes) == 0 {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_episode_load_failed"), ShowAlert: true})
 			return
@@ -722,7 +732,7 @@ func (h *CallbackMusicHandler) handleInlineEpisodeCallback(ctx context.Context, 
 		_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "callback_success")})
 		return
 	case "s", "n":
-		episodes, err := h.fetchEpisodes(ctx, query.From.ID, platformName, trackID)
+		episodes, err := h.fetchEpisodes(ctx, query.From.ID, 0, platformName, trackID)
 		if err != nil || len(episodes) == 0 {
 			_ = b.AnswerCallbackQuery(ctx, &telego.AnswerCallbackQueryParams{CallbackQueryID: query.ID, Text: tr(ctx, "cb_episode_load_failed"), ShowAlert: true})
 			return

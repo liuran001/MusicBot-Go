@@ -38,11 +38,23 @@ type RateLimiter struct {
 	cleanupInterval time.Duration
 	lastCleanup     time.Time
 	maxEntries      int
+	sendMu          sync.Mutex
+	sendCtx         context.Context
+	sendQueue       chan sendQueueTask
+	sendRunning     int
+	sendWorkers     int
 }
 
 type chatLimiter struct {
 	limiter  *rate.Limiter
 	lastUsed time.Time
+}
+
+type sendQueueTask struct {
+	ctx    context.Context
+	chatID int64
+	fn     func() error
+	done   chan error
 }
 
 func NewRateLimiter(msgPerSec float64, burst int) *RateLimiter {
@@ -69,6 +81,73 @@ func NewRateLimiterWithGlobal(msgPerSec float64, burst int, globalPerSec float64
 
 func (rl *RateLimiter) SetLogger(logger Logger) {
 	rl.logger = logger
+}
+
+// StartQueue enables a bounded Telegram API send queue. The public send/edit
+// helpers still block until their request finishes, but the actual API calls
+// are executed by this worker set instead of by event/download goroutines.
+// Calling StartQueue with non-positive values leaves direct execution enabled.
+func (rl *RateLimiter) StartQueue(ctx context.Context, workers, queueSize int) {
+	if rl == nil || workers <= 0 || queueSize <= 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	rl.sendMu.Lock()
+	if rl.sendQueue != nil {
+		rl.sendMu.Unlock()
+		return
+	}
+	queue := make(chan sendQueueTask, queueSize)
+	rl.sendCtx = ctx
+	rl.sendQueue = queue
+	rl.sendWorkers = workers
+	rl.sendMu.Unlock()
+
+	for i := 0; i < workers; i++ {
+		go rl.runSendWorker(ctx, queue)
+	}
+}
+
+func (rl *RateLimiter) runSendWorker(ctx context.Context, queue <-chan sendQueueTask) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task, ok := <-queue:
+			if !ok {
+				return
+			}
+			rl.sendMu.Lock()
+			rl.sendRunning++
+			rl.sendMu.Unlock()
+			err := rl.withRetryDirect(task.ctx, task.chatID, task.fn)
+			rl.sendMu.Lock()
+			if rl.sendRunning > 0 {
+				rl.sendRunning--
+			}
+			rl.sendMu.Unlock()
+			select {
+			case task.done <- err:
+			case <-task.ctx.Done():
+			}
+		}
+	}
+}
+
+// QueueStats reports the current Telegram API send queue state.
+func (rl *RateLimiter) QueueStats() (waiting, running, capacity, workers int) {
+	if rl == nil {
+		return 0, 0, 0, 0
+	}
+	rl.sendMu.Lock()
+	defer rl.sendMu.Unlock()
+	if rl.sendQueue == nil {
+		return 0, 0, 0, 0
+	}
+	return len(rl.sendQueue), rl.sendRunning, cap(rl.sendQueue), rl.sendWorkers
 }
 
 func (rl *RateLimiter) logError(msg string, args ...any) {
@@ -228,6 +307,60 @@ func WithRetry(ctx context.Context, rl *RateLimiter, chatID int64, fn func() err
 	}
 	if rl == nil {
 		return fn()
+	}
+	return rl.withRetry(ctx, chatID, fn)
+}
+
+func (rl *RateLimiter) withRetry(ctx context.Context, chatID int64, fn func() error) error {
+	if rl == nil {
+		return fn()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	rl.sendMu.Lock()
+	queue := rl.sendQueue
+	queueCtx := rl.sendCtx
+	rl.sendMu.Unlock()
+	if queue == nil {
+		return rl.withRetryDirect(ctx, chatID, fn)
+	}
+	if queueCtx == nil {
+		queueCtx = context.Background()
+	}
+
+	task := sendQueueTask{
+		ctx:    ctx,
+		chatID: chatID,
+		fn:     fn,
+		done:   make(chan error, 1),
+	}
+	select {
+	case <-queueCtx.Done():
+		return queueCtx.Err()
+	default:
+	}
+	select {
+	case queue <- task:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-queueCtx.Done():
+		return queueCtx.Err()
+	}
+	select {
+	case err := <-task.done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-queueCtx.Done():
+		return queueCtx.Err()
+	}
+}
+
+func (rl *RateLimiter) withRetryDirect(ctx context.Context, chatID int64, fn func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	maxRetries := 3
 	for attempt := 0; attempt < maxRetries; attempt++ {

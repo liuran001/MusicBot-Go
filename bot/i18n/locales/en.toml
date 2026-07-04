@@ -32,13 +32,13 @@ Examples:
 /search Jay Chou
 /search Take My Hand qq"""
 
-input_content = """Send a song name, link, or ID
+input_content = """Send a song name or link
 
 Examples:
 /music Jay Chou
 /music https://music.163.com/song/1859603835"""
 
-input_lyric_content = """Send a song name, link, or ID, or reply to a song message
+input_lyric_content = """Send a song name or link, or reply to a song message
 
 Examples:
 /lyric Sunny Day
@@ -55,6 +55,9 @@ download_queued = "Queued…"
 download_queue_button = "View queue"
 download_queue_status = "Downloading: {{.Running}}\nWaiting in queue: {{.Waiting}}"
 download_queue_status_limited = "Downloading: {{.Running}}\nWaiting in queue: {{.Waiting}} / {{.Limit}}"
+download_queue_active_limited = "Accepted tasks: {{.Active}} / {{.Limit}}"
+download_queue_status_detail = "Accepted download tasks: {{.Active}}{{.ActiveLimit}}\nDownloading: {{.Running}}\nWaiting for a download slot: {{.Waiting}}{{.WaitLimit}}\nPer-user limit: {{.PerUserLimit}}, per-chat limit: {{.PerChatLimit}}\nSend queue: {{.UploadWaiting}}{{.UploadQueueLimit}}\nSending: {{.UploadRunning}}{{.UploadLimit}}"
+telegram_send_queue_status = "Telegram send queue: {{.Waiting}}{{.Limit}}, send workers: {{.Running}}/{{.Workers}}"
 
 # --- bot command menu (setMyCommands) ---
 cmd_help = "How to use"
@@ -65,12 +68,13 @@ cmd_fav = "Favorite a track / view favorites"
 cmd_settings = "Default platform, quality, and lyric format"
 cmd_recognize = "Recognize a song"
 cmd_status = "Cache and account status"
+cmd_queue = "Show download and send queues"
 cmd_about = "Version and plugin info"
 
 # --- bot profile ---
 bot_name = "Music Bot"
 bot_short_description = "Multi-platform music / lyric download bot"
-bot_description = "Send a song name, link, or ID to search and download music. Supports NetEase Cloud Music, QQ Music, and more."
+bot_description = "Send a song name or link to search and download music. Supports NetEase Cloud Music, QQ Music, and more."
 
 # --- user-visible error mapping (helpers.go) ---
 err_process_timeout = "Processing timed out, please try again later"
@@ -95,7 +99,7 @@ quality_tag_high = "HiFi"
 quality_tag_lossless = "Lossless"
 
 # --- help / about / status (authored WITH markdown, rendered via T not Tmd) ---
-help_intro = "Send a song name, link, or ID to search and download music."
+help_intro = "Send a song name or link to search and download music."
 help_private_hint = "In private chat you can send content directly without a command."
 help_section_commands = "🚀 Common commands"
 help_cmd_music = "download a track"
@@ -104,6 +108,7 @@ help_cmd_lyric = "get lyrics"
 help_cmd_recognize = "recognize a song (reply to a voice message)"
 help_cmd_settings = "default platform, quality & lyric format"
 help_cmd_status = "cache & account status"
+help_cmd_queue = "show download and send queues"
 help_cmd_about = "version & plugin info"
 help_section_params = "🎚 Parameters"
 help_quality_label = "Quality"
@@ -113,7 +118,7 @@ help_section_examples = "💡 Examples"
 help_example_music = "Jay Chou"
 help_example_search = "Take My Hand qq"
 help_section_admin = "🛠 Admin commands"
-help_arg_track = "name|link|ID"
+help_arg_track = "name|link"
 help_arg_keyword = "keyword"
 about_title = "MusicBot-Go"
 about_version = "Version"

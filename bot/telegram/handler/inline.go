@@ -1121,20 +1121,22 @@ func (h *InlineSearchHandler) tryResolveDirectTrack(ctx context.Context, text, p
 			}
 		}
 	}
-	if platformSuffix != "" && len(fields) == 1 && isLikelyIDToken(fields[0]) {
-		return platformSuffix, fields[0], true
-	}
-	if platformName, trackID, ok := h.PlatformManager.MatchText(text); ok {
-		return platformName, trackID, true
+	if platformSuffix != "" && len(fields) == 1 && !isBareNumericText(fields[0]) {
+		if trackID, ok := matchPlatformTrack(ctx, h.PlatformManager, platformSuffix, fields[0]); ok {
+			return platformSuffix, trackID, true
+		}
 	}
 	if platformName, trackID, ok := h.PlatformManager.MatchURL(text); ok {
+		return platformName, trackID, true
+	}
+	if platformName, trackID, ok := matchTextTrack(h.PlatformManager, text); ok {
 		return platformName, trackID, true
 	}
 	if urlStr := extractFirstURL(text); urlStr != "" && urlStr != text {
 		if platformName, trackID, ok := h.PlatformManager.MatchURL(urlStr); ok {
 			return platformName, trackID, true
 		}
-		if platformName, trackID, ok := h.PlatformManager.MatchText(urlStr); ok {
+		if platformName, trackID, ok := matchTextTrack(h.PlatformManager, urlStr); ok {
 			return platformName, trackID, true
 		}
 	}

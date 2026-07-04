@@ -50,7 +50,7 @@ MusicBot-Go/
     └── applemusic/              # Apple Music（Widevine 原生解密 + 可选 FairPlay wrapper）
 
 每个平台插件目录的典型结构：`client.go`（API 客户端）、`platform.go`（Platform
-接口实现）、`matcher.go` / `textmatcher.go`（URL / 短链 / 纯 ID 识别）、
+接口实现）、`matcher.go` / `textmatcher.go`（URL / 短链 / 平台特定文本识别）、
 `register.go`（注册工厂），按需还有 `recognizer.go`、`refresh.go`（Cookie 续期）、
 `account.go`（账号登录）等。
 ```
@@ -80,8 +80,8 @@ Telegram Update
   └─> Router
         ├─> PlaylistHandler.TryHandle()             # 先识别专辑/歌单链接并进入分页选择
         └─> MusicHandler.Handle()
-             ├─> 解析文本/URL/ID/关键词
-             ├─> PlatformManager.MatchText()/MatchURL()  # 识别平台
+             ├─> 解析文本/URL/关键词（裸数字按关键词处理）
+             ├─> PlatformManager.MatchText()/MatchURL()  # 识别链接和平台特定文本
              ├─> (若为关键词) 按默认平台搜索并回退到其他平台
              ├─> Platform.GetTrack()                     # 获取歌曲信息
              ├─> Repository.FindByPlatformTrackID()      # 检查缓存
@@ -197,7 +197,7 @@ type SongRepository interface {
 ### Telegram 处理器 (`bot/telegram/handler/`)
 
 **主要处理器**:
-- `MusicHandler`: 音乐下载核心逻辑（含 `/music` 与关键词回退、URL/ID 自动识别）
+- `MusicHandler`: 音乐下载核心逻辑（含 `/music` 与关键词回退、URL 自动识别）
 - `SearchHandler`: 搜索功能 (使用用户默认平台)
 - `PlaylistHandler`: 专辑/歌单分页选择
 - `ArtistHandler`: 艺术家作品集
@@ -239,7 +239,7 @@ type SongRepository interface {
  - **SearchHandler**: 使用用户默认平台搜索
  - **MusicHandler**: 使用用户默认音质下载
  - **平台回退**: 搜索失败时自动切换到 `SearchFallbackPlatform`
- - **/music 关键词**: 未匹配链接/ID 时执行同样的回退搜索
+ - **/music 关键词**: 未匹配链接时执行同样的回退搜索
 
 ### 数据库
 ```sql

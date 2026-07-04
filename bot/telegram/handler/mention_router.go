@@ -193,10 +193,10 @@ func (r *MentionRouter) isDirectDownload(ctx context.Context, content string) bo
 			return true
 		}
 	}
-	if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
+	if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 		return true
 	}
-	if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
+	if _, _, matched := matchTextTrack(r.PlatformManager, resolvedText); matched {
 		return true
 	}
 	return false
@@ -213,7 +213,7 @@ func (r *MentionRouter) dispatchRecognize(ctx context.Context, b *telego.Bot, me
 }
 
 // dispatchLyric rewrites the message into "/lyric <keyword>" and forwards it to
-// the lyric handler, reusing its full URL/ID/search-delegation flow.
+// the lyric handler, reusing its URL/search-delegation flow.
 func (r *MentionRouter) dispatchLyric(ctx context.Context, b *telego.Bot, message *telego.Message, keyword string) {
 	if r.Lyric == nil {
 		return
@@ -221,7 +221,7 @@ func (r *MentionRouter) dispatchLyric(ctx context.Context, b *telego.Bot, messag
 	r.Lyric.Handle(ctx, b, &telego.Update{Message: rewriteCommandMessage(message, "/lyric", keyword)})
 }
 
-// dispatchSong matches the guest song flow: a URL/ID resolves directly to a
+// dispatchSong matches the guest song flow: a URL resolves directly to a
 // download (via the music handler), otherwise the keyword goes to a search list.
 func (r *MentionRouter) dispatchSong(ctx context.Context, b *telego.Bot, message *telego.Message, content string) {
 	content = strings.TrimSpace(content)
@@ -232,11 +232,11 @@ func (r *MentionRouter) dispatchSong(ctx context.Context, b *telego.Bot, message
 	if r.PlatformManager != nil {
 		baseText, _, _ := parseTrailingOptions(content, r.PlatformManager)
 		resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
-		if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
+		if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 			r.dispatchMusic(ctx, b, message, content)
 			return
 		}
-		if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
+		if _, _, matched := matchTextTrack(r.PlatformManager, resolvedText); matched {
 			r.dispatchMusic(ctx, b, message, content)
 			return
 		}

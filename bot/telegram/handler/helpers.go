@@ -42,7 +42,13 @@ func extractPlatformTrack(ctx context.Context, message *telego.Message, manager 
 		fields := strings.Fields(args)
 		if len(fields) >= 3 {
 			if _, err := platform.ParseQuality(fields[2]); err == nil {
-				return fields[0], fields[1], true
+				platformName := fields[0]
+				if resolved, ok := resolvePlatformAlias(manager, fields[0]); ok {
+					platformName = resolved
+				}
+				if trackID, matched := matchPlatformTrack(ctx, manager, platformName, fields[1]); matched {
+					return platformName, trackID, true
+				}
 			}
 		}
 	}
@@ -56,17 +62,17 @@ func extractPlatformTrack(ctx context.Context, message *telego.Message, manager 
 			return "", "", false
 		}
 		resolvedText := resolveShortLinkText(ctx, manager, text)
-		if plat, id, matched := manager.MatchText(resolvedText); matched {
+		if plat, id, matched := manager.MatchURL(resolvedText); matched {
 			return plat, id, true
 		}
-		if plat, id, matched := manager.MatchURL(resolvedText); matched {
+		if plat, id, matched := matchTextTrack(manager, resolvedText); matched {
 			return plat, id, true
 		}
 		if extractedURL := extractFirstURL(resolvedText); extractedURL != "" && extractedURL != resolvedText {
 			if plat, id, matched := manager.MatchURL(extractedURL); matched {
 				return plat, id, true
 			}
-			if plat, id, matched := manager.MatchText(extractedURL); matched {
+			if plat, id, matched := matchTextTrack(manager, extractedURL); matched {
 				return plat, id, true
 			}
 		}
@@ -205,12 +211,16 @@ func searchTracksWithFallback(ctx context.Context, manager platform.Manager, pri
 // platform. When the limiter rejects the search it returns platform.ErrRateLimited
 // before any platform API call is made; a nil limiter disables throttling.
 func searchTracksWithFallbackLimited(ctx context.Context, manager platform.Manager, limiter *ResourceRateLimiter, userID int64, primaryPlatform, fallbackPlatform, keyword string, limitFn searchLimitFunc, fallbackOnEmpty bool) ([]platform.Track, string, bool, error) {
+	return searchTracksWithFallbackLimitedFor(ctx, manager, limiter, userID, 0, primaryPlatform, fallbackPlatform, keyword, limitFn, fallbackOnEmpty)
+}
+
+func searchTracksWithFallbackLimitedFor(ctx context.Context, manager platform.Manager, limiter *ResourceRateLimiter, userID, chatID int64, primaryPlatform, fallbackPlatform, keyword string, limitFn searchLimitFunc, fallbackOnEmpty bool) ([]platform.Track, string, bool, error) {
 	primaryPlatform = strings.TrimSpace(primaryPlatform)
 	fallbackPlatform = strings.TrimSpace(fallbackPlatform)
 	if manager == nil {
 		return nil, primaryPlatform, false, platform.ErrUnavailable
 	}
-	if !limiter.Allow(ActionSearch, userID, primaryPlatform) {
+	if !limiter.AllowFor(ActionSearch, userID, chatID, primaryPlatform) {
 		return nil, primaryPlatform, false, platform.ErrRateLimited
 	}
 	plat := manager.Get(primaryPlatform)
@@ -521,6 +531,26 @@ func isLikelyIDToken(token string) bool {
 		}
 	}
 	return hasDigit
+}
+
+func isBareNumericText(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	for _, ch := range text {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func matchTextTrack(manager platform.Manager, text string) (platformName, trackID string, matched bool) {
+	if manager == nil || isBareNumericText(text) {
+		return "", "", false
+	}
+	return manager.MatchText(text)
 }
 
 func isNumeric(s string) bool {
@@ -1548,12 +1578,12 @@ func matchPlatformTrack(ctx context.Context, manager platform.Manager, platformN
 			return id, true
 		}
 	}
-	if matcher, ok := plat.(platform.TextMatcher); ok {
+	if matcher, ok := plat.(platform.TextMatcher); ok && !isBareNumericText(text) {
 		if id, ok := matcher.MatchText(text); ok {
 			return id, true
 		}
 	}
-	if isLikelyIDToken(text) && len(text) >= 5 {
+	if isLikelyIDToken(text) && len(text) >= 5 && !isBareNumericText(text) {
 		return text, true
 	}
 	return "", false

@@ -60,7 +60,7 @@ func (h *RecognizeHandler) Handle(ctx context.Context, b *telego.Bot, update *te
 	if message.From != nil {
 		recognizeUserID = message.From.ID
 	}
-	if !h.ResourceLimiter.Allow(ActionRecognize, recognizeUserID, "") {
+	if !h.ResourceLimiter.AllowFor(ActionRecognize, recognizeUserID, chatID, "") {
 		sendText(ctx, b, chatID, replyID, tr(ctx, "err_rate_limited"))
 		return
 	}

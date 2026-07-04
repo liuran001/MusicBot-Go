@@ -45,6 +45,7 @@ func buildHelpText(ctx context.Context, manager platform.Manager, isAdmin bool, 
 	}
 	text += "`/settings` \\- " + esc("help_cmd_settings") + "\n" +
 		"`/status` \\- " + esc("help_cmd_status") + "\n" +
+		"`/queue` \\- " + esc("help_cmd_queue") + "\n" +
 		"`/about` \\- " + esc("help_cmd_about") + "\n" +
 		"\n*" + esc("help_section_params") + "*\n" +
 		esc("help_quality_label") + "：`low` / `high` / `lossless` / `hires`\n" +

@@ -22,11 +22,11 @@ func TestExtractPlatformTrackFromMessage(t *testing.T) {
 		wantFound    bool
 	}{
 		{
-			name:         "text match",
+			name:         "numeric text is keyword",
 			messageText:  "12345",
-			wantPlatform: "netease",
-			wantTrackID:  "12345",
-			wantFound:    true,
+			wantPlatform: "",
+			wantTrackID:  "",
+			wantFound:    false,
 		},
 		{
 			name:         "URL match",

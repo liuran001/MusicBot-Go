@@ -34,6 +34,7 @@ type App struct {
 	Logger                   *logpkg.Logger
 	DB                       *db.Repository
 	Pool                     *worker.Pool
+	DownloadPool             *worker.Pool
 	PlatformManager          platform.Manager
 	DynPlugins               *dynplugin.Manager
 	AdminIDs                 map[int64]struct{}
@@ -190,6 +191,54 @@ func initWorkerPool(conf *config.Config, log *logpkg.Logger) *worker.Pool {
 	return pool
 }
 
+func (a *App) initDownloadPool(downloadConcurrency, waitLimit, globalLimit int) *worker.Pool {
+	if a.DownloadPool != nil {
+		return a.DownloadPool
+	}
+	size := resolveDownloadWorkerPoolSize(
+		a.Config.GetInt("DownloadWorkerPoolSize"),
+		downloadConcurrency,
+		waitLimit,
+		globalLimit,
+	)
+	pool := worker.New(size)
+	pool.SetPanicHandler(func(recovered any, stack []byte) {
+		if a.Logger != nil {
+			a.Logger.Error("download task panic recovered", "panic", recovered, "stack", string(stack))
+		}
+	})
+	a.DownloadPool = pool
+	return pool
+}
+
+func resolveDownloadWorkerPoolSize(configured, downloadConcurrency, waitLimit, globalLimit int) int {
+	minimum := downloadConcurrency
+	if globalLimit > minimum {
+		minimum = globalLimit
+	}
+	if configured > 0 {
+		if configured < minimum {
+			return minimum
+		}
+		return configured
+	}
+
+	size := globalLimit
+	if size <= 0 {
+		size = waitLimit + downloadConcurrency
+	}
+	if size <= 0 {
+		size = downloadConcurrency * 2
+	}
+	if size < minimum {
+		size = minimum
+	}
+	if size <= 0 {
+		size = 4
+	}
+	return size
+}
+
 func initPluginRuntime(ctx context.Context, conf *config.Config, log *logpkg.Logger) (
 	platformManager platform.Manager,
 	dynManager *dynplugin.Manager,
@@ -334,6 +383,7 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	rateLimiter := telegram.NewRateLimiterWithGlobal(rateLimitPerSecond, rateLimitBurst, globalRateLimitPerSecond, globalRateLimitBurst)
 	rateLimiter.SetLogger(a.Logger)
+	rateLimiter.StartQueue(ctx, a.Config.GetInt("TelegramSendWorkerCount"), a.Config.GetInt("TelegramSendQueueSize"))
 	resourceLimiter := handler.NewResourceRateLimiter(buildResourceRateLimits(a.Config))
 	enableAprilFools := a.Config.GetBool("EnableAprilFools")
 	aprilFoolsTextPrankProbability := a.Config.GetFloat64("AprilFoolsTextPrankProbability")
@@ -356,6 +406,10 @@ func (a *App) Start(ctx context.Context) error {
 	uploadQueueSize := a.Config.GetInt("UploadQueueSize")
 	uploadWorkerCount := a.Config.GetInt("UploadWorkerCount")
 	downloadQueueWaitLimit := a.Config.GetInt("DownloadQueueWaitLimit")
+	downloadQueuePerUserLimit := a.Config.GetInt("DownloadQueuePerUserLimit")
+	downloadQueuePerChatLimit := a.Config.GetInt("DownloadQueuePerChatLimit")
+	downloadQueueGlobalLimit := a.Config.GetInt("DownloadQueueGlobalLimit")
+	downloadPool := a.initDownloadPool(downloadConcurrency, downloadQueueWaitLimit, downloadQueueGlobalLimit)
 	defaultPlatform := strings.TrimSpace(a.Config.GetString("DefaultPlatform"))
 	if defaultPlatform == "" {
 		defaultPlatform = "netease"
@@ -402,34 +456,38 @@ func (a *App) Start(ctx context.Context) error {
 	playlistCallback := &handler.PlaylistCallbackHandler{Playlist: playlistHandler, RateLimiter: rateLimiter}
 
 	musicHandler := &handler.MusicHandler{
-		Repo:                     a.DB,
-		Pool:                     a.Pool,
-		Logger:                   a.Logger,
-		CacheDir:                 cacheDir,
-		BotName:                  botName,
-		DefaultQuality:           defaultQuality,
-		DefaultLyricFormat:       defaultLyricFormat,
-		InlineUploadChatID:       int64(a.Config.GetInt("InlineUploadChatID")),
-		DefaultPlatform:          defaultPlatform,
-		FallbackPlatform:         searchFallback,
-		AdminIDs:                 a.adminSet,
-		AdminCommands:            adminCommands,
-		PlatformManager:          a.PlatformManager,
-		DownloadService:          downloadService,
-		ID3Service:               id3Service,
-		TagProviders:             tagProviders,
-		Limiter:                  downloadLimiter,
-		UploadLimiter:            uploadLimiter,
-		UploadWorkerCount:        uploadWorkerCount,
-		UploadQueueSize:          uploadQueueSize,
-		DownloadQueueWaitLimit:   downloadQueueWaitLimit,
-		UploadBot:                a.Telegram.UploadClient(),
-		RateLimiter:              rateLimiter,
-		ResourceLimiter:          resourceLimiter,
-		Playlist:                 playlistHandler,
-		RecognizeEnabled:         a.Config.GetBool("EnableRecognize"),
-		EnableQueueObservability: a.Config.GetBool("BotDebug"),
-		PluginSettingDefinitions: a.PluginSettingDefinitions,
+		Repo:                      a.DB,
+		Pool:                      a.Pool,
+		DownloadPool:              downloadPool,
+		Logger:                    a.Logger,
+		CacheDir:                  cacheDir,
+		BotName:                   botName,
+		DefaultQuality:            defaultQuality,
+		DefaultLyricFormat:        defaultLyricFormat,
+		InlineUploadChatID:        int64(a.Config.GetInt("InlineUploadChatID")),
+		DefaultPlatform:           defaultPlatform,
+		FallbackPlatform:          searchFallback,
+		AdminIDs:                  a.adminSet,
+		AdminCommands:             adminCommands,
+		PlatformManager:           a.PlatformManager,
+		DownloadService:           downloadService,
+		ID3Service:                id3Service,
+		TagProviders:              tagProviders,
+		Limiter:                   downloadLimiter,
+		UploadLimiter:             uploadLimiter,
+		UploadWorkerCount:         uploadWorkerCount,
+		UploadQueueSize:           uploadQueueSize,
+		DownloadQueueWaitLimit:    downloadQueueWaitLimit,
+		DownloadQueuePerUserLimit: downloadQueuePerUserLimit,
+		DownloadQueuePerChatLimit: downloadQueuePerChatLimit,
+		DownloadQueueGlobalLimit:  downloadQueueGlobalLimit,
+		UploadBot:                 a.Telegram.UploadClient(),
+		RateLimiter:               rateLimiter,
+		ResourceLimiter:           resourceLimiter,
+		Playlist:                  playlistHandler,
+		RecognizeEnabled:          a.Config.GetBool("EnableRecognize"),
+		EnableQueueObservability:  a.Config.GetBool("BotDebug"),
+		PluginSettingDefinitions:  a.PluginSettingDefinitions,
 	}
 	musicHandler.Artist = &handler.ArtistHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, Logger: a.Logger}
 	musicHandler.StartWorker(ctx)
@@ -516,6 +574,7 @@ func (a *App) Start(ctx context.Context) error {
 		LyricCallback:            &handler.LyricCallbackHandler{PlatformManager: a.PlatformManager, RateLimiter: rateLimiter, ResourceLimiter: resourceLimiter, Repo: a.DB, DefaultPlatform: defaultPlatform, FallbackPlatform: searchFallback, InlineUploadChatID: int64(a.Config.GetInt("InlineUploadChatID")), UploadBot: a.Telegram.UploadClient()},
 		FavoriteCallback:         favoriteCallback,
 		DownloadQueueCallback:    &handler.DownloadQueueCallbackHandler{Music: musicHandler, RateLimiter: rateLimiter},
+		Queue:                    &handler.DownloadQueueCommandHandler{Music: musicHandler, RateLimiter: rateLimiter},
 		Reload:                   reloadHandler,
 		Admin:                    adminHandler,
 		Inline:                   &handler.InlineSearchHandler{Repo: a.DB, PlatformManager: a.PlatformManager, CollectionChosen: chosenInlineHandler, Favorites: favoritesHandler, BotName: botName, DefaultPlatform: defaultPlatform, DefaultQuality: defaultQuality, FallbackPlatform: searchFallback, PageSize: inlinePageSize, ResourceLimiter: resourceLimiter},
@@ -526,6 +585,7 @@ func (a *App) Start(ctx context.Context) error {
 		Whitelist:                whitelist,
 		Logger:                   a.Logger,
 		Repo:                     a.DB,
+		Pool:                     a.Pool,
 	}
 
 	updates, err := a.Telegram.Client().UpdatesViaLongPolling(ctx, telegram.LongPollingParams())
@@ -569,6 +629,7 @@ var botCommandSpecs = []localizedCommandSpec{
 	{command: "settings", descKey: "cmd_settings"},
 	{command: "recognize", descKey: "cmd_recognize", recognize: true},
 	{command: "status", descKey: "cmd_status"},
+	{command: "queue", descKey: "cmd_queue"},
 	{command: "about", descKey: "cmd_about"},
 }
 
@@ -902,6 +963,15 @@ func (a *App) Shutdown(ctx context.Context) error {
 			}
 		}
 	}
+	if a.DownloadPool != nil && a.DownloadPool != a.Pool {
+		if err := a.DownloadPool.Shutdown(ctx); err != nil {
+			a.DownloadPool.StopNow()
+			if firstErr == nil {
+				firstErr = fmt.Errorf("shutdown download worker pool: %w", err)
+			}
+		}
+		a.DownloadPool = nil
+	}
 
 	// 关闭平台插件持有的后台守护协程（如 bilibili/kugou 的 Cookie 自动续期）。
 	if dm, ok := a.PlatformManager.(*platform.DefaultManager); ok {
@@ -984,6 +1054,7 @@ func buildResourceRateLimits(c *config.Config) map[string]handler.ResourceLimit 
 		return handler.ResourceLimit{
 			Window:      window,
 			PerUser:     c.GetInt(prefix + "PerUser"),
+			PerChat:     c.GetInt(prefix + "PerChat"),
 			PerPlatform: c.GetInt(prefix + "PerPlatform"),
 			Global:      c.GetInt(prefix + "Global"),
 		}

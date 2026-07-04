@@ -66,7 +66,7 @@ func (h *ArtistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *te
 	if message.From != nil {
 		userID = message.From.ID
 	}
-	if !h.ResourceLimiter.Allow(ActionArtist, userID, platformName) {
+	if !h.ResourceLimiter.AllowFor(ActionArtist, userID, message.Chat.ID, platformName) {
 		sendText(ctx, b, message.Chat.ID, message.MessageID, userVisibleArtistError(ctx, platform.ErrRateLimited))
 		return true
 	}

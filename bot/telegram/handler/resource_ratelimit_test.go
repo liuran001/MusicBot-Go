@@ -41,6 +41,54 @@ func TestResourceRateLimiterPerPlatform(t *testing.T) {
 	}
 }
 
+func TestResourceRateLimiterPerChat(t *testing.T) {
+	l := NewResourceRateLimiter(map[string]ResourceLimit{
+		ActionSearch: {Window: time.Minute, PerUser: 100, PerChat: 2, PerPlatform: 100, Global: 100},
+	})
+	if !l.AllowFor(ActionSearch, 1, 10, "netease") {
+		t.Fatal("first request in chat 10 should be allowed")
+	}
+	if !l.AllowFor(ActionSearch, 2, 10, "netease") {
+		t.Fatal("second request in chat 10 should be allowed")
+	}
+	if l.AllowFor(ActionSearch, 3, 10, "netease") {
+		t.Fatal("third request in chat 10 should hit the per-chat limit")
+	}
+	if !l.AllowFor(ActionSearch, 3, 11, "netease") {
+		t.Fatal("another chat should have an independent quota")
+	}
+}
+
+func TestResourceRateLimiterWithoutChatSkipsConversationLimit(t *testing.T) {
+	l := NewResourceRateLimiter(map[string]ResourceLimit{
+		ActionSearch: {Window: time.Minute, PerUser: 1, PerChat: 1, Global: 10},
+	})
+	if !l.AllowFor(ActionSearch, 1, 0, "netease") {
+		t.Fatal("first inline user should be allowed")
+	}
+	if !l.AllowFor(ActionSearch, 2, 0, "netease") {
+		t.Fatal("inline users without a chat must not share one conversation quota")
+	}
+	if l.AllowFor(ActionSearch, 1, 0, "netease") {
+		t.Fatal("inline mode must still enforce the per-user quota")
+	}
+}
+
+func TestResourceRateLimiterOnlyTracksEnabledDimensions(t *testing.T) {
+	l := NewResourceRateLimiter(map[string]ResourceLimit{
+		ActionSearch: {Window: time.Minute, Global: 10},
+	})
+	if !l.AllowFor(ActionSearch, 1, 100, "netease") {
+		t.Fatal("request should be allowed")
+	}
+	if len(l.users) != 0 || len(l.chats) != 0 || len(l.plats) != 0 {
+		t.Fatalf("disabled dimensions should remain empty: users=%d chats=%d platforms=%d", len(l.users), len(l.chats), len(l.plats))
+	}
+	if len(l.global[ActionSearch]) != 1 {
+		t.Fatalf("global quota entries = %d, want 1", len(l.global[ActionSearch]))
+	}
+}
+
 func TestResourceRateLimiterGlobal(t *testing.T) {
 	l := NewResourceRateLimiter(searchRule(time.Minute, 100, 100, 20))
 	allowed := 0

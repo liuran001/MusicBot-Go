@@ -98,7 +98,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 
 	platformName, trackID, found := extractPlatformTrackFromMessage(ctx, args, h.PlatformManager)
 	if !found {
-		// Not a URL/ID — treat the argument as a song name.
+		// Not a URL or platform-specific direct reference — treat the argument as a song name.
 		if h.SearchHandler != nil {
 			// Delegate to SearchHandler with "lyric" action so the user gets
 			// a full result list; the "fetching" message is no longer needed.
@@ -145,7 +145,7 @@ func (h *LyricHandler) Handle(ctx context.Context, b *telego.Bot, update *telego
 		return
 	}
 
-	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, searchRequesterID(message), plat, platformName, trackID)
+	lyrics, err := getLyricsLimitedFor(ctx, h.ResourceLimiter, searchRequesterID(message), message.Chat.ID, plat, platformName, trackID)
 	if err != nil {
 		errText := h.formatLyricsError(ctx, err)
 		params := &telego.EditMessageTextParams{ChatID: telego.ChatID{ID: msgResult.Chat.ID}, MessageID: msgResult.MessageID, Text: errText}
@@ -192,10 +192,10 @@ func extractPlatformTrackFromMessage(ctx context.Context, messageText string, mg
 		if _, _, matched := matchPlaylistURL(ctx, mgr, resolvedText); matched {
 			return "", "", false
 		}
-		if platformName, trackID, matched := mgr.MatchText(resolvedText); matched {
+		if platformName, trackID, matched := mgr.MatchURL(resolvedText); matched {
 			return platformName, trackID, true
 		}
-		if platformName, trackID, matched := mgr.MatchURL(resolvedText); matched {
+		if platformName, trackID, matched := matchTextTrack(mgr, resolvedText); matched {
 			return platformName, trackID, true
 		}
 	}
@@ -230,7 +230,11 @@ func (h *LyricHandler) searchFirstTrackForLyric(ctx context.Context, message *te
 		fallbackPlatform = ""
 	}
 
-	tracks, matchedPlatform, _, err := searchTracksWithFallbackLimited(ctx, h.PlatformManager, h.ResourceLimiter, searchRequesterID(message), primaryPlatform, fallbackPlatform, keyword, nil, true)
+	chatID := int64(0)
+	if message != nil {
+		chatID = message.Chat.ID
+	}
+	tracks, matchedPlatform, _, err := searchTracksWithFallbackLimitedFor(ctx, h.PlatformManager, h.ResourceLimiter, searchRequesterID(message), chatID, primaryPlatform, fallbackPlatform, keyword, nil, true)
 	if err != nil || len(tracks) == 0 {
 		return "", "", false
 	}
@@ -362,11 +366,15 @@ func lyricCacheKey(platformName, trackID string) string {
 // platform.ErrRateLimited before hitting the API. A nil limiter (or unconfigured
 // lyric rule) fetches unthrottled. Cache misses populate the cache on success.
 func getLyricsLimited(ctx context.Context, limiter *ResourceRateLimiter, userID int64, plat platform.Platform, platformName, trackID string) (*platform.Lyrics, error) {
+	return getLyricsLimitedFor(ctx, limiter, userID, 0, plat, platformName, trackID)
+}
+
+func getLyricsLimitedFor(ctx context.Context, limiter *ResourceRateLimiter, userID, chatID int64, plat platform.Platform, platformName, trackID string) (*platform.Lyrics, error) {
 	key := lyricCacheKey(platformName, trackID)
 	if cached, ok := lyricFetchCache.Load(key); ok && cached != nil {
 		return cached, nil
 	}
-	if !limiter.Allow(ActionLyric, userID, platformName) {
+	if !limiter.AllowFor(ActionLyric, userID, chatID, platformName) {
 		return nil, platform.ErrRateLimited
 	}
 	lyrics, err := plat.GetLyrics(ctx, trackID)
@@ -390,7 +398,7 @@ func (h *LyricHandler) SendTrackLyrics(ctx context.Context, b *telego.Bot, chatI
 		sendText(ctx, b, chatID, replyToMessageID, tr(ctx, "guest_platform_no_lyrics"))
 		return
 	}
-	lyrics, err := getLyricsLimited(ctx, h.ResourceLimiter, requesterID, plat, platformName, trackID)
+	lyrics, err := getLyricsLimitedFor(ctx, h.ResourceLimiter, requesterID, chatID, plat, platformName, trackID)
 	if err != nil || lyrics == nil {
 		sendText(ctx, b, chatID, replyToMessageID, h.formatLyricsError(ctx, err))
 		return

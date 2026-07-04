@@ -29,13 +29,13 @@ input_keyword = """検索キーワードを送信してください
 /search 周杰倫
 /search 起風了 qq"""
 
-input_content = """曲名・リンク・ID を送信してください
+input_content = """曲名・リンクを送信してください
 
 例：
 /music 周杰倫
 /music https://music.163.com/song/1859603835"""
 
-input_lyric_content = """曲名・リンク・ID を送信するか、曲メッセージに返信してください
+input_lyric_content = """曲名・リンクを送信するか、曲メッセージに返信してください
 
 例：
 /lyric 稲香
@@ -54,6 +54,9 @@ download_queue_button = "順番待ちを確認"
 # 「順番待ちを確認」ボタンのポップアップ。
 download_queue_status = "ダウンロード中：{{.Running}} 件\n順番待ち：{{.Waiting}} 件"
 download_queue_status_limited = "ダウンロード中：{{.Running}} 件\n順番待ち：{{.Waiting}}/{{.Limit}} 件"
+download_queue_active_limited = "受付済みタスク：{{.Active}}/{{.Limit}} 件"
+download_queue_status_detail = "受付済みダウンロード：{{.Active}}{{.ActiveLimit}}\nダウンロード中：{{.Running}} 件\nダウンロード枠待ち：{{.Waiting}}{{.WaitLimit}}\nユーザー上限：{{.PerUserLimit}}、チャット上限：{{.PerChatLimit}}\n送信キュー：{{.UploadWaiting}}{{.UploadQueueLimit}}\n送信中：{{.UploadRunning}}{{.UploadLimit}}"
+telegram_send_queue_status = "Telegram 送信キュー：{{.Waiting}}{{.Limit}}、送信 worker：{{.Running}}/{{.Workers}}"
 
 # --- error messages (userVisibleDownloadError / search / playlist) ---
 err_process_timeout = "処理がタイムアウトしました。後でもう一度お試しください"
@@ -85,15 +88,16 @@ cmd_fav = "お気に入り登録 / 一覧表示"
 cmd_settings = "デフォルトのプラットフォーム・音質・歌詞形式"
 cmd_recognize = "曲を認識"
 cmd_status = "キャッシュとアカウントの状態"
+cmd_queue = "ダウンロードと送信キューを表示"
 cmd_about = "バージョンとプラグイン情報"
 
 # --- bot profile (setMyName / setMyShortDescription / setMyDescription) ---
 bot_name = "音楽ボット"
 bot_short_description = "マルチプラットフォーム音楽 / 歌詞ダウンロードボット"
-bot_description = "曲名・リンク・ID を送ると検索してダウンロードできます。NetEase Cloud Music、QQ Music など複数のプラットフォームに対応。"
+bot_description = "曲名・リンクを送ると検索してダウンロードできます。NetEase Cloud Music、QQ Music など複数のプラットフォームに対応。"
 
 # --- help / about / status (MarkdownV2 templates) ---
-help_intro = "曲名・リンク・IDを送ると音楽を検索してダウンロードできます。"
+help_intro = "曲名・リンクを送ると音楽を検索してダウンロードできます。"
 help_private_hint = "プライベートチャットではコマンドなしで直接送信できます。"
 help_section_commands = "🚀 よく使うコマンド"
 help_cmd_music = "曲をダウンロード"
@@ -102,6 +106,7 @@ help_cmd_lyric = "歌詞を取得"
 help_cmd_recognize = "曲を認識（ボイスメッセージに返信）"
 help_cmd_settings = "デフォルトのプラットフォーム・音質・歌詞形式"
 help_cmd_status = "キャッシュとアカウントの状態"
+help_cmd_queue = "ダウンロードと送信キューを表示"
 help_cmd_about = "バージョンとプラグイン情報"
 help_section_params = "🎚 パラメータ"
 help_quality_label = "音質"
@@ -110,7 +115,7 @@ help_section_examples = "💡 例"
 help_example_music = "米津玄師"
 help_example_search = "Lemon qq"
 help_section_admin = "🛠 管理者コマンド"
-help_arg_track = "曲名|リンク|ID"
+help_arg_track = "曲名|リンク"
 help_arg_keyword = "キーワード"
 about_title = "MusicBot-Go"
 about_version = "バージョン"

@@ -30,13 +30,13 @@ input_keyword = """请发送搜索关键词
 /search 周杰伦
 /search 起风了 qq"""
 
-input_content = """请发送歌曲名、链接或 ID
+input_content = """请发送歌曲名或链接
 
 示例：
 /music 周杰伦
 /music https://music.163.com/song/1859603835"""
 
-input_lyric_content = """请发送歌曲名、链接或 ID，或回复一条歌曲消息
+input_lyric_content = """请发送歌曲名或链接，或回复一条歌曲消息
 
 示例：
 /lyric 稻香
@@ -55,6 +55,9 @@ download_queue_button = "查看排队"
 # 点击「查看排队」按钮的弹窗：当前在下载 {{.Running}} 个，排队 {{.Waiting}} 个
 download_queue_status = "正在下载：{{.Running}} 个\n排队等待：{{.Waiting}} 个"
 download_queue_status_limited = "正在下载：{{.Running}} 个\n排队等待：{{.Waiting}}/{{.Limit}} 个"
+download_queue_active_limited = "已接收任务：{{.Active}}/{{.Limit}} 个"
+download_queue_status_detail = "已接收下载任务：{{.Active}}{{.ActiveLimit}}\n正在下载：{{.Running}} 个\n等待下载槽：{{.Waiting}}{{.WaitLimit}}\n单用户上限：{{.PerUserLimit}}，单对话上限：{{.PerChatLimit}}\n发送队列：{{.UploadWaiting}}{{.UploadQueueLimit}}\n正在发送：{{.UploadRunning}}{{.UploadLimit}}"
+telegram_send_queue_status = "Telegram 发送队列：{{.Waiting}}{{.Limit}}，发送 worker：{{.Running}}/{{.Workers}}"
 
 # --- user-visible error mapping (userVisibleDownloadError / search / playlist) ---
 err_process_timeout = "处理超时，请稍后重试"
@@ -86,16 +89,17 @@ cmd_fav = "收藏歌曲 / 查看收藏列表"
 cmd_settings = "默认平台、音质与歌词格式"
 cmd_recognize = "听歌识曲"
 cmd_status = "缓存与账号状态"
+cmd_queue = "查看下载与发送队列"
 cmd_about = "版本与插件信息"
 
 # --- bot profile (setMyName / setMyShortDescription / setMyDescription) ---
 bot_name = "MusicBot-Go 音乐机器人"
 bot_short_description = "多平台音乐 / 歌词下载机器人"
-bot_description = "发送歌曲名、链接或 ID，即可搜索和下载音乐。支持网易云音乐、QQ音乐等多个平台。"
+bot_description = "发送歌曲名或链接，即可搜索和下载音乐。支持网易云音乐、QQ音乐等多个平台。"
 
 # --- help / about / status (MarkdownV2 templates: authored WITH markdown,
 # rendered via T not Tmd; dynamic values are escaped by their builders) ---
-help_intro = "发送歌曲名、链接或 ID，即可搜索和下载音乐。"
+help_intro = "发送歌曲名或链接，即可搜索和下载音乐。"
 help_private_hint = "私聊中可直接发送内容，无需输入命令。"
 help_section_commands = "🚀 常用命令"
 help_cmd_music = "下载歌曲"
@@ -104,6 +108,7 @@ help_cmd_lyric = "获取歌词"
 help_cmd_recognize = "听歌识曲（回复一条语音）"
 help_cmd_settings = "默认平台、音质与歌词格式"
 help_cmd_status = "缓存与账号状态"
+help_cmd_queue = "查看下载与发送队列"
 help_cmd_about = "版本与插件信息"
 help_section_params = "🎚 参数"
 help_quality_label = "音质"
@@ -112,7 +117,7 @@ help_section_examples = "💡 示例"
 help_example_music = "周杰伦"
 help_example_search = "起风了 qq"
 help_section_admin = "🛠 管理员命令"
-help_arg_track = "歌名|链接|ID"
+help_arg_track = "歌名|链接"
 help_arg_keyword = "关键词"
 about_title = "MusicBot-Go"
 about_version = "版本"

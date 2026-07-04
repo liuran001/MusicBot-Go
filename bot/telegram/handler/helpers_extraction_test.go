@@ -60,6 +60,7 @@ func TestCommandArguments(t *testing.T) {
 func TestExtractPlatformTrack_CommandArgs(t *testing.T) {
 	mgr := newStubManager()
 	mgr.Register(newStubPlatform("netease"))
+	mgr.Register(newStubPlatform("spotify"))
 
 	tests := []struct {
 		name         string
@@ -69,11 +70,11 @@ func TestExtractPlatformTrack_CommandArgs(t *testing.T) {
 		wantFound    bool
 	}{
 		{
-			name:         "command args with quality",
+			name:         "numeric command args with quality",
 			text:         "/music netease 12345 hires",
-			wantPlatform: "netease",
-			wantTrackID:  "12345",
-			wantFound:    true,
+			wantPlatform: "",
+			wantTrackID:  "",
+			wantFound:    false,
 		},
 		{
 			name:         "command args with standard quality",
@@ -130,11 +131,11 @@ func TestExtractPlatformTrack_MatchText(t *testing.T) {
 			wantFound:    true,
 		},
 		{
-			name:         "numeric text match",
+			name:         "numeric text is keyword",
 			text:         "12345",
-			wantPlatform: "netease",
-			wantTrackID:  "12345",
-			wantFound:    true,
+			wantPlatform: "",
+			wantTrackID:  "",
+			wantFound:    false,
 		},
 		{
 			name:         "no match",
@@ -152,6 +153,64 @@ func TestExtractPlatformTrack_MatchText(t *testing.T) {
 			if gotPlatform != tt.wantPlatform || gotTrackID != tt.wantTrackID || gotFound != tt.wantFound {
 				t.Errorf("extractPlatformTrack() = (%q, %q, %v), want (%q, %q, %v)",
 					gotPlatform, gotTrackID, gotFound, tt.wantPlatform, tt.wantTrackID, tt.wantFound)
+			}
+		})
+	}
+}
+
+func TestResolveTrackFromQuery_NumericUsesKeywordSearch(t *testing.T) {
+	mgr := newStubManager()
+	var gotQuery string
+	mgr.Register(&fallbackTestPlatform{
+		name:           "netease",
+		supportsSearch: true,
+		searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+			gotQuery = query
+			return []platform.Track{{ID: "searched-12345", Platform: "netease", Title: "numeric keyword"}}, nil
+		},
+	})
+
+	h := &MusicHandler{PlatformManager: mgr, DefaultPlatform: "netease"}
+	gotPlatform, gotTrackID, gotFound := h.resolveTrackFromQuery(context.Background(), nil, "12345")
+	if !gotFound || gotPlatform != "netease" || gotTrackID != "searched-12345" {
+		t.Fatalf("resolveTrackFromQuery() = (%q, %q, %v), want (netease, searched-12345, true)",
+			gotPlatform, gotTrackID, gotFound)
+	}
+	if gotQuery != "12345" {
+		t.Fatalf("search query = %q, want 12345", gotQuery)
+	}
+}
+
+func TestResolveTrackFromQuery_NumericPlatformFormsUseKeywordSearch(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+	}{
+		{name: "platform prefix", args: "netease 12345"},
+		{name: "platform suffix", args: "12345 netease"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := newStubManager()
+			var gotQuery string
+			mgr.Register(&fallbackTestPlatform{
+				name:           "netease",
+				supportsSearch: true,
+				searchFunc: func(ctx context.Context, query string, limit int) ([]platform.Track, error) {
+					gotQuery = query
+					return []platform.Track{{ID: "searched-12345", Platform: "netease", Title: "numeric keyword"}}, nil
+				},
+			})
+
+			h := &MusicHandler{PlatformManager: mgr, DefaultPlatform: "qqmusic"}
+			gotPlatform, gotTrackID, gotFound := h.resolveTrackFromQuery(context.Background(), nil, tt.args)
+			if !gotFound || gotPlatform != "netease" || gotTrackID != "searched-12345" {
+				t.Fatalf("resolveTrackFromQuery(%q) = (%q, %q, %v), want (netease, searched-12345, true)",
+					tt.args, gotPlatform, gotTrackID, gotFound)
+			}
+			if gotQuery != "12345" {
+				t.Fatalf("search query = %q, want 12345", gotQuery)
 			}
 		})
 	}

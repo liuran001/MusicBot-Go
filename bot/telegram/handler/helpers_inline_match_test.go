@@ -38,6 +38,16 @@ func TestMatchPlatformTrack_FallbackForLikelyID(t *testing.T) {
 	}
 }
 
+func TestMatchPlatformTrack_DoesNotFallbackForBareNumericID(t *testing.T) {
+	manager := newStubManager()
+	manager.Register(&strictTextMatcherPlatform{stubPlatform: newStubPlatform("netease")})
+
+	id, ok := matchPlatformTrack(context.Background(), manager, "netease", "12345")
+	if ok {
+		t.Fatalf("expected numeric token to stay keyword, got id=%q", id)
+	}
+}
+
 func (p *strictTextMatcherPlatform) Metadata() platform.Meta {
 	return platform.Meta{Name: p.Name(), DisplayName: p.Name(), Emoji: "🎵"}
 }

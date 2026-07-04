@@ -20,6 +20,7 @@ type Router struct {
 	Recognize                MessageHandler
 	About                    MessageHandler
 	Status                   MessageHandler
+	Queue                    MessageHandler
 	RmCache                  MessageHandler
 	Settings                 MessageHandler
 	Reload                   MessageHandler
@@ -39,6 +40,7 @@ type Router struct {
 	DownloadQueueCallback    CallbackHandler
 	Inline                   InlineHandler
 	ChosenInline             ChosenInlineHandler
+	Pool                     botpkg.WorkerPool
 	PlatformManager          platform.Manager
 	AdminCommands            []string
 	Whitelist                *Whitelist
@@ -82,6 +84,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 	}
 	bh.Handle(r.wrapMessage(r.About), matchCommandFunc(botName, "about"))
 	bh.Handle(r.wrapMessage(r.Status), matchCommandFunc(botName, "status"))
+	bh.Handle(r.wrapMessage(r.Queue), matchCommandFunc(botName, "queue"))
 	bh.Handle(r.wrapMessage(r.Settings), matchCommandFunc(botName, "settings"))
 	if r.Favorites != nil {
 		bh.Handle(r.wrapMessage(r.Favorites), matchCommandFunc(botName, "fav"))
@@ -205,7 +208,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 				if plat, _, matched := r.PlatformManager.MatchURL(resolvedURL); matched {
 					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
 				}
-				if plat, _, matched := r.PlatformManager.MatchText(resolvedURL); matched {
+				if plat, _, matched := matchTextTrack(r.PlatformManager, resolvedURL); matched {
 					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
 				}
 			}
@@ -217,10 +220,10 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		}
 		if r.PlatformManager != nil {
 			resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
-			if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
+			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 				return true
 			}
-			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
+			if _, _, matched := matchTextTrack(r.PlatformManager, resolvedText); matched {
 				return true
 			}
 		}
@@ -250,10 +253,10 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			if _, _, matched := matchArtistURL(ctx, r.PlatformManager, resolvedText); matched {
 				return false
 			}
-			if _, _, matched := r.PlatformManager.MatchText(resolvedText); matched {
+			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
 				return false
 			}
-			if _, _, matched := r.PlatformManager.MatchURL(resolvedText); matched {
+			if _, _, matched := matchTextTrack(r.PlatformManager, resolvedText); matched {
 				return false
 			}
 		}
@@ -304,7 +307,10 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 				}
 				update := &telego.Update{GuestMessage: &message}
 				reqCtx := r.localize(ctx, update)
-				r.GuestMode.Handle(reqCtx, ctx.Bot(), update)
+				bot := ctx.Bot()
+				r.submitEvent(reqCtx, "guest_message", func(runCtx context.Context) {
+					r.GuestMode.Handle(runCtx, bot, update)
+				})
 			}
 			return nil
 		})
@@ -358,7 +364,10 @@ func (r *Router) wrapMessage(handler MessageHandler) th.Handler {
 				return nil
 			}
 		}
-		handler.Handle(reqCtx, ctx.Bot(), &update)
+		bot := ctx.Bot()
+		r.submitEvent(reqCtx, "message", func(runCtx context.Context) {
+			handler.Handle(runCtx, bot, &update)
+		})
 		return nil
 	}
 }
@@ -384,7 +393,10 @@ func (r *Router) wrapCommentButtons(handler MessageHandler) th.Handler {
 				return nil
 			}
 		}
-		handler.Handle(reqCtx, ctx.Bot(), &update)
+		bot := ctx.Bot()
+		r.submitEvent(reqCtx, "comment_buttons", func(runCtx context.Context) {
+			handler.Handle(runCtx, bot, &update)
+		})
 		return nil
 	}
 }
@@ -401,7 +413,10 @@ func (r *Router) wrapInline(handler InlineHandler) th.Handler {
 				return nil
 			}
 		}
-		handler.Handle(reqCtx, ctx.Bot(), &update)
+		bot := ctx.Bot()
+		r.submitEvent(reqCtx, "inline", func(runCtx context.Context) {
+			handler.Handle(runCtx, bot, &update)
+		})
 		return nil
 	}
 }
@@ -412,7 +427,10 @@ func (r *Router) wrapCallback(handler CallbackHandler) th.Handler {
 			return nil
 		}
 		reqCtx := r.localize(ctx, &update)
-		handler.Handle(reqCtx, ctx.Bot(), &update)
+		bot := ctx.Bot()
+		r.submitEvent(reqCtx, "callback", func(runCtx context.Context) {
+			handler.Handle(runCtx, bot, &update)
+		})
 		return nil
 	}
 }
@@ -429,8 +447,32 @@ func (r *Router) wrapChosenInline(handler ChosenInlineHandler) th.Handler {
 				return nil
 			}
 		}
-		handler.Handle(reqCtx, ctx.Bot(), &update)
+		bot := ctx.Bot()
+		r.submitEvent(reqCtx, "chosen_inline", func(runCtx context.Context) {
+			handler.Handle(runCtx, bot, &update)
+		})
 		return nil
+	}
+}
+
+func (r *Router) submitEvent(ctx context.Context, kind string, fn func(context.Context)) {
+	if fn == nil {
+		return
+	}
+	runCtx := detachContext(ctx)
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	if r.Pool == nil {
+		fn(runCtx)
+		return
+	}
+	if err := r.Pool.Submit(func() {
+		fn(runCtx)
+	}); err != nil {
+		if r.Logger != nil {
+			r.Logger.Error("failed to enqueue telegram event", "kind", kind, "error", err)
+		}
 	}
 }
 

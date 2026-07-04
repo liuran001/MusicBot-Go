@@ -492,15 +492,21 @@ func (c *Config) Validate() error {
 	}
 
 	mustNonNegative := map[string]int{
-		"DBMaxOpenConns":         c.GetInt("DBMaxOpenConns"),
-		"DBMaxIdleConns":         c.GetInt("DBMaxIdleConns"),
-		"DBConnMaxLifetimeSec":   c.GetInt("DBConnMaxLifetimeSec"),
-		"MultipartMinSizeMB":     c.GetInt("MultipartMinSizeMB"),
-		"GlobalRateLimitBurst":   c.GetInt("GlobalRateLimitBurst"),
-		"DownloadConcurrency":    c.GetInt("DownloadConcurrency"),
-		"DownloadMaxRetries":     c.GetInt("DownloadMaxRetries"),
-		"DownloadQueueWaitLimit": c.GetInt("DownloadQueueWaitLimit"),
-		"UploadConcurrency":      c.GetInt("UploadConcurrency"),
+		"DBMaxOpenConns":            c.GetInt("DBMaxOpenConns"),
+		"DBMaxIdleConns":            c.GetInt("DBMaxIdleConns"),
+		"DBConnMaxLifetimeSec":      c.GetInt("DBConnMaxLifetimeSec"),
+		"MultipartMinSizeMB":        c.GetInt("MultipartMinSizeMB"),
+		"GlobalRateLimitBurst":      c.GetInt("GlobalRateLimitBurst"),
+		"TelegramSendWorkerCount":   c.GetInt("TelegramSendWorkerCount"),
+		"TelegramSendQueueSize":     c.GetInt("TelegramSendQueueSize"),
+		"DownloadWorkerPoolSize":    c.GetInt("DownloadWorkerPoolSize"),
+		"DownloadConcurrency":       c.GetInt("DownloadConcurrency"),
+		"DownloadMaxRetries":        c.GetInt("DownloadMaxRetries"),
+		"DownloadQueueWaitLimit":    c.GetInt("DownloadQueueWaitLimit"),
+		"DownloadQueuePerUserLimit": c.GetInt("DownloadQueuePerUserLimit"),
+		"DownloadQueuePerChatLimit": c.GetInt("DownloadQueuePerChatLimit"),
+		"DownloadQueueGlobalLimit":  c.GetInt("DownloadQueueGlobalLimit"),
+		"UploadConcurrency":         c.GetInt("UploadConcurrency"),
 	}
 	for k, v := range mustNonNegative {
 		if v < 0 {
@@ -565,35 +571,48 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("RateLimitBurst", 3)
 	v.SetDefault("GlobalRateLimitPerSecond", 0.0)
 	v.SetDefault("GlobalRateLimitBurst", 0)
-	// Resource rate limiting: per-action sliding-window quotas across three
-	// dimensions (per user / per platform / global) for abusable platform-API
+	v.SetDefault("TelegramSendWorkerCount", 4)
+	v.SetDefault("TelegramSendQueueSize", 256)
+	// Resource rate limiting: per-action sliding-window quotas across four
+	// dimensions (per user / per chat / per platform / global) for abusable platform-API
 	// entry points. A non-positive quota disables that dimension; all-zero for an
 	// action disables limiting for it. Shared window in seconds.
 	v.SetDefault("ResourceRateLimitWindowSeconds", 60)
 	v.SetDefault("SearchRateLimitPerUser", 5)
+	v.SetDefault("SearchRateLimitPerChat", 12)
 	v.SetDefault("SearchRateLimitPerPlatform", 10)
 	v.SetDefault("SearchRateLimitGlobal", 20)
 	v.SetDefault("LyricRateLimitPerUser", 8)
+	v.SetDefault("LyricRateLimitPerChat", 20)
 	v.SetDefault("LyricRateLimitPerPlatform", 20)
 	v.SetDefault("LyricRateLimitGlobal", 40)
-	v.SetDefault("DownloadRateLimitPerUser", 6)
+	v.SetDefault("DownloadRateLimitPerUser", 4)
+	v.SetDefault("DownloadRateLimitPerChat", 8)
 	v.SetDefault("DownloadRateLimitPerPlatform", 15)
 	v.SetDefault("DownloadRateLimitGlobal", 30)
 	v.SetDefault("RecognizeRateLimitPerUser", 3)
+	v.SetDefault("RecognizeRateLimitPerChat", 4)
 	v.SetDefault("RecognizeRateLimitPerPlatform", 0)
 	v.SetDefault("RecognizeRateLimitGlobal", 10)
 	v.SetDefault("PlaylistRateLimitPerUser", 5)
+	v.SetDefault("PlaylistRateLimitPerChat", 10)
 	v.SetDefault("PlaylistRateLimitPerPlatform", 12)
 	v.SetDefault("PlaylistRateLimitGlobal", 25)
 	v.SetDefault("EpisodeRateLimitPerUser", 8)
+	v.SetDefault("EpisodeRateLimitPerChat", 20)
 	v.SetDefault("EpisodeRateLimitPerPlatform", 20)
 	v.SetDefault("EpisodeRateLimitGlobal", 40)
 	v.SetDefault("ArtistRateLimitPerUser", 5)
+	v.SetDefault("ArtistRateLimitPerChat", 10)
 	v.SetDefault("ArtistRateLimitPerPlatform", 12)
 	v.SetDefault("ArtistRateLimitGlobal", 25)
+	v.SetDefault("DownloadWorkerPoolSize", 0)
 	v.SetDefault("DownloadConcurrency", 4)
 	v.SetDefault("DownloadMaxRetries", 3)
 	v.SetDefault("DownloadQueueWaitLimit", 20)
+	v.SetDefault("DownloadQueuePerUserLimit", 2)
+	v.SetDefault("DownloadQueuePerChatLimit", 6)
+	v.SetDefault("DownloadQueueGlobalLimit", 24)
 	v.SetDefault("UploadConcurrency", 1)
 	v.SetDefault("UploadWorkerCount", 1)
 	v.SetDefault("UploadQueueSize", 20)
