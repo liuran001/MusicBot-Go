@@ -28,6 +28,7 @@ type platformInfo struct {
 	Emoji             string                `json:"emoji"`
 	Aliases           []string              `json:"aliases"`
 	AllowGroupURL     bool                  `json:"allow_group_url"`
+	GroupURLHosts     []string              `json:"group_url_hosts"`
 	Capabilities      platform.Capabilities `json:"capabilities"`
 	SupportsMatchURL  bool                  `json:"supports_match_url"`
 	SupportsMatchText bool                  `json:"supports_match_text"`
@@ -364,6 +365,7 @@ func (s *scriptPlatform) Metadata() platform.Meta {
 		Emoji:         strings.TrimSpace(s.info.Emoji),
 		Aliases:       s.info.Aliases,
 		AllowGroupURL: s.info.AllowGroupURL,
+		GroupURLHosts: s.info.GroupURLHosts,
 	}
 }
 

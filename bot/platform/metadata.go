@@ -9,6 +9,7 @@ type Meta struct {
 	Emoji         string
 	Aliases       []string
 	AllowGroupURL bool
+	GroupURLHosts []string
 }
 
 // MetadataProvider can be implemented by platforms to expose metadata.

@@ -536,9 +536,51 @@ func mergeMeta(oldMeta, newMeta Meta) Meta {
 	if newMeta.Emoji == "" {
 		newMeta.Emoji = oldMeta.Emoji
 	}
-	newMeta.AllowGroupURL = newMeta.AllowGroupURL || oldMeta.AllowGroupURL
+	oldAllowsAllGroupHosts := oldMeta.AllowGroupURL && len(oldMeta.GroupURLHosts) == 0
+	newAllowsAllGroupHosts := newMeta.AllowGroupURL && len(newMeta.GroupURLHosts) == 0
+	allowGroupURL := newMeta.AllowGroupURL || oldMeta.AllowGroupURL
+	if oldAllowsAllGroupHosts || newAllowsAllGroupHosts {
+		newMeta.GroupURLHosts = nil
+	} else {
+		newMeta.GroupURLHosts = mergeStringSet(oldMeta.GroupURLHosts, newMeta.GroupURLHosts)
+	}
+	newMeta.AllowGroupURL = allowGroupURL
 	newMeta.Aliases = mergeAliases(oldMeta.Aliases, newMeta.Aliases)
 	return newMeta
+}
+
+func mergeStringSet(existing, incoming []string) []string {
+	if len(existing) == 0 {
+		return incoming
+	}
+	if len(incoming) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{})
+	merged := make([]string, 0, len(existing)+len(incoming))
+	for _, value := range existing {
+		key := strings.ToLower(strings.TrimSpace(value))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, strings.TrimSpace(value))
+	}
+	for _, value := range incoming {
+		key := strings.ToLower(strings.TrimSpace(value))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, strings.TrimSpace(value))
+	}
+	return merged
 }
 
 func mergeAliases(existing, incoming []string) []string {

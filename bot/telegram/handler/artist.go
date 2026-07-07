@@ -45,11 +45,12 @@ func (h *ArtistHandler) TryHandle(ctx context.Context, b *telego.Bot, update *te
 	if baseText == "" {
 		return false
 	}
-	platformName, artistID, ok := matchArtistURL(ctx, h.PlatformManager, baseText)
+	resolvedText := resolveShortLinkText(ctx, h.PlatformManager, baseText)
+	platformName, artistID, ok := matchArtistURL(ctx, h.PlatformManager, resolvedText)
 	if !ok {
 		return false
 	}
-	if message.Chat.Type != "private" && !isAllowedGroupURLPlatform(platformName, h.PlatformManager) {
+	if message.Chat.Type != "private" && !isAllowedGroupURLPlatform(platformName, resolvedText, h.PlatformManager) {
 		return false
 	}
 	if h.PlatformManager == nil {

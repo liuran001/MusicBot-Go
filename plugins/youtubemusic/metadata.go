@@ -13,7 +13,9 @@ func metadata() platform.Meta {
 		DisplayName: "YouTube Music",
 		Emoji:       "🎬",
 		Aliases:     []string{"youtubemusic", "ytmusic", "ytm", "yt", "youtube", "ytmsc"},
-		// YouTube links are public and safe to auto-parse in groups.
+		// Only YouTube Music links are safe to auto-parse in groups; ordinary
+		// youtube.com shares should remain normal chat messages unless explicit.
 		AllowGroupURL: true,
+		GroupURLHosts: []string{"music.youtube.com"},
 	}
 }

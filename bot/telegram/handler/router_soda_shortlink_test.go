@@ -26,6 +26,67 @@ func (p *playlistMatcherTestPlatform) MatchPlaylistURL(rawURL string) (string, b
 	return "", false
 }
 
+type groupURLHostTestPlatform struct {
+	*stubPlatform
+	meta platform.Meta
+}
+
+func (p *groupURLHostTestPlatform) Metadata() platform.Meta {
+	if p.meta.Name == "" {
+		p.meta.Name = p.Name()
+	}
+	return p.meta
+}
+
+func TestIsAllowedGroupURLPlatformHonorsHostAllowlist(t *testing.T) {
+	manager := newStubManager()
+	manager.Register(&groupURLHostTestPlatform{
+		stubPlatform: newStubPlatform("youtubemusic"),
+		meta: platform.Meta{
+			Name:          "youtubemusic",
+			DisplayName:   "YouTube Music",
+			AllowGroupURL: true,
+			GroupURLHosts: []string{"music.youtube.com"},
+		},
+	})
+
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "music youtube watch", url: "https://music.youtube.com/watch?v=dQw4w9WgXcQ", want: true},
+		{name: "www music youtube watch", url: "https://www.music.youtube.com/watch?v=dQw4w9WgXcQ", want: true},
+		{name: "plain youtube watch", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", want: false},
+		{name: "youtu be short", url: "https://youtu.be/dQw4w9WgXcQ", want: false},
+		{name: "share text with plain youtube", url: "look https://youtube.com/shorts/dQw4w9WgXcQ", want: false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isAllowedGroupURLPlatform("youtubemusic", tt.url, manager)
+			if got != tt.want {
+				t.Fatalf("isAllowedGroupURLPlatform(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAllowedGroupURLPlatformKeepsUnrestrictedPlatforms(t *testing.T) {
+	manager := newStubManager()
+	manager.Register(&groupURLHostTestPlatform{
+		stubPlatform: newStubPlatform("soda"),
+		meta: platform.Meta{
+			Name:          "soda",
+			DisplayName:   "汽水音乐",
+			AllowGroupURL: true,
+		},
+	})
+
+	if !isAllowedGroupURLPlatform("soda", "https://qishui.douyin.com/s/ixBVdUyy/", manager) {
+		t.Fatal("expected platforms without host allowlist to keep allowing matched group URLs")
+	}
+}
+
 func TestMatchPlaylistURL_ResolvesSodaAlbumShortLinkShareText(t *testing.T) {
 	manager := newStubManager()
 	manager.Register(&playlistMatcherTestPlatform{

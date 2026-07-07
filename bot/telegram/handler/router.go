@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/url"
 	"strings"
 
 	botpkg "github.com/liuran001/MusicBot-Go/bot"
@@ -155,7 +156,7 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			return false
 		}
 		if update.Message.Chat.Type != "private" {
-			return isAllowedGroupURLPlatform(platformName, r.PlatformManager)
+			return isAllowedGroupURLPlatform(platformName, resolvedText, r.PlatformManager)
 		}
 		return true
 	})
@@ -178,12 +179,13 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 		if strings.TrimSpace(baseText) == "" {
 			return false
 		}
-		platformName, _, matched := matchArtistURL(ctx, r.PlatformManager, baseText)
+		resolvedText := resolveShortLinkText(ctx, r.PlatformManager, baseText)
+		platformName, _, matched := matchArtistURL(ctx, r.PlatformManager, resolvedText)
 		if !matched {
 			return false
 		}
 		if update.Message.Chat.Type != "private" {
-			return isAllowedGroupURLPlatform(platformName, r.PlatformManager)
+			return isAllowedGroupURLPlatform(platformName, resolvedText, r.PlatformManager)
 		}
 		return true
 	})
@@ -206,10 +208,10 @@ func (r *Router) Register(bh *th.BotHandler, botName string) {
 			for _, urlStr := range urls {
 				resolvedURL := extractResolvedURL(ctx, r.PlatformManager, urlStr)
 				if plat, _, matched := r.PlatformManager.MatchURL(resolvedURL); matched {
-					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
+					return isAllowedGroupURLPlatform(plat, resolvedURL, r.PlatformManager)
 				}
 				if plat, _, matched := matchTextTrack(r.PlatformManager, resolvedURL); matched {
-					return isAllowedGroupURLPlatform(plat, r.PlatformManager)
+					return isAllowedGroupURLPlatform(plat, resolvedURL, r.PlatformManager)
 				}
 			}
 			return false
@@ -549,10 +551,50 @@ func hasSearchPlatformSuffix(text string, manager platform.Manager) bool {
 	return true
 }
 
-func isAllowedGroupURLPlatform(platformName string, manager platform.Manager) bool {
+func isAllowedGroupURLPlatform(platformName, rawURL string, manager platform.Manager) bool {
 	if manager == nil {
 		return false
 	}
 	meta, _ := manager.Meta(platformName)
-	return meta.AllowGroupURL
+	if !meta.AllowGroupURL {
+		return false
+	}
+	if len(meta.GroupURLHosts) == 0 {
+		return true
+	}
+	host := normalizeGroupURLHost(rawURL)
+	if host == "" {
+		return false
+	}
+	for _, allowed := range meta.GroupURLHosts {
+		allowedHost := normalizeGroupURLHost(allowed)
+		if allowedHost == "" {
+			continue
+		}
+		if host == allowedHost || strings.HasSuffix(host, "."+allowedHost) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeGroupURLHost(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	if candidate := extractFirstURL(rawURL); candidate != "" {
+		rawURL = candidate
+	}
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "https://" + rawURL
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	host = strings.TrimPrefix(host, "www.")
+	host = strings.TrimPrefix(host, "m.")
+	return host
 }
