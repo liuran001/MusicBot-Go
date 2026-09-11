@@ -93,6 +93,7 @@ type Favorite struct {
 	TrackID         string
 	AddedByUserID   int64
 	AddedByName     string
+	AddedByUsername string
 	SongName        string
 	SongArtists     string
 	SongAlbum       string

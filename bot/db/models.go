@@ -270,6 +270,7 @@ type FavoriteModel struct {
 	TrackID         string `gorm:"uniqueIndex:idx_fav_scope_track,priority:4;not null"`
 	AddedByUserID   int64  `gorm:"index"`
 	AddedByName     string
+	AddedByUsername string
 	SongName        string
 	SongArtists     string
 	SongAlbum       string
@@ -293,6 +294,7 @@ func toFavorite(model FavoriteModel) *bot.Favorite {
 		TrackID:         model.TrackID,
 		AddedByUserID:   model.AddedByUserID,
 		AddedByName:     model.AddedByName,
+		AddedByUsername: model.AddedByUsername,
 		SongName:        model.SongName,
 		SongArtists:     model.SongArtists,
 		SongAlbum:       model.SongAlbum,
@@ -312,6 +314,7 @@ func toFavoriteModel(fav *bot.Favorite) *FavoriteModel {
 		TrackID:         fav.TrackID,
 		AddedByUserID:   fav.AddedByUserID,
 		AddedByName:     fav.AddedByName,
+		AddedByUsername: fav.AddedByUsername,
 		SongName:        fav.SongName,
 		SongArtists:     fav.SongArtists,
 		SongAlbum:       fav.SongAlbum,

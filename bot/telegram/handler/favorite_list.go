@@ -197,8 +197,8 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 					who = tr(ctx, "fav_anonymous")
 				}
 				whoHTML := html.EscapeString(who)
-				if fav.AddedByUserID > 0 {
-					whoHTML = fmt.Sprintf("<a href=\"tg://user?id=%d\">%s</a>", fav.AddedByUserID, whoHTML)
+				if username := strings.TrimSpace(fav.AddedByUsername); username != "" {
+					whoHTML = fmt.Sprintf("<a href=\"https://t.me/%s\">%s</a>", html.EscapeString(username), whoHTML)
 				}
 				line += "  · 👤 " + whoHTML
 			}
@@ -641,7 +641,7 @@ func (h *FavoritesHandler) handleCommandToggle(ctx context.Context, b *telego.Bo
 		scopeType = botpkg.FavoriteScopeGroup
 		scopeID = message.Chat.ID
 	}
-	out, err := toggleFavorite(ctx, b, h.Repo, h.PlatformManager, scopeType, scopeID, message.From.ID, callbackUserDisplayName(message.From), platformName, trackID)
+	out, err := toggleFavorite(ctx, b, h.Repo, h.PlatformManager, scopeType, scopeID, message.From.ID, callbackUserDisplayName(message.From), message.From.Username, platformName, trackID)
 	if err != nil {
 		h.reply(ctx, b, message, tr(ctx, "fav_command_failed"))
 		return

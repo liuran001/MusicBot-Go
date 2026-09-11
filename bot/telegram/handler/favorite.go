@@ -214,7 +214,7 @@ func resolveFavoriteToggleDeny(ctx context.Context, b *telego.Bot, repo botpkg.S
 }
 
 // addFavoriteWithMeta resolves song metadata and inserts the favorite.
-func addFavoriteWithMeta(ctx context.Context, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, platformName, trackID string) (string, error) {
+func addFavoriteWithMeta(ctx context.Context, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, clickerUsername, platformName, trackID string) (string, error) {
 	meta := findSongMetaForFavorite(ctx, repo, mgr, platformName, trackID)
 	fav := &botpkg.Favorite{
 		ScopeType:       scopeType,
@@ -223,6 +223,7 @@ func addFavoriteWithMeta(ctx context.Context, repo botpkg.SongRepository, mgr pl
 		TrackID:         trackID,
 		AddedByUserID:   clickerID,
 		AddedByName:     strings.TrimSpace(clickerName),
+		AddedByUsername: strings.TrimSpace(clickerUsername),
 		SongName:        meta.songName,
 		SongArtists:     meta.songArtists,
 		SongAlbum:       meta.songAlbum,
@@ -235,7 +236,7 @@ func addFavoriteWithMeta(ctx context.Context, repo botpkg.SongRepository, mgr pl
 // toggleFavorite is the immediate add/remove core behind the /fav command. The
 // favorite button uses a two-step removal (see handleToggle), but the command is
 // explicit so it toggles in one step.
-func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, platformName, trackID string) (favoriteToggleOutcome, error) {
+func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongRepository, mgr platform.Manager, scopeType string, scopeID, clickerID int64, clickerName, clickerUsername, platformName, trackID string) (favoriteToggleOutcome, error) {
 	platformName = strings.TrimSpace(platformName)
 	trackID = strings.TrimSpace(trackID)
 	if repo == nil || scopeID == 0 || clickerID == 0 || platformName == "" || trackID == "" {
@@ -257,7 +258,7 @@ func toggleFavorite(ctx context.Context, b *telego.Bot, repo botpkg.SongReposito
 		return favoriteToggleOutcome{removed: true}, nil
 	}
 
-	songName, err := addFavoriteWithMeta(ctx, repo, mgr, scopeType, scopeID, clickerID, clickerName, platformName, trackID)
+	songName, err := addFavoriteWithMeta(ctx, repo, mgr, scopeType, scopeID, clickerID, clickerName, clickerUsername, platformName, trackID)
 	if err != nil {
 		return favoriteToggleOutcome{}, err
 	}
@@ -430,7 +431,7 @@ func (h *FavoriteCallbackHandler) handleToggle(ctx context.Context, b *telego.Bo
 	}
 
 	// Not favorited: add immediately, no confirmation.
-	if _, err := addFavoriteWithMeta(ctx, h.Repo, h.PlatformManager, scopeType, scopeID, clicker, callbackUserDisplayName(&query.From), parsed.platform, parsed.trackID); err != nil {
+	if _, err := addFavoriteWithMeta(ctx, h.Repo, h.PlatformManager, scopeType, scopeID, clicker, callbackUserDisplayName(&query.From), query.From.Username, parsed.platform, parsed.trackID); err != nil {
 		if h.Logger != nil {
 			h.Logger.Warn("favorite add failed", "platform", parsed.platform, "trackID", parsed.trackID, "error", err)
 		}

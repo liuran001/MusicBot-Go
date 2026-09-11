@@ -61,7 +61,7 @@ func TestToggleFavoritePersonal(t *testing.T) {
 	ctx := context.Background()
 	const uid int64 = 42
 
-	out, err := toggleFavorite(ctx, nil, repo, nil, botpkg.FavoriteScopeUser, uid, uid, "Tester", "netease", "777")
+	out, err := toggleFavorite(ctx, nil, repo, nil, botpkg.FavoriteScopeUser, uid, uid, "Tester", "", "netease", "777")
 	if err != nil || !out.added {
 		t.Fatalf("expected added, got %+v err=%v", out, err)
 	}
@@ -72,7 +72,7 @@ func TestToggleFavoritePersonal(t *testing.T) {
 		t.Fatalf("expected favorited in repo")
 	}
 
-	out, err = toggleFavorite(ctx, nil, repo, nil, botpkg.FavoriteScopeUser, uid, uid, "Tester", "netease", "777")
+	out, err = toggleFavorite(ctx, nil, repo, nil, botpkg.FavoriteScopeUser, uid, uid, "Tester", "", "netease", "777")
 	if err != nil || !out.removed {
 		t.Fatalf("expected removed, got %+v err=%v", out, err)
 	}
@@ -87,7 +87,7 @@ func TestToggleFavoriteGroupDisabled(t *testing.T) {
 	const gid int64 = -100
 	_ = repo.SetPluginSetting(ctx, botpkg.PluginScopeGroup, gid, GroupFavPlugin, GroupFavKey, GroupFavOff)
 
-	out, err := toggleFavorite(zhCtx(), nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "netease", "1")
+	out, err := toggleFavorite(zhCtx(), nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "", "netease", "1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestToggleFavoriteGroupAdminOnlyDeniesNonAdmin(t *testing.T) {
 	_ = repo.SetPluginSetting(ctx, botpkg.PluginScopeGroup, gid, GroupFavPlugin, GroupFavKey, GroupFavAdmin)
 
 	// b is nil, so the admin check cannot succeed: a non-admin is denied.
-	out, err := toggleFavorite(zhCtx(), nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "netease", "1")
+	out, err := toggleFavorite(zhCtx(), nil, repo, nil, botpkg.FavoriteScopeGroup, gid, 7, "X", "", "netease", "1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
