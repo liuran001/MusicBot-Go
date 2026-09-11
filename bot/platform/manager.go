@@ -136,8 +136,8 @@ func closeProviders(providers []Platform) {
 // platform that tries providers in registration order with automatic fallback.
 // Returns nil if no platform with that name is registered.
 func (m *DefaultManager) Get(name string) Platform {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	providers, ok := m.providers[name]
 	if !ok || len(providers) == 0 {

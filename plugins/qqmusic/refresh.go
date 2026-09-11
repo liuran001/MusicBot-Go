@@ -68,8 +68,10 @@ func (c *Client) startAutoRenew() {
 		return
 	}
 	c.autoRenew.started = true
+	ctx, cancel := context.WithCancel(context.Background())
+	c.autoRenew.cancel = cancel
 	c.mu.Unlock()
-	go c.autoRenewLoop()
+	go c.autoRenewLoop(ctx)
 }
 
 func (c *Client) AutoRenewStatus() platform.AutoRenewStatus {
@@ -90,8 +92,15 @@ func (c *Client) SetAutoRenew(enabled bool, interval time.Duration) (platform.Au
 	if interval <= 0 {
 		interval = defaultAutoRenewInterval
 	}
+	c.mu.Lock()
 	c.autoRenew.enabled = enabled
 	c.autoRenew.interval = interval
+	if !enabled && c.autoRenew.cancel != nil {
+		c.autoRenew.cancel()
+		c.autoRenew.cancel = nil
+		c.autoRenew.started = false
+	}
+	c.mu.Unlock()
 	if c.persistFunc != nil {
 		if err := c.persistFunc(map[string]string{
 			"auto_renew_enabled":      boolStringQQ(enabled),
@@ -113,31 +122,49 @@ func boolStringQQ(v bool) string {
 	return "false"
 }
 
-func (c *Client) autoRenewLoop() {
+func (c *Client) autoRenewLoop(ctx context.Context) {
 	for {
+		c.mu.RLock()
+		enabled, interval := c.autoRenew.enabled, c.autoRenew.interval
+		c.mu.RUnlock()
+		if !enabled {
+			return
+		}
 		cookie := c.Cookie()
 		if reason, ok := autoRenewSkipReason(cookie); !ok {
 			c.logInfo(fmt.Sprintf("qqmusic: auto-renew skipped, %s", reason))
-			time.Sleep(defaultRetryInterval)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(defaultRetryInterval):
+			}
 			continue
 		}
-		if shouldRenew(cookie, c.autoRenew.interval) {
-			newCookie, ok := c.tryRenew(cookie)
+		if shouldRenew(cookie, interval) {
+			newCookie, ok := c.tryRenew(ctx, cookie)
 			if ok {
 				c.setCookie(newCookie)
 				c.persistCookie(newCookie)
 			}
-			sleep := nextCheckDelay(newCookieOr(cookie, newCookie, ok), c.autoRenew.interval)
-			time.Sleep(sleep)
+			sleep := nextCheckDelay(newCookieOr(cookie, newCookie, ok), interval)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(sleep):
+			}
 			continue
 		}
 		sleep := nextCheckDelay(cookie, c.autoRenew.interval)
-		time.Sleep(sleep)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(sleep):
+		}
 	}
 }
 
-func (c *Client) tryRenew(cookie string) (string, bool) {
-	updated, err := c.renewCookie(context.Background(), cookie)
+func (c *Client) tryRenew(ctx context.Context, cookie string) (string, bool) {
+	updated, err := c.renewCookie(ctx, cookie)
 	if err != nil {
 		c.logWarn(fmt.Sprintf("qqmusic: auto-renew failed: %v", err))
 		return "", false

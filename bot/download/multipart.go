@@ -221,7 +221,13 @@ func (md *MultipartDownloader) downloadSingle(ctx context.Context, rawURL string
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+	// This request deliberately omits Range. A 206 response therefore cannot
+	// represent a complete download; accepting it (especially with unknown
+	// length/chunked transfer) would cache a truncated file as successful.
+	if resp.StatusCode == http.StatusPartialContent {
+		return 0, fmt.Errorf("%w: unexpected partial content for un-ranged request", errDownloadIntegrity)
+	}
+	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 

@@ -44,6 +44,7 @@ type autoRenewConfig struct {
 	enabled  bool
 	interval time.Duration
 	started  bool
+	cancel context.CancelFunc
 }
 
 func NewClient(cookie string, timeout time.Duration, logger bot.Logger, autoRenewEnabled bool, autoRenewInterval time.Duration, persist func(map[string]string) error) *Client {

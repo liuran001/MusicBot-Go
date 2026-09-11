@@ -15,6 +15,7 @@ type Pool struct {
 	tasks    chan func()
 	wg       sync.WaitGroup
 	shutdown chan struct{}
+	stopOnce sync.Once
 	mu       sync.Mutex
 	tasksMu  sync.RWMutex
 	closed   bool
@@ -157,14 +158,27 @@ func (p *Pool) SubmitWaitContext(ctx context.Context, task func() error) error {
 // Shutdown gracefully drains queued tasks and waits for workers to exit.
 // Contrast with StopNow, which stops immediately without draining the queue.
 func (p *Pool) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	p.mu.Lock()
-	if !p.closed {
-		p.closed = true
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	p.closed = true
+	p.mu.Unlock()
+
+	// Closing the task channel may wait for an in-flight Submit to release its
+	// read lock. Perform that handoff asynchronously so a deadline can still
+	// interrupt Shutdown instead of being masked by a blocked producer.
+	closed := make(chan struct{})
+	go func() {
 		p.tasksMu.Lock()
 		close(p.tasks)
 		p.tasksMu.Unlock()
-	}
-	p.mu.Unlock()
+		close(closed)
+	}()
 
 	done := make(chan struct{})
 	go func() {
@@ -172,6 +186,13 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 		close(done)
 	}()
 
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-closed:
+	case <-done:
+		return nil
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -183,11 +204,9 @@ func (p *Pool) Shutdown(ctx context.Context) error {
 // StopNow closes the pool without waiting for tasks to finish.
 func (p *Pool) StopNow() {
 	p.mu.Lock()
-	if !p.closed {
-		p.closed = true
-		close(p.shutdown)
-	}
+	p.closed = true
 	p.mu.Unlock()
+	p.stopOnce.Do(func() { close(p.shutdown) })
 }
 
 // Size returns the worker count.

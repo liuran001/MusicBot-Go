@@ -57,7 +57,7 @@ func WithCacheSizeMB(mb int) Option {
 }
 
 // NewSQLiteRepository creates a repository backed by SQLite.
-func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface, opts ...Option) (*Repository, error) {
+func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface, opts ...Option) (repo *Repository, err error) {
 	if cacheDSN == "" || dataDSN == "" {
 		return nil, fmt.Errorf("dsns required")
 	}
@@ -90,11 +90,25 @@ func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface, 
 	if err != nil {
 		return nil, err
 	}
+	dataDB := (*gorm.DB)(nil)
+	defer func() {
+		if repo != nil {
+			return
+		}
+		if dataDB != nil {
+			if sqlDB, e := dataDB.DB(); e == nil {
+				_ = sqlDB.Close()
+			}
+		}
+		if sqlDB, e := cacheDB.DB(); e == nil {
+			_ = sqlDB.Close()
+		}
+	}()
 	if err := applySQLitePragmas(cacheDB, options.cacheSizeMB); err != nil {
 		return nil, err
 	}
 
-	dataDB, err := gorm.Open(sqlite.Open(sqliteDSN(dataDSN, options.cacheSizeMB)), &gorm.Config{
+	dataDB, err = gorm.Open(sqlite.Open(sqliteDSN(dataDSN, options.cacheSizeMB)), &gorm.Config{
 		PrepareStmt:            true,
 		SkipDefaultTransaction: true,
 		Logger:                 gormLogger,
@@ -151,13 +165,14 @@ func NewSQLiteRepository(cacheDSN, dataDSN string, gormLogger logger.Interface, 
 	dataSQLDB.SetMaxIdleConns(maxIdle)
 	dataSQLDB.SetConnMaxLifetime(maxLifetime)
 
-	return &Repository{
+	repo = &Repository{
 		cacheDB:            cacheDB,
 		dataDB:             dataDB,
 		defaultPlatform:    "netease",
 		defaultQuality:     "hires",
 		defaultLyricFormat: "lrc",
-	}, nil
+	}
+	return repo, nil
 }
 
 // performDataMigration checks if legacy tables exist in cacheDB, backs up the DB, migrates data to dataDB, and drops tables.
@@ -1572,14 +1587,18 @@ func (r *Repository) FindCachedSongMeta(ctx context.Context, platform, trackID s
 
 // Close closes the database connection.
 func (r *Repository) Close() error {
-	if r == nil || r.cacheDB == nil || r.dataDB == nil {
+	if r == nil {
 		return nil
 	}
-	if sqlDB, err := r.cacheDB.DB(); err == nil {
-		_ = sqlDB.Close()
+	if r.cacheDB != nil {
+		if sqlDB, err := r.cacheDB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
 	}
-	if sqlDB, err := r.dataDB.DB(); err == nil {
-		_ = sqlDB.Close()
+	if r.dataDB != nil {
+		if sqlDB, err := r.dataDB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
 	}
 	return nil
 }

@@ -71,6 +71,7 @@ func TestLocalizedAudioRetrievalFailureRedownloadsAndCachesNewLanguage(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer repo.Close()
 	source := &botpkg.SongInfo{Platform: "applemusic", TrackID: "id", Quality: "high", FileExt: "m4a", FileID: "old-en-file", Duration: 1, AudioValidated: true, MetadataLanguage: "en", AudioLanguage: "en", SongName: "Old title", SongArtists: "Old artist", SongAlbum: "Old album"}
 	if err := repo.Create(zhCtx(), source); err != nil {
 		t.Fatal(err)
@@ -194,6 +195,7 @@ func TestUnchangedCachedNamesMarkLanguageWithoutMediaTransfer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer repo.Close()
 			ctx := i18n.WithLocalizer(context.Background(), i18n.For("en"))
 			source := &botpkg.SongInfo{Platform: "applemusic", TrackID: "same", Quality: "high", FileID: "original-file", AudioValidated: true, SongName: "English title", SongArtists: "English artist", SongAlbum: "English album"}
 			if err := repo.Create(ctx, source); err != nil {

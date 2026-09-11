@@ -38,6 +38,7 @@ func TestRepositoryCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
+	defer repo.Close()
 	repo.SetDefaults("netease", "hires", "lrc")
 
 	ctx := context.Background()
@@ -165,6 +166,7 @@ func TestRepositoryAudioValidatedPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen migrated repo: %v", err)
 	}
+	defer repo.Close()
 	legacy, err := repo.FindByPlatformTrackID(ctx, "netease", "legacy-audio", "high")
 	if err != nil {
 		t.Fatalf("find legacy row: %v", err)
