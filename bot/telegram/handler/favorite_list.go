@@ -196,7 +196,11 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 				if who == "" {
 					who = tr(ctx, "fav_anonymous")
 				}
-				line += "  · 👤 " + html.EscapeString(who)
+				whoHTML := html.EscapeString(who)
+				if fav.AddedByUserID > 0 {
+					whoHTML = fmt.Sprintf("<a href=\"tg://user?id=%d\">%s</a>", fav.AddedByUserID, whoHTML)
+				}
+				line += "  · 👤 " + whoHTML
 			}
 			sb.WriteString(line)
 			sb.WriteString("\n")
