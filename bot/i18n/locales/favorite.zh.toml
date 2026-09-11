@@ -18,7 +18,7 @@ fav_list_header_count = "{{.Header}}（{{.Count}} 首）"
 fav_list_page_indicator = "  ·  第 {{.Page}}/{{.Pages}} 页"
 fav_list_manage_tag = "  ·  🗑 管理"
 fav_list_empty = "还没有收藏。发送歌曲后点底部「⭐ 收藏」即可收藏。"
-fav_list_manage_hint = "点下方歌曲即可取消收藏。"
+fav_list_manage_hint = "点下方对应编号即可取消收藏。"
 fav_anonymous = "匿名"
 
 fav_btn_done = "✅ 完成"

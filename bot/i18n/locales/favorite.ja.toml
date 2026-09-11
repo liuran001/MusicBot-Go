@@ -18,7 +18,7 @@ fav_list_header_count = "{{.Header}}（{{.Count}} 曲）"
 fav_list_page_indicator = "  ·  {{.Page}}/{{.Pages}} ページ"
 fav_list_manage_tag = "  ·  🗑 管理"
 fav_list_empty = "まだお気に入りがありません。曲を送信して下部の「⭐ お気に入り」を押すと追加できます。"
-fav_list_manage_hint = "下の曲を押すとお気に入りから削除できます。"
+fav_list_manage_hint = "下の対応する番号を押すとお気に入りから削除できます。"
 fav_anonymous = "匿名"
 
 fav_btn_done = "✅ 完了"

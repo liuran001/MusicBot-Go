@@ -18,7 +18,7 @@ fav_list_header_count = "{{.Header}} ({{.Count}})"
 fav_list_page_indicator = "  ·  page {{.Page}}/{{.Pages}}"
 fav_list_manage_tag = "  ·  🗑 manage"
 fav_list_empty = "No favorites yet. Send a song and tap “⭐ Favorite” at the bottom to add it."
-fav_list_manage_hint = "Tap a song below to remove it from favorites."
+fav_list_manage_hint = "Tap the corresponding number below to remove a song from favorites."
 fav_anonymous = "anonymous"
 
 fav_btn_done = "✅ Done"

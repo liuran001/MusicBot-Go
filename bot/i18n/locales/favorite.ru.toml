@@ -18,7 +18,7 @@ fav_list_header_count = "{{.Header}} ({{.Count}} тр.)"
 fav_list_page_indicator = "  ·  страница {{.Page}}/{{.Pages}}"
 fav_list_manage_tag = "  ·  🗑 управление"
 fav_list_empty = "В избранном пока пусто. Отправьте трек и нажмите «⭐ В избранное» внизу, чтобы добавить его."
-fav_list_manage_hint = "Нажмите на трек ниже, чтобы удалить его из избранного."
+fav_list_manage_hint = "Нажмите на соответствующий номер ниже, чтобы удалить трек из избранного."
 fav_anonymous = "аноним"
 
 fav_btn_done = "✅ Готово"

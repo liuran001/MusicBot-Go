@@ -60,19 +60,6 @@ func (h *FavoritesHandler) pageSize() int {
 	return 8
 }
 
-// truncateButtonLabel rune-safely caps a button label so a long title doesn't
-// produce an oversized button.
-func truncateButtonLabel(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max <= 1 {
-		return string(r[:max])
-	}
-	return string(r[:max-1]) + "…"
-}
-
 // favoriteTrackLink returns a clickable URL for a favorite's track, falling back
 // to a constructed netease song URL when none was stored.
 func favoriteTrackLink(fav *botpkg.Favorite) string {
@@ -202,7 +189,7 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 	}
 	if total > 0 {
 		for i, fav := range favs {
-			idx := offset + i + 1
+			idx := i + 1
 			line := fmt.Sprintf("%d. %s", idx, favoriteSongHTML(fav))
 			if view == "g" {
 				who := strings.TrimSpace(fav.AddedByName)
@@ -222,24 +209,21 @@ func (h *FavoritesHandler) buildListView(ctx context.Context, lc favoriteListCon
 	}
 
 	var rows [][]telego.InlineKeyboardButton
-	// One row per song. In normal mode it's a wide "send" button; in the manage
-	// submenu it's a "delete" button. Deletion lives in its own submenu so the
-	// main list stays clean (no trailing trash buttons on the right).
-	for i, fav := range favs {
-		idx := offset + i + 1
-		name := strings.TrimSpace(fav.SongName)
-		if name == "" {
-			name = fav.Platform + ":" + fav.TrackID
-		}
-		if lc.manage {
-			rows = append(rows, []telego.InlineKeyboardButton{
-				{Text: truncateButtonLabel(fmt.Sprintf("🗑 %d. %s", idx, name), 44), CallbackData: fmt.Sprintf("favm x %s %s %d %d", lc.token, view, page, i)},
-			})
-		} else {
-			rows = append(rows, []telego.InlineKeyboardButton{
-				{Text: truncateButtonLabel(fmt.Sprintf("▶️ %d. %s", idx, name), 44), CallbackData: fmt.Sprintf("favm s %s %s %d %d", lc.token, view, page, i)},
-			})
-		}
+	// Match search results with page-local numbered buttons.
+	action := "s"
+	if lc.manage {
+		action = "x"
+	}
+	buttons := make([]telego.InlineKeyboardButton, 0, len(favs))
+	for i := range favs {
+		buttons = append(buttons, telego.InlineKeyboardButton{
+			Text:         strconv.Itoa(i + 1),
+			CallbackData: fmt.Sprintf("favm %s %s %s %d %d", action, lc.token, view, page, i),
+		})
+	}
+	for start := 0; start < len(buttons); start += 8 {
+		end := min(start+8, len(buttons))
+		rows = append(rows, buttons[start:end])
 	}
 
 	if lc.manage {
